@@ -856,7 +856,7 @@ Item {
         // Discoverability, faint and in the strip: the two keys everyone needs.
         // On the wallpaper SUPER+D opens the desktop view; in that view it closes it.
         Tag {
-          text: view.privacyMode ? "PRIVACY ON" : "PRIVACY"
+          text: !view.privacyMode ? "PRIVACY" : (view.settings.privacyUnlockCount > 0 ? "PRIVACY ON · " + view.settings.privacyUnlockCount + "/" + view.settings.privacyUnlockNeeded : "PRIVACY ON")
           tone: view.privacyMode ? view.desk.yellow : view.textFaint
           MouseArea { anchors.fill: parent; enabled: view.interactive; cursorShape: Qt.PointingHandCursor; onClicked: view.settings.togglePrivacyMode() }
         }
@@ -2028,7 +2028,7 @@ Item {
           Layout.row: 98; Layout.column: 0
           Layout.fillWidth: true
           elide: Text.ElideRight
-          text: (view.keyboardAvailable ? "SUPER+I hide desk  ·  SUPER+D / ESC close" : "SUPER+I hide desk  ·  SUPER+D show desktop") + "  ·  SUPER+SHIFT+I privacy  ·  right-click a card to inspect"
+          text: (view.keyboardAvailable ? "SUPER+I hide desk  ·  SUPER+D / ESC close" : "SUPER+I hide desk  ·  SUPER+D show desktop") + "  ·  SUPER+SHIFT+I privacy ×3 off  ·  right-click a card to inspect"
           color: view.textDim; font.family: view.mono; font.pixelSize: Style.font.caption
         }
         Item { Layout.row: 99; Layout.column: 0; Layout.fillHeight: true }
