@@ -95,6 +95,7 @@ Item {
   readonly property var snap: (desk && desk.snap) ? desk.snap : ({})
   readonly property bool privacyMode: !!(settings && settings.privacyMode)
   readonly property var machine: snap.machine || ({})
+  readonly property var containers: snap.containers || ({})
   readonly property var ai: snap.ai || ({})
   readonly property var allSessions: ai.sessions || []
   readonly property var projects: ai.projects || []
@@ -765,6 +766,30 @@ Item {
     implicitWidth: tl.implicitWidth + Style.spacing.md * 2
     implicitHeight: tl.implicitHeight + Style.spacing.xs * 2
     PlainText { id: tl; anchors.centerIn: parent; text: parent.text; color: tone; font.family: view.mono; font.pixelSize: Style.font.caption; font.bold: true }
+  }
+
+  component PowerToggle: Item {
+    id: tog
+    property bool lit: false
+    property bool busy: false
+    implicitWidth: Math.round(40 * Style.fontScale)
+    implicitHeight: Math.round(18 * Style.fontScale)
+    Rectangle {
+      anchors.fill: parent
+      radius: height / 2
+      color: Util.alpha(tog.lit ? view.desk.green : view.desk.themeForeground, tog.lit ? 0.22 : 0.08)
+      border.width: 1
+      border.color: Util.alpha(tog.lit ? view.desk.green : view.desk.themeForeground, tog.lit ? 0.65 : 0.28)
+      Rectangle {
+        width: parent.height - 4
+        height: width
+        radius: width / 2
+        y: 2
+        x: tog.lit ? parent.width - width - 2 : 2
+        color: tog.busy ? view.textFaint : (tog.lit ? view.desk.green : view.textDim)
+        Behavior on x { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+      }
+    }
   }
 
   component SectionChip: Rectangle {
@@ -1441,10 +1466,10 @@ Item {
         }
       }
 
-      // RIGHT COLUMN: usage + local AI + machine corner
+      // RIGHT COLUMN: usage + local AI + machine + containers
       GridLayout {
         id: rightColumn
-        visible: view.sectionEnabled("usage") || view.sectionEnabled("localAi") || view.sectionEnabled("machine")
+        visible: view.sectionEnabled("usage") || view.sectionEnabled("localAi") || view.sectionEnabled("machine") || view.sectionEnabled("containers")
         Layout.fillHeight: true
         // A fixed column: content-driven widths let the column drift narrower
         // whenever card text became shrinkable, and rows then overran the border.
@@ -1886,6 +1911,100 @@ Item {
               Item { Layout.fillWidth: true }
               PlainText { visible: !!mc.bat; text: mc.bat ? "BAT " + mc.bat.pct + "% " + String(mc.bat.status || "").toLowerCase() : ""; color: mc.bat && mc.bat.pct < 20 && mc.bat.status !== "Charging" ? view.desk.red : view.textDim; font.family: view.mono; font.pixelSize: Style.font.caption }
             }
+          }
+        }
+
+        Card {
+          id: containersCard
+          Layout.row: view.settings.rightIndex("containers")
+          Layout.column: 0
+          Layout.fillWidth: true
+          visible: view.sectionEnabled("containers")
+          moveId: "containers"
+          draggable: true
+          title: "CONTAINERS"
+          readonly property var pack: view.containers
+          readonly property var items: Array.isArray(pack.items) ? pack.items : []
+          readonly property int visibleLimit: 8
+          hint: !pack.present ? "no container engine" : (String(pack.engine || "docker") + " · " + Number(pack.up || 0) + " up · " + Number(pack.total || items.length))
+          function rowMeta(item) {
+            var parts = []
+            if (item.health) parts.push(item.health)
+            else if (item.state && item.state !== "running") parts.push(item.state)
+            if (item.image) parts.push(item.image)
+            return parts.join(" · ")
+          }
+          function requestToggle(item) {
+            if (!item || !item.name || view.desk.containerBusy) return
+            view.desk.controlContainer(item.running ? "stop" : "start", item.name)
+          }
+          ColumnLayout {
+            id: containersColumn
+            anchors { left: parent.left; right: parent.right }
+            spacing: Style.spacing.xs
+            Repeater {
+              model: containersCard.items.slice(0, containersCard.visibleLimit)
+              delegate: RowLayout {
+                id: containerRow
+                required property var modelData
+                Layout.fillWidth: true
+                spacing: Style.spacing.sm
+                readonly property bool thisBusy: view.desk.containerBusy && view.desk.containerName === String(modelData.name || "")
+                Rectangle {
+                  width: 8; height: 8; radius: 4
+                  color: modelData.running ? (modelData.health === "unhealthy" ? view.desk.yellow : view.desk.green) : "transparent"
+                  border.width: modelData.running ? 0 : 1
+                  border.color: view.textFaint
+                }
+                PlainText {
+                  text: modelData.label || modelData.name || ""
+                  color: view.desk.themeForeground
+                  font.family: view.mono
+                  font.pixelSize: Style.font.bodySmall
+                  Layout.fillWidth: true
+                  Layout.minimumWidth: 0
+                  elide: Text.ElideRight
+                }
+                PlainText {
+                  text: containerRow.thisBusy ? (view.desk.containerAction === "stop" ? "stopping" : "starting") : containersCard.rowMeta(modelData)
+                  color: containerRow.thisBusy ? view.desk.yellow : view.textDim
+                  font.family: view.mono
+                  font.pixelSize: Style.font.caption
+                  elide: Text.ElideLeft
+                  horizontalAlignment: Text.AlignRight
+                  Layout.fillWidth: true
+                  Layout.minimumWidth: 0
+                  Layout.maximumWidth: Math.round(140 * Style.fontScale)
+                }
+                PowerToggle {
+                  lit: !!modelData.running
+                  busy: containerRow.thisBusy
+                  opacity: view.desk.containerBusy && !containerRow.thisBusy ? 0.45 : 1
+                  MouseArea {
+                    anchors.fill: parent
+                    enabled: view.interactive && !view.desk.containerBusy
+                    cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    onClicked: containersCard.requestToggle(containerRow.modelData)
+                  }
+                }
+              }
+            }
+            PlainText {
+              visible: containersCard.items.length === 0
+              text: containersCard.pack.present ? "no containers" : "docker / podman not found"
+              color: view.textFaint
+              font.family: view.mono
+              font.pixelSize: Style.font.bodySmall
+            }
+            PlainText {
+              visible: containersCard.items.length > containersCard.visibleLimit
+              text: "+" + (containersCard.items.length - containersCard.visibleLimit) + " more"
+              color: view.textFaint
+              font.family: view.mono
+              font.pixelSize: Style.font.caption
+            }
+            PlainText { Layout.fillWidth: true; visible: !!view.desk.containerStatus; text: view.desk.containerStatus; color: view.desk.green; font.family: view.mono; font.pixelSize: Style.font.caption; wrapMode: Text.Wrap }
+            PlainText { Layout.fillWidth: true; visible: !!view.desk.containerError; text: view.desk.containerError; color: view.desk.red; font.family: view.mono; font.pixelSize: Style.font.caption; wrapMode: Text.Wrap }
           }
         }
         // Legend — readable, one line, under the last card. Wording follows the surface.

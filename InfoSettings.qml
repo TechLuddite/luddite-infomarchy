@@ -19,7 +19,8 @@ Item {
     { id: "localAi", label: "LOCAL AI" },
     { id: "machine", label: "MACHINE" },
     { id: "changes", label: "CHANGES" },
-    { id: "projects", label: "PROJECTS" }
+    { id: "projects", label: "PROJECTS" },
+    { id: "containers", label: "CONTAINERS" }
   ]
   property var sections: ({})
   property var attentionMuted: ({})
@@ -44,11 +45,11 @@ Item {
   property bool webEnabled: false
   property string webUrl: ""
   readonly property string webServerPath: Qt.resolvedUrl("web-server.ts").toString().replace(/^file:\/\//, "")
-  property var rightOrder: ["usage", "localAi", "machine"]
+  property var rightOrder: ["usage", "localAi", "machine", "containers"]
   property var opsOrder: ["changes", "needs", "projects"]
 
   function normalizedRightOrder(value) {
-    var allowed = ["usage", "localAi", "machine"], result = []
+    var allowed = ["usage", "localAi", "machine", "containers"], result = []
     if (Array.isArray(value)) for (var i = 0; i < value.length; i++) if (allowed.indexOf(value[i]) >= 0 && result.indexOf(value[i]) < 0) result.push(value[i])
     for (var j = 0; j < allowed.length; j++) if (result.indexOf(allowed[j]) < 0) result.push(allowed[j])
     return result

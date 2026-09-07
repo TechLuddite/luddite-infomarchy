@@ -30,6 +30,13 @@ Start here. Details and dead ends: `~/Work/luddite-infomarchy/`.
 - SUPER+SHIFT+I. WAN, LAN, SSID, `user@host`, GitHub login, home mounts, window previews.
 - RECENT TASKS · WHAT GOT ASKED keeps the first four words and masks the rest (`obfuscatePrompt` / `displayPrompt`). Inspect drawer matches. COPY EXCERPT still copies the full text. OSS project names and session topics stay.
 
+## CONTAINERS
+
+- Right-column card, last by default (`rightOrder` ends with `containers`). Per-row toggle starts/stops via `container-control.ts`. Inventory from `/usr/bin/docker ps -a`, else podman. Names as argv after a live inventory match.
+- Snapshot fields: id, name, label, service, project, image, state, running, health. Compose working_dir, env files, commands, mounts, and ports are dropped. Tests assert `/home/` and `.env` do not survive parse.
+- `INFOMARCHY_SKIP_CONTAINERS=1` skips collection. Demo data uses `lab-*` names, not this host's stack.
+- Not on the phone HTML. The phone `web-snapshot.json` still carries the object if PHONE is on.
+
 ## LOCAL AI
 
 - Origin is `dashboard.json` `ollamaHost`, else `OLLAMA_HOST`, else `http://127.0.0.1:11434`. IPC: `omarchy-shell infomarchy setOllamaHost` / `getOllamaHost`.
