@@ -832,7 +832,9 @@ Item {
 
     ColumnLayout {
       anchors.fill: parent
-      spacing: Style.spacing.sm
+      // Same token as card-to-card and column-to-column. sm (4px at scale 1)
+      // left the module strip a gap short of the rest of the desk (lg / view.gap, 8px).
+      spacing: view.gap
 
       Flow {
         id: moduleStrip
