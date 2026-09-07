@@ -2451,6 +2451,51 @@ function opencodeLocalUsage(): any | null {
   } catch { return null; }
   finally { try { db?.close(); } catch {} }
 }
+const CLAUDE_AUTH_REFRESH_MS = 15 * 60 * 1000;
+let currentClaudeAuthRefreshAt = Number(prev.claudeAuthRefreshAt || 0);
+let claudeUsageFresh: any = null;
+
+export function claudeOauthExpiredAt(expiresAt: unknown, nowMs = now): boolean {
+  const n = Number(expiresAt);
+  return Number.isFinite(n) && n > 0 && n <= nowMs;
+}
+
+function claudeOauthExpired(): boolean {
+  const path = join(process.env.CLAUDE_CONFIG_DIR || join(HOME, ".claude"), ".credentials.json");
+  let fd = -1;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const st = fstatSync(fd);
+    const uid = typeof process.getuid === "function" ? process.getuid() : -1;
+    if (!st.isFile() || st.nlink !== 1 || (uid >= 0 && st.uid !== uid) || (st.mode & 0o077) || st.size > 16_384) return false;
+    const buf = Buffer.allocUnsafe(st.size);
+    const n = readSync(fd, buf, 0, buf.byteLength, 0);
+    const parsed = parseJsonBounded(buf.subarray(0, n).toString("utf8"), 16_384, 8);
+    const oauth = parsed && typeof parsed === "object" ? (parsed as any).claudeAiOauth : null;
+    if (!oauth || typeof oauth !== "object") return false;
+    return claudeOauthExpiredAt(oauth.expiresAt);
+  } catch { return false; }
+  finally { if (fd >= 0) try { closeSync(fd); } catch {} }
+}
+
+async function refreshClaudeAuthIfNeeded() {
+  try {
+    if (instanceId() === "overlay") return;
+    if (process.env.INFOMARCHY_SKIP_CLAUDE_USAGE === "1") return;
+    if (currentClaudeAuthRefreshAt && now - currentClaudeAuthRefreshAt < CLAUDE_AUTH_REFRESH_MS) return;
+    if (!claudeOauthExpired()) return;
+    const claude = Bun.which("claude");
+    if (!claude) return;
+    currentClaudeAuthRefreshAt = now;
+    await run([claude, "-p", "ping", "--max-turns", "0", "--output-format", "json"], 12_000);
+    const collector = join(process.env.OMARCHY_PATH || "/usr/share/omarchy", "bin/omarchy-agent-usage-claude");
+    if (!existsSync(collector)) return;
+    const text = await run([collector, "--limits-only"], 8_000);
+    const parsed = parseJsonBounded(text, 4000, 12);
+    if (parsed && typeof parsed === "object" && parsed.id === "claude") claudeUsageFresh = parsed;
+  } catch {}
+}
+
 function agentsUsage() {
   // Omarchy's own agents plugin caches rate limits + token usage here; reuse it when present.
   // Every field is normalized to what the cards display: two individually valid
@@ -2463,7 +2508,8 @@ function agentsUsage() {
     const j = text === null ? null : parseJsonBounded(text, 4000, 12);
     if (!j || typeof j !== "object") continue;
     const key = uiString(f.replace(/\.json$/, ""), 32);
-    if (key) out[key] = normalizeUsage(j);
+    if (!key) continue;
+    out[key] = key === "claude" && claudeUsageFresh ? normalizeUsage(claudeUsageFresh) : normalizeUsage(j);
   }
   // Omarchy does not ship grok or opencode collectors. Fill those rows from
   // local session files. Never write into Omarchy's usage directory, and never
@@ -2622,7 +2668,7 @@ async function runCollector() {
   }
   const pids = scanProcs();
   const [cpuS, memS, diskS, netS, pingS, gpuS, sessions, ollama, externalIpS, github] = await Promise.all([
-    Promise.resolve(cpu()), Promise.resolve(mem()), disk(), net(), ping(), gpu(), liveSessions(pids), ollamaState(), externalIp(), githubActivity(), refreshGrokBilling(),
+    Promise.resolve(cpu()), Promise.resolve(mem()), disk(), net(), ping(), gpu(), liveSessions(pids), ollamaState(), externalIp(), githubActivity(), refreshGrokBilling(), refreshClaudeAuthIfNeeded(),
   ]);
   const claude = claudeHistory(), codex = codexHistory(), grok = grokHistory(), grokBot = grokBotHistory(), opencode = opencodeHistory(), pi = piHistory();
   recent.sort((a, b) => b.ts - a.ts);
@@ -2680,6 +2726,7 @@ async function runCollector() {
       opencodeTotals: currentOpencodeTotals,
       grokLocalUsage: currentGrokUsageCache,
       opencodeLocalUsage: currentOpencodeUsageCache,
+      claudeAuthRefreshAt: currentClaudeAuthRefreshAt,
       sessionNotifications: notificationState.tracked,
     }));
   } catch {}

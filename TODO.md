@@ -43,6 +43,16 @@ and screen placement are described in the work log/conversation.
 - [x] 10. Global command strip and keyboard navigation.
 - [x] Final complete regression, performance, data-safety, and documentation pass.
 
+## This fork, shipped 2026-09-07
+
+- [x] Stream privacy SUPER+SHIFT+I.
+- [x] Pi sessions and recent-task fairness for OpenCode and Pi.
+- [x] LAN phone view: token URL, CIDR allowlist, Host/Origin, CSP, GET/HEAD.
+- [x] Phone USAGE meters without 7-day charts. PRIVACY chip. MACHINE meter grid. Same-origin HTML swap instead of meta refresh.
+- [x] Grok weekly/build meters from CLI billing (`cli-chat-proxy.grok.com`), cache `grok-billing.json`.
+- [x] Overlay SUPER+I while the layer has exclusive keyboard focus.
+- [x] Claude USAGE: refresh lapsed CLI OAuth via `claude -p ping --max-turns 0`, then re-read Omarchy limits. Do not write `omarchy/agents/usage`.
+
 ## Follow-up batch
 
 - [x] 11. Recent Tasks: 80-row scrollback, text/project/provider search, and a visible, draggable scrollbar.
@@ -62,3 +72,6 @@ and screen placement are described in the work log/conversation.
 - [ ] Stable keyed session model: the sessions Repeater is rebuilt on every snapshot (Qt clears delegates on model replacement), which restarts animations and drops per-card state; preview paths are cached at the view level as a stopgap. (Astra finding, 2026-09-05.)
 - [ ] Automatic topic refinement can race an explicit UNLOAD within the same tick and reload the model; refinement is loopback-only and capped at 6 requests, but a suppress-after-unload signal would close it fully. (Astra finding, 2026-09-05.)
 - [ ] Many live sessions on a small monitor can push lower cards off screen; panels are deliberately non-scrolling, so cap visible session cards and show "+N more". (Astra finding, 2026-09-05.)
+- [ ] Phone HTML still embeds WAN/LAN/SSID/`user@host` in `.open` spans while PRIVACY is on (CSS hide only). Keep `maskSnapshot` on the HTML and fetch identity only after PRIVACY is off.
+- [ ] Drop `100.64.0.0/10` from phone default CIDRs unless this host actually uses Tailscale. VPN VLAN CIDR is still unset.
+- [ ] Live plugin clone under `~/.config/omarchy/plugins/techluddite.luddite-infomarchy` drifts from this git checkout. Copy or reinstall after landing on `master`.
