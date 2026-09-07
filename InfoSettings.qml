@@ -40,8 +40,11 @@ Item {
   property bool ready: false
   property bool dashboardVisible: false
   // Stream/screenshot mask: hide WAN, LAN, SSID, user@host, GitHub login.
-  // OSS project names stay. Default off; persists until toggled.
+  // OSS project names stay. Default off; persists until three *+I presses.
   property bool privacyMode: false
+  property int privacyUnlockCount: 0
+  readonly property int privacyUnlockNeeded: 3
+  readonly property int privacyUnlockMs: 2000
   property bool webEnabled: false
   property string webUrl: ""
   readonly property string webServerPath: Qt.resolvedUrl("web-server.ts").toString().replace(/^file:\/\//, "")
@@ -78,6 +81,7 @@ Item {
       ollamaHost = parsed ? normalizeOllamaHost(parsed.ollamaHost) : ""
       dashboardVisible = parsed && typeof parsed.dashboardVisible === "boolean" ? parsed.dashboardVisible : true
       privacyMode = !!(parsed && parsed.privacyMode === true)
+      privacyUnlockCount = 0
       webEnabled = !!(parsed && parsed.webEnabled === true)
       if (webEnabled) Qt.callLater(refreshWebUrl)
       else webUrl = ""
@@ -98,6 +102,7 @@ Item {
       ollamaHost = ""
       dashboardVisible = true
       privacyMode = false
+      privacyUnlockCount = 0
       webEnabled = false
       webUrl = ""
       rightOrder = normalizedRightOrder(null)
@@ -296,11 +301,35 @@ Item {
     persist()
   }
   function toggleDashboardVisible() { setDashboardVisible(!dashboardVisible) }
+  function privacyUnlockStep(on, count, needed) {
+    if (!on) return { on: true, count: 0 }
+    var next = Math.max(0, Math.floor(Number(count) || 0)) + 1
+    if (next >= Math.max(1, Math.floor(Number(needed) || 3))) return { on: false, count: 0 }
+    return { on: true, count: next }
+  }
+  Timer {
+    id: privacyUnlockReset
+    interval: root.privacyUnlockMs
+    repeat: false
+    onTriggered: root.privacyUnlockCount = 0
+  }
   function setPrivacyMode(enabled) {
+    privacyUnlockCount = 0
+    privacyUnlockReset.stop()
     privacyMode = !!enabled
     persist()
   }
-  function togglePrivacyMode() { setPrivacyMode(!privacyMode) }
+  function togglePrivacyMode() {
+    var step = privacyUnlockStep(privacyMode, privacyUnlockCount, privacyUnlockNeeded)
+    privacyUnlockCount = step.count
+    if (step.on !== privacyMode) {
+      privacyUnlockReset.stop()
+      setPrivacyMode(step.on)
+      return
+    }
+    if (privacyUnlockCount > 0) privacyUnlockReset.restart()
+    else privacyUnlockReset.stop()
+  }
   function setWebEnabled(enabled) {
     webEnabled = !!enabled
     if (!webEnabled) webUrl = ""

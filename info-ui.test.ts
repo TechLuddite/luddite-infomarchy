@@ -186,7 +186,7 @@ describe("right column fits a 1080p desk", () => {
     const view = readFileSync(join(import.meta.dir, "InfoView.qml"), "utf8");
     expect(view).toContain("// Cockpit density: two meters per row");
     expect(view).toContain('text: "WAN " + view.wanText()');
-    expect(view).toContain('"SUPER+I hide desk  ·  SUPER+D show desktop") + "  ·  SUPER+SHIFT+I privacy  ·  right-click a card to inspect"');
+    expect(view).toContain('"SUPER+I hide desk  ·  SUPER+D show desktop") + "  ·  SUPER+SHIFT+I privacy ×3 off  ·  right-click a card to inspect"');
     expect(view).toContain("readonly property int metaWidth");
   });
 });
@@ -272,7 +272,9 @@ describe("stream privacy mode", () => {
     expect(settings).toContain("property bool privacyMode: false");
     expect(settings).toContain("function togglePrivacyMode()");
     expect(settings).toContain("privacyMode: privacyMode");
+    expect(settings).toContain("readonly property int privacyUnlockNeeded: 3");
     expect(service).toContain("function togglePrivacy(): void { dashboardSettings.togglePrivacyMode() }");
+    expect(overlay).toContain("if (!event.isAutoRepeat) dashboardSettings.togglePrivacyMode()");
     expect(service).toContain("function getPrivacy(): string");
     expect(service).toContain("function toggleWeb(): void { dashboardSettings.toggleWebEnabled() }");
     expect(view).toContain('text: view.settings.webEnabled ? (view.settings.webUrl ? "PHONE ON" : "PHONE …") : "PHONE"');
@@ -293,9 +295,23 @@ describe("stream privacy mode", () => {
     expect(view).toContain("privacyMode || !github.login");
     expect(view).toContain("onPrivacyModeChanged: if (privacyMode && previewsEnabled) previewsEnabled = false");
     expect(view).toContain("view.previewsEnabled && !view.privacyMode");
-    expect(view).toContain('text: view.privacyMode ? "PRIVACY ON" : "PRIVACY"');
+    expect(view).toContain('text: !view.privacyMode ? "PRIVACY" : (view.settings.privacyUnlockCount > 0 ? "PRIVACY ON · " + view.settings.privacyUnlockCount + "/" + view.settings.privacyUnlockNeeded : "PRIVACY ON")');
     expect(view).not.toContain('text: "WAN " + (view.machine.externalIp || "—")');
     expect(view).not.toContain("WIFI \" + (mc.net.ssid");
+  });
+
+  test("one press enables privacy, three presses disable it", () => {
+    const source = settings.match(/function privacyUnlockStep\([\s\S]*?\n  \}/)?.[0];
+    expect(source).toBeTruthy();
+    const privacyUnlockStep = Function(`return (${source})`)();
+    expect(privacyUnlockStep(false, 0, 3)).toEqual({ on: true, count: 0 });
+    expect(privacyUnlockStep(true, 0, 3)).toEqual({ on: true, count: 1 });
+    expect(privacyUnlockStep(true, 1, 3)).toEqual({ on: true, count: 2 });
+    expect(privacyUnlockStep(true, 2, 3)).toEqual({ on: false, count: 0 });
+    expect(privacyUnlockStep(true, 5, 3)).toEqual({ on: false, count: 0 });
+    expect(settings).toContain("privacyUnlockReset.restart()");
+    expect(settings).toContain("readonly property int privacyUnlockMs: 2000");
+    expect(service).toContain("function setPrivacy(v: string): void { dashboardSettings.setPrivacyMode(");
   });
 
   test("recent-task prompts keep the first four words and mask the rest", () => {

@@ -86,8 +86,9 @@ Scope {
         Keys.onEscapePressed: root.close()
         Keys.onPressed: function(event) {
           if ((event.modifiers & Qt.MetaModifier) && event.key === Qt.Key_I) {
-            if (event.modifiers & Qt.ShiftModifier) dashboardSettings.togglePrivacyMode()
-            else dashboardSettings.toggleDashboardVisible()
+            if (event.modifiers & Qt.ShiftModifier) {
+              if (!event.isAutoRepeat) dashboardSettings.togglePrivacyMode()
+            } else dashboardSettings.toggleDashboardVisible()
             event.accepted = true
             return
           }
