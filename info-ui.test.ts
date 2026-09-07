@@ -98,6 +98,8 @@ describe("usage trend chart", () => {
     expect(view).toContain("id: trendCanvas");
     expect(view).toContain('text: view.usageMetric === "value" ? "≈ $ VALUE" : "TOKENS"');
     expect(view).toContain("up.u.usageStatusText");
+    expect(view).toContain("color: Util.alpha(up.tone, 0.07)");
+    expect(view).toContain("border.color: Util.alpha(up.tone, 0.28)");
     expect(view).toContain("usageTrend.hovered");
     expect(view).toContain('"% cache reads"');
     expect(view).toContain('"unpriced"');
