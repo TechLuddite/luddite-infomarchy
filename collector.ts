@@ -29,6 +29,10 @@ function instanceId(): string {
   const raw = i >= 0 ? String(process.argv[i + 1] || "") : "bg";
   return raw.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 32) || "bg";
 }
+export function forceRefreshRequested(argv = process.argv): boolean {
+  return argv.includes("--force-refresh") || process.env.INFOMARCHY_FORCE_REFRESH === "1";
+}
+const FORCE_REFRESH = forceRefreshRequested();
 const PREV_FILE = join(STATE_DIR, `prev-${instanceId()}.json`);
 // Shared by every collector instance: the GitHub rows are the same for the
 // wallpaper and the overlay, and one 7-day store means one set of API calls.
@@ -353,7 +357,7 @@ export function externalIpCacheFresh(cached: any, stamp = Date.now()): boolean {
 async function externalIp() {
   const cached = prev.externalIp || {};
   // Cache failures too, otherwise a disconnected host would retry every tick.
-  if (externalIpCacheFresh(cached, now)) return cached;
+  if (!FORCE_REFRESH && externalIpCacheFresh(cached, now)) return cached;
   if (process.env.INFOMARCHY_SKIP_EXTERNAL_IP === "1") return { address: cached.address || null, checkedAt: now };
   try {
     const response = await fetch("https://1.1.1.1/cdn-cgi/trace", { signal: AbortSignal.timeout(1200) });
@@ -369,14 +373,15 @@ const dt = prev.ts ? (now - prev.ts) / 1000 : 0;
 
 // GitHub activity heatmap feed (see github-activity.ts). Cached on disk and
 // refreshed at most every five minutes; a tick that finds the cache fresh
-// costs one small file read. Only the wallpaper collector refreshes and
-// writes — the overlay's collector reads the same file — so two instances
-// never race each other's fetches. INFOMARCHY_SKIP_GITHUB=1 never calls gh.
+// costs one small file read. The wallpaper collector writes the store; the
+// overlay reads it, and writes only on --force-refresh. INFOMARCHY_SKIP_GITHUB=1
+// never calls gh.
 const GITHUB_WRITER = instanceId() !== "overlay";
 async function githubActivity() {
   const ghAvailable = !!Bun.which("gh");
   const store = parseGithubStoreText(read(GITHUB_FILE));
-  if (GITHUB_WRITER && ghAvailable && githubFetchEnabled() && githubRefreshDue(store, now)) {
+  const githubDue = FORCE_REFRESH || githubRefreshDue(store, now);
+  if ((GITHUB_WRITER || FORCE_REFRESH) && ghAvailable && githubFetchEnabled() && githubDue) {
     await refreshGithubActivity(store, now, run, ghAvailable);
     try { writePrivateStateFile(STATE_DIR, basename(GITHUB_FILE), JSON.stringify(store)); } catch {}
   }
@@ -2094,7 +2099,7 @@ export function normalizeUsage(j: any, stamp = now): any {
 const LOCAL_USAGE_STATUS = "local session totals, not subscription limits";
 const GROK_BILLING_FILE = "grok-billing.json";
 const GROK_BILLING_URL = "https://cli-chat-proxy.grok.com/v1/billing?format=credits";
-const GROK_BILLING_REFRESH_MS = 15 * 60 * 1000;
+export const GROK_BILLING_REFRESH_MS = 60 * 1000;
 const GROK_PRODUCT_LABELS: Record<string, string> = {
   GrokBuild: "BUILD", PRODUCT_GROK_BUILD: "BUILD",
   GrokVoice: "VOICE", PRODUCT_GROK_VOICE: "VOICE",
@@ -2152,14 +2157,16 @@ function grokCliAccessToken(): string {
     const n = readSync(fd, buf, 0, buf.byteLength, 0);
     const parsed = parseJsonBounded(buf.subarray(0, n).toString("utf8"), 16_384, 8);
     if (!parsed || typeof parsed !== "object") return "";
+    let expired = "";
     for (const rec of Object.values(parsed)) {
       if (!rec || typeof rec !== "object") continue;
       const key = String((rec as any).key || "");
       if (key.length < 20 || key.length > 4000) continue;
       const exp = Date.parse(String((rec as any).expires_at || ""));
-      if (Number.isFinite(exp) && exp < now - 30_000) continue;
+      if (Number.isFinite(exp) && exp < now - 30_000) { if (!expired) expired = key; continue; }
       return key;
     }
+    return expired;
   } catch { return ""; }
   finally { if (fd >= 0) try { closeSync(fd); } catch {} }
   return "";
@@ -2185,14 +2192,19 @@ async function fetchGrokBilling(): Promise<any | null> {
     return parsed && typeof parsed === "object" ? parsed : null;
   } catch { return null; }
 }
+export function grokBillingRefreshDue(existing: any, stamp: number, force = false): boolean {
+  if (force) return true;
+  if (process.env.INFOMARCHY_SKIP_GROK_BILLING === "1") return false;
+  const attemptedAt = Number(existing && existing.attemptedAt || existing && existing.fetchedAt || 0);
+  if (attemptedAt && stamp - attemptedAt < GROK_BILLING_REFRESH_MS && Array.isArray(existing?.limits) && existing.limits.length) return false;
+  return true;
+}
 async function refreshGrokBilling() {
   try {
-  if (instanceId() === "overlay") return;
   if (process.env.INFOMARCHY_SKIP_GROK_BILLING === "1") return;
   const path = join(STATE_DIR, GROK_BILLING_FILE);
   const existing = parseJsonBounded(readRegularFileLimited(path, 4096) || "", 4096, 8);
-  const attemptedAt = Number(existing && existing.attemptedAt || existing && existing.fetchedAt || 0);
-  if (attemptedAt && now - attemptedAt < GROK_BILLING_REFRESH_MS && Array.isArray(existing?.limits) && existing.limits.length) return;
+  if (!grokBillingRefreshDue(existing, now, FORCE_REFRESH)) return;
   const live = parseGrokCreditsConfig(await fetchGrokBilling());
   const fromLog = live ? null : grokBillingFromUnifiedLog(readHistoryTail(join(process.env.GROK_HOME || join(HOME, ".grok"), "logs", "unified.jsonl"), 64 * 1024) || "");
   const parsed = live || fromLog;
@@ -2298,9 +2310,8 @@ export function grokUsageFromUpdatesText(text: string): GrokUsageSnap[] {
     const parsed = parseJsonBounded(line, 2048, 12);
     const snap = grokUsageFromUpdate(parsed);
     if (snap) snaps.push(snap);
-    if (snaps.length >= 256) break;
   }
-  return snaps;
+  return snaps.length > 256 ? snaps.slice(-256) : snaps;
 }
 export function foldGrokSessionSnaps(snaps: GrokUsageSnap[]): { last: GrokUsageSnap | null; daily: Map<string, number> } {
   const daily = new Map<string, number>();
@@ -2364,7 +2375,7 @@ function grokLocalUsage(): any | null {
   }
   const hashed = String(Bun.hash(identity + "|" + limitsIdentity));
   const cached = prev.grokLocalUsage && prev.grokLocalUsage.identity === hashed ? prev.grokLocalUsage : null;
-  if (cached?.record) { currentGrokUsageCache = cached; return cached.record; }
+  if (!FORCE_REFRESH && cached?.record) { currentGrokUsageCache = cached; return cached.record; }
   const modelUsage: Record<string, TokenUsage> = {};
   const todayTokensByModel: Record<string, number> = {};
   const daily = new Map<string, number>();
@@ -2412,7 +2423,7 @@ function opencodeLocalUsage(): any | null {
     identity = `${stat.size}:${Math.round(stat.mtimeMs)}`;
   } catch { return null; }
   const cached = prev.opencodeLocalUsage && prev.opencodeLocalUsage.identity === identity ? prev.opencodeLocalUsage : null;
-  if (cached?.record) { currentOpencodeUsageCache = cached; return cached.record; }
+  if (!FORCE_REFRESH && cached?.record) { currentOpencodeUsageCache = cached; return cached.record; }
   let db: Database | null = null;
   try {
     db = new Database(path, { readonly: true });
@@ -2500,14 +2511,17 @@ function claudeOauthExpired(): boolean {
 
 async function refreshClaudeAuthIfNeeded() {
   try {
-    if (instanceId() === "overlay") return;
     if (process.env.INFOMARCHY_SKIP_CLAUDE_USAGE === "1") return;
-    if (currentClaudeAuthRefreshAt && now - currentClaudeAuthRefreshAt < CLAUDE_AUTH_REFRESH_MS) return;
-    if (!claudeOauthExpired()) return;
-    const claude = Bun.which("claude");
-    if (!claude) return;
-    currentClaudeAuthRefreshAt = now;
-    await run([claude, "-p", "ping", "--max-turns", "0", "--output-format", "json"], 12_000);
+    if (!FORCE_REFRESH && instanceId() === "overlay") return;
+    const expired = claudeOauthExpired();
+    if (!FORCE_REFRESH && !expired) return;
+    if (expired) {
+      if (!FORCE_REFRESH && currentClaudeAuthRefreshAt && now - currentClaudeAuthRefreshAt < CLAUDE_AUTH_REFRESH_MS) return;
+      const claude = Bun.which("claude");
+      if (!claude) return;
+      currentClaudeAuthRefreshAt = now;
+      await run([claude, "-p", "ping", "--max-turns", "0", "--output-format", "json"], 12_000);
+    }
     const collector = join(process.env.OMARCHY_PATH || "/usr/share/omarchy", "bin/omarchy-agent-usage-claude");
     if (!existsSync(collector)) return;
     const text = await run([collector, "--limits-only"], 8_000);
