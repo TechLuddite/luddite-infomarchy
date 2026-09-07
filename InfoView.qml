@@ -1595,8 +1595,8 @@ Item {
                   }
                   PlainText {
                     Layout.fillWidth: true
-                    visible: !!up.u.usageStatusText
-                    text: up.u.usageStatusText || ""
+                    visible: !!(up.u.authHelpText || up.u.usageStatusText)
+                    text: up.u.authHelpText || up.u.usageStatusText || ""
                     color: view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption
                     elide: Text.ElideRight
                   }
