@@ -2050,6 +2050,11 @@ export function normalizeUsage(j: any, stamp = now): any {
   const lifetime = valueSummary(j.modelUsage && typeof j.modelUsage === "object" ? j.modelUsage : {});
   const todayValue = todayValueEstimate(j.todayTokensByModel && typeof j.todayTokensByModel === "object" ? j.todayTokensByModel : {}, j.modelUsage && typeof j.modelUsage === "object" ? j.modelUsage : {});
   const dayKeys = heatDays.map(localDayKey);
+  const usageStatusText = uiString(j.usageStatusText, 160);
+  // Omarchy's collector seeds authHelpText with "Run `claude auth login`…"
+  // even on a successful limits probe. The desk then looks expired until a
+  // CLI poke refreshes the meters. Help is only real when a status is set.
+  const authHelpText = usageStatusText ? uiString(j.authHelpText, 200) : "";
   return {
     name: uiString(j.name, 64), ready: j.ready !== false, tierLabel: uiString(j.tierLabel, 32),
     // Ship the projection from the tested implementation instead of letting
@@ -2058,8 +2063,8 @@ export function normalizeUsage(j: any, stamp = now): any {
     todayPrompts: count(j.todayPrompts), todaySessions: count(j.todaySessions), todayTotalTokens: count(j.todayTotalTokens),
     totalPrompts: count(j.totalPrompts), totalSessions: count(j.totalSessions),
     updatedAt: typeof j.updatedAt === "string" ? uiString(j.updatedAt, 40) : count(j.updatedAt),
-    modelUsage, recentDays, usageStatusText: uiString(j.usageStatusText, 160),
-    authHelpText: uiString(j.authHelpText, 200),
+    modelUsage, recentDays, usageStatusText,
+    authHelpText,
     // Seven aligned daily token totals (oldest first) for the trend chart, and
     // API-value estimates from the attributed price table.
     dailyTokens: alignDailyTokens(j.recentDays, dayKeys),

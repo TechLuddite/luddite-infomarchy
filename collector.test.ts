@@ -848,7 +848,8 @@ describe("second-reviewer findings (2026-09-04)", () => {
     const usage = normalizeUsage({
       name: "Codex", limits: [null, "junk", { label: "WEEKLY", percent: "0.5", resetsAt: "2026-09-10T00:00:00Z" }],
       modelUsage: big, recentDays: Array.from({ length: 400 }, (_, i) => ({ day: i, prompts: i })), todayPrompts: "12",
-      updatedAt: "2026-09-07T08:54:32.906328+00:00", authHelpText: "Claude Code's saved sign-in expired — showing the last known limits.",
+      updatedAt: "2026-09-07T08:54:32.906328+00:00", usageStatusText: "Sign-in expired",
+      authHelpText: "Claude Code's saved sign-in expired — showing the last known limits.",
     }, Date.UTC(2026, 8, 4));
     expect(usage.limits.length).toBe(1);
     expect(usage.limits[0].percent).toBe(0.5);
@@ -858,6 +859,10 @@ describe("second-reviewer findings (2026-09-04)", () => {
     expect(usage.todayPrompts).toBe(12);
     expect(usage.updatedAt).toBe("2026-09-07T08:54:32.906328+00:00");
     expect(usage.authHelpText).toContain("sign-in expired");
+    expect(normalizeUsage({
+      name: "Claude", ready: true, limits: [{ label: "WEEKLY", percent: 0.6 }],
+      authHelpText: "Run `claude auth login` to restore authoritative usage.",
+    }).authHelpText).toBe("");
     expect(normalizeUsageLimit(null)).toBeNull();
     expect(claudeOauthExpiredAt(1_700_000_000_000, 1_700_000_000_001)).toBe(true);
     expect(claudeOauthExpiredAt(1_700_000_000_002, 1_700_000_000_001)).toBe(false);
