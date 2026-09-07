@@ -29,9 +29,8 @@ Scope {
 
   // SUPER+D means "show me the desktop": the real wallpaper, dimmed exactly as
   // the background layer dims it, with the dashboard on top only when SUPER+I
-  // has it visible. The old 88% theme-colour scrim hid the wallpaper photo and
-  // ignored SUPER+I, so toggling the dashboard while the overlay was open
-  // changed the desk underneath without changing what was on screen.
+  // has it visible. Exclusive keyboard focus on this layer would swallow
+  // SUPER+I, so the key is handled here as well as by the Hyprland bind.
   property string background: ""
   readonly property real wallpaperOpacity: 0.32
   Process {
@@ -86,6 +85,12 @@ Scope {
         focus: root.opened
         Keys.onEscapePressed: root.close()
         Keys.onPressed: function(event) {
+          if ((event.modifiers & Qt.MetaModifier) && event.key === Qt.Key_I) {
+            if (event.modifiers & Qt.ShiftModifier) dashboardSettings.togglePrivacyMode()
+            else dashboardSettings.toggleDashboardVisible()
+            event.accepted = true
+            return
+          }
           if (event.key >= Qt.Key_0 && event.key <= Qt.Key_9) { var i = event.key === Qt.Key_0 ? 9 : event.key - Qt.Key_1; var def = dashboardSettings.definitions[i]; if (def) dashboardSettings.toggleSection(def.id); event.accepted = true; return }
           if (event.key === Qt.Key_J || event.key === Qt.Key_Down) { infoView.keyboardStep(1); event.accepted = true; return }
           if (event.key === Qt.Key_K || event.key === Qt.Key_Up) { infoView.keyboardStep(-1); event.accepted = true; return }

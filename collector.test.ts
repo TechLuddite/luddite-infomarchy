@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, sy
 import { Database } from "bun:sqlite";
 import { tmpdir } from "os";
 import { join, relative } from "path";
-import { providerOf, titleLooksBusy, cmdIsTurnInhibitor, sessionIdFrom, sessionHostsFromEnvironment, tmuxSocketFromEnvironment, parseTmuxPanes, parseTmuxClients, tmuxPaneForAncestors, linkRecentToLive, inferSessionIdsFromRecent, attachSessionTopics, localSessionSummary, cleanGeneratedSummary, activityCellIndex, parseExternalIpTrace, externalIpCacheFresh, frameSnapshot, parseJsonBounded, readRegularFileLimited, safePrompt, sessionPresentation, writePrivateStateFile, decodeProjectDir, dropPartialFirstLine, readHistoryTail, readRegularFileHead, rolloutSessionId, rolloutCwd, topicCacheHit, topicRetryBlocked, pruneTopicCache, reapStateTempFiles, parseGpuLine, parseDfRows, plausibleTimestamp, normalizeUsage, normalizeUsageLimit, ollamaHostIsLocal, topicRefinementAllowed, terminate, rateForModel, estimateValue, valueSummary, alignDailyTokens, localDayKey, loadPricing, todayValueEstimate, herdrSocketFromEnvironment, herdrClientPids, herdrWindowFor, boomuxClientShellId, boomuxWindowFor, backgroundDaemonKind, parseClaudeAgents, sessionStaleness, STALE_AFTER_MS, decodeBase32, grokBotLine, grokBotRow, grokBotAttention, attachGrokBotRoster, validNetDevice, observationalGitCommand, observationalGitEnv, grokUsageFromUpdate, grokUsageFromUpdatesText, foldGrokSessionSnaps, piUserText, piSessionIdFromName } from "./collector.ts";
+import { providerOf, titleLooksBusy, cmdIsTurnInhibitor, sessionIdFrom, sessionHostsFromEnvironment, tmuxSocketFromEnvironment, parseTmuxPanes, parseTmuxClients, tmuxPaneForAncestors, linkRecentToLive, inferSessionIdsFromRecent, attachSessionTopics, localSessionSummary, cleanGeneratedSummary, activityCellIndex, parseExternalIpTrace, externalIpCacheFresh, frameSnapshot, parseJsonBounded, readRegularFileLimited, safePrompt, sessionPresentation, writePrivateStateFile, decodeProjectDir, dropPartialFirstLine, readHistoryTail, readRegularFileHead, rolloutSessionId, rolloutCwd, topicCacheHit, topicRetryBlocked, pruneTopicCache, reapStateTempFiles, parseGpuLine, parseDfRows, plausibleTimestamp, normalizeUsage, normalizeUsageLimit, ollamaHostIsLocal, topicRefinementAllowed, terminate, rateForModel, estimateValue, valueSummary, alignDailyTokens, localDayKey, loadPricing, todayValueEstimate, herdrSocketFromEnvironment, herdrClientPids, herdrWindowFor, boomuxClientShellId, boomuxWindowFor, backgroundDaemonKind, parseClaudeAgents, sessionStaleness, STALE_AFTER_MS, decodeBase32, grokBotLine, grokBotRow, grokBotAttention, attachGrokBotRoster, validNetDevice, observationalGitCommand, observationalGitEnv, grokUsageFromUpdate, grokUsageFromUpdatesText, foldGrokSessionSnaps, piUserText, piSessionIdFromName, grokObservedLimits, parseGrokCreditsConfig, grokBillingFromUnifiedLog } from "./collector.ts";
 import { sessionEventId } from "./notification-events.ts";
 
 const testRoot = mkdtempSync(join(tmpdir(), "infomarchy-test-"));
@@ -593,6 +593,46 @@ describe("history collection", () => {
     expect(snap.ai.usage.grok.todayTotalTokens).toBe(290);
     rmSync(root, { recursive: true, force: true });
   });
+
+  test("observed Grok weekly pool becomes a percent meter, not a guessed 5-hour window", () => {
+    const dir = join(testRoot, "grok-limits");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "grok-limits.json"), JSON.stringify({
+      source: "user-observed",
+      limits: [{ label: "WEEKLY", percent: 0.03, resetsAt: "2026-09-14T00:26:00-07:00" }, { label: "bad", percent: -1 }],
+    }));
+    expect(grokObservedLimits(dir)).toEqual([
+      { label: "WEEKLY", title: "WEEKLY", percent: 0.03, resetsAt: "2026-09-14T00:26:00-07:00" },
+    ]);
+    expect(grokObservedLimits(join(testRoot, "missing-limits"))).toEqual([]);
+  });
+
+  test("Grok credits config uses 0-100 percents and product rows", () => {
+    const parsed = parseGrokCreditsConfig({
+      config: {
+        creditUsagePercent: 17,
+        currentPeriod: { type: "USAGE_PERIOD_TYPE_WEEKLY", end: "2026-09-14T07:26:13Z" },
+        productUsage: [{ product: "GrokBuild", usagePercent: 14 }, { product: "GrokVoice", usagePercent: 3 }],
+      },
+    });
+    expect(parsed).toEqual({
+      percent: 0.17,
+      resetsAt: "2026-09-14T07:26:13Z",
+      products: [{ label: "BUILD", percent: 0.14 }, { label: "VOICE", percent: 0.03 }],
+    });
+    const log = grokBillingFromUnifiedLog(JSON.stringify({
+      msg: "billing: fetched credits config",
+      ctx: { config: { creditUsagePercent: 16, currentPeriod: { end: "2026-09-14T07:26:13Z" }, productUsage: [] } },
+    }) + "\n");
+    expect(log?.percent).toBe(0.16);
+    const dir = join(testRoot, "grok-billing");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "grok-billing.json"), JSON.stringify({
+      limits: [{ label: "WEEKLY", percent: 0.17, resetsAt: "2026-09-14T07:26:13Z" }, { label: "BUILD", percent: 0.14, resetsAt: "2026-09-14T07:26:13Z" }],
+    }));
+    expect(grokObservedLimits(dir).map((row: any) => row.label)).toEqual(["WEEKLY", "BUILD"]);
+    expect(grokObservedLimits(dir)[0].percent).toBe(0.17);
+  });
 });
 
 describe("degrading instead of crashing", () => {
@@ -808,6 +848,7 @@ describe("second-reviewer findings (2026-09-04)", () => {
     const usage = normalizeUsage({
       name: "Codex", limits: [null, "junk", { label: "WEEKLY", percent: "0.5", resetsAt: "2026-09-10T00:00:00Z" }],
       modelUsage: big, recentDays: Array.from({ length: 400 }, (_, i) => ({ day: i, prompts: i })), todayPrompts: "12",
+      updatedAt: "2026-09-07T08:54:32.906328+00:00", authHelpText: "Claude Code's saved sign-in expired — showing the last known limits.",
     }, Date.UTC(2026, 8, 4));
     expect(usage.limits.length).toBe(1);
     expect(usage.limits[0].percent).toBe(0.5);
@@ -815,6 +856,8 @@ describe("second-reviewer findings (2026-09-04)", () => {
     expect(Object.keys(usage.modelUsage).length).toBe(32);
     expect(usage.recentDays.length).toBe(31);
     expect(usage.todayPrompts).toBe(12);
+    expect(usage.updatedAt).toBe("2026-09-07T08:54:32.906328+00:00");
+    expect(usage.authHelpText).toContain("sign-in expired");
     expect(normalizeUsageLimit(null)).toBeNull();
   });
 

@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
-  DEFAULT_CIDRS, escapeHtml, handleRequest, hostAllowed, ipAllowed, maskSnapshot,
-  originAllowed, parseCidr, parseCidrList, tokensEqual, newToken, ipv4ToInt,
+  DEFAULT_CIDRS, displayMount, escapeHtml, fmtBytes, fmtRate, handleRequest, hostAllowed, ipAllowed, maskSnapshot,
+  originAllowed, parseCidr, parseCidrList, tokensEqual, newToken, ipv4ToInt, wifiLabel,
 } from "./web-server";
 
 const root = mkdtempSync(join(tmpdir(), "infomarchy-web-"));
@@ -23,7 +23,7 @@ const base = {
   port: 8787,
   allowedHosts: ["172.20.20.142", "127.0.0.1"],
   cidrs,
-  snapshot: { ts: 1, user: "larry", host: "box", machine: { externalIp: "203.0.113.9", net: { ssid: "secret", addr: "172.20.20.142" }, cpu: { pct: 10 }, mem: { pct: 20, used: 1, total: 2 } }, ai: { sessions: [{ provider: "pi", project: "Halo", topic: "<img src=x onerror=alert(1)>" }], attention: [], recent: [{ provider: "opencode", project: "~/Work", text: "<script>alert(1)</script>" }], usage: {}, github: { login: "TechLuddite" } } },
+  snapshot: { ts: 1, user: "larry", host: "box", machine: { externalIp: "203.0.113.9", net: { ssid: "secret", addr: "172.20.20.142", wireless: true, signal: -47, dev: "wlan0", rxRate: 2_420_000, txRate: 386_000 }, cpu: { pct: 27.4, load: [1.18, 0.92] }, mem: { pct: 44.4, used: 15_246_073_856, total: 34_359_738_368 }, disks: [{ mount: "/home/larry", size: 1_999_844_147_200, used: 816_043_786_240, pct: 40.8 }], ping: { ok: true, ms: 18.6 }, battery: { pct: 81, status: "Charging" }, temp: 52, uptime: 186_300 }, ai: { sessions: [{ provider: "pi", project: "Halo", topic: "<img src=x onerror=alert(1)>" }], attention: [], recent: [{ provider: "opencode", project: "~/Work", text: "<script>alert(1)</script>" }], usageDays: ["2026-09-01","2026-09-02","2026-09-03","2026-09-04","2026-09-05","2026-09-06","2026-09-07"], usage: { grok: { name: "Grok", ready: true, tierLabel: "weekly", todayPrompts: 4, todayTotalTokens: 4000, dailyTokens: [0,0,0,0,0,100,50], limits: [{ label: "WEEKLY", percent: 0.03, resetsAt: "2026-09-14T00:26:00-07:00" }], value: { lifetime: 1.2, today: 0.1, totals: { inputTokens: 100, outputTokens: 50, cacheReadInputTokens: 10, cacheCreationInputTokens: 0 } } }, claude: { name: "Claude Code", ready: true, tierLabel: "Max 5x", todayPrompts: 0, todayTotalTokens: 0, authHelpText: "Claude Code's saved sign-in expired", limits: [{ label: "Session (5-hour)", percent: 0.16, resetsAt: "2026-09-07T13:10:00Z" }] } }, github: { login: "TechLuddite" } } },
 };
 
 describe("phone view access control", () => {
@@ -78,12 +78,50 @@ describe("phone view rendering", () => {
     expect(page.headers["Content-Security-Policy"]).toContain("default-src 'none'");
     expect(page.headers["X-Frame-Options"]).toBe("DENY");
     expect(page.body).toContain("Halo");
-    expect(page.body).toContain("&lt;script&gt;");
+    expect(page.body).toContain("&lt;img src=x");
+    expect(page.body).not.toContain("<img src");
     expect(page.body).not.toContain("<script>alert");
-    expect(page.body).not.toContain("203.0.113.9");
-    expect(page.body).not.toContain("secret");
+    expect(page.body.match(/<script/g)?.length).toBe(1);
     expect(page.body).not.toContain("TechLuddite");
+    expect(page.body).toContain('class="privacy"');
+    expect(page.body).toContain('id="privacy"');
+    expect(page.body).toContain("PRIVACY ON");
     expect(page.body).toContain("WAN/LAN/SSID hidden");
+    expect(page.body).toContain("WAN 203.0.113.9");
+    expect(page.body).toContain("WIFI secret");
+    expect(page.body).toContain("DISK ~");
+    expect(page.body).toContain("DISK /home/larry");
+    expect(page.body).not.toContain("<h2>RECENT</h2>");
+    const usageAt = page.body.indexOf("USAGE");
+    const sessionsAt = page.body.indexOf("LIVE SESSIONS");
+    expect(usageAt).toBeGreaterThan(0);
+    expect(usageAt).toBeLessThan(sessionsAt);
+    expect(page.body).not.toContain("TOKENS · 7 days");
+    expect(page.body).not.toContain("$ VALUE · 7 days");
+    expect(page.body).not.toContain("polyline");
+    expect(page.body).toContain("WEEKLY");
+    expect(page.body).toContain("3%");
+    expect(page.body).toContain("Claude Code");
+    expect(page.body).toContain("sign-in expired");
+    expect(page.body).not.toContain('http-equiv="refresh"');
+    expect(page.body).not.toContain("refreshes every 5s");
+    expect(page.body).toContain(">Refresh</a>");
+    expect(page.body).toContain('id="view"');
+    expect(page.body).toContain("fetch(location.pathname");
+    expect(page.headers["Content-Security-Policy"]).toContain("connect-src 'self'");
+    expect(page.headers["Content-Security-Policy"]).toMatch(/script-src 'nonce-[0-9a-f]{32}'/);
+    expect(page.body).toMatch(/<script nonce="[0-9a-f]{32}">/);
+    expect(page.body).toContain("CPU");
+    expect(page.body).toContain("RAM");
+    expect(page.body).toContain("DISK ~");
+    expect(page.body).toContain("WIFI");
+    expect(page.body).toContain("-47 dBm");
+    expect(page.body).toContain("BAT 81% charging");
+    expect(page.body).toContain("⇄ 19 ms");
+    expect(fmtBytes(15_246_073_856)).toBe("14.2G");
+    expect(fmtRate(2_420_000)).toBe("19.4Mb/s");
+    expect(displayMount("/home/larry/Projects")).toBe("~/Projects");
+    expect(wifiLabel({ wireless: true, ssid: "secret", dev: "wlan0" })).toBe("WIFI");
   });
 
   test("HEAD is empty and missing snapshots are 503", () => {
