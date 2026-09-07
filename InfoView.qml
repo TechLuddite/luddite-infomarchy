@@ -1382,7 +1382,7 @@ Item {
           draggable: true
           title: "USAGE & LIMITS"
           hint: {
-            var keys = Object.keys(view.usage); return keys.length ? "via omarchy agents" : "enable the Agents bar widget"
+            var keys = Object.keys(view.usage); return keys.length ? "omarchy agents · grok/opencode local" : "enable the Agents bar widget"
           }
           ColumnLayout {
             width: parent.width
@@ -1514,6 +1514,13 @@ Item {
                   PlainText { text: up.u.tierLabel || ""; color: view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption }
                   Item { Layout.fillWidth: true }
                   PlainText { text: "today " + (up.u.todayPrompts || 0) + "p · " + view.desk.tokens(up.u.todayTotalTokens) + " tok" + (up.u.value && up.u.value.today !== null && up.u.value.today !== undefined ? " · ≈" + view.usageMoney(up.u.value.today) : ""); color: view.textDim; font.family: view.mono; font.pixelSize: Style.font.caption }
+                }
+                PlainText {
+                  Layout.fillWidth: true
+                  visible: !!up.u.usageStatusText
+                  text: up.u.usageStatusText || ""
+                  color: view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption
+                  elide: Text.ElideRight
                 }
                 PlainText {
                   Layout.fillWidth: true

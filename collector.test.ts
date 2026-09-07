@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, sy
 import { Database } from "bun:sqlite";
 import { tmpdir } from "os";
 import { join, relative } from "path";
-import { providerOf, titleLooksBusy, cmdIsTurnInhibitor, sessionIdFrom, sessionHostsFromEnvironment, tmuxSocketFromEnvironment, parseTmuxPanes, parseTmuxClients, tmuxPaneForAncestors, linkRecentToLive, inferSessionIdsFromRecent, attachSessionTopics, localSessionSummary, cleanGeneratedSummary, activityCellIndex, parseExternalIpTrace, externalIpCacheFresh, frameSnapshot, parseJsonBounded, readRegularFileLimited, safePrompt, sessionPresentation, writePrivateStateFile, decodeProjectDir, dropPartialFirstLine, readHistoryTail, readRegularFileHead, rolloutSessionId, rolloutCwd, topicCacheHit, topicRetryBlocked, pruneTopicCache, reapStateTempFiles, parseGpuLine, parseDfRows, plausibleTimestamp, normalizeUsage, normalizeUsageLimit, ollamaHostIsLocal, topicRefinementAllowed, terminate, rateForModel, estimateValue, valueSummary, alignDailyTokens, localDayKey, loadPricing, todayValueEstimate, herdrSocketFromEnvironment, herdrClientPids, herdrWindowFor, boomuxClientShellId, boomuxWindowFor, backgroundDaemonKind, parseClaudeAgents, sessionStaleness, STALE_AFTER_MS, decodeBase32, grokBotLine, grokBotRow, grokBotAttention, attachGrokBotRoster, validNetDevice, observationalGitCommand, observationalGitEnv } from "./collector.ts";
+import { providerOf, titleLooksBusy, cmdIsTurnInhibitor, sessionIdFrom, sessionHostsFromEnvironment, tmuxSocketFromEnvironment, parseTmuxPanes, parseTmuxClients, tmuxPaneForAncestors, linkRecentToLive, inferSessionIdsFromRecent, attachSessionTopics, localSessionSummary, cleanGeneratedSummary, activityCellIndex, parseExternalIpTrace, externalIpCacheFresh, frameSnapshot, parseJsonBounded, readRegularFileLimited, safePrompt, sessionPresentation, writePrivateStateFile, decodeProjectDir, dropPartialFirstLine, readHistoryTail, readRegularFileHead, rolloutSessionId, rolloutCwd, topicCacheHit, topicRetryBlocked, pruneTopicCache, reapStateTempFiles, parseGpuLine, parseDfRows, plausibleTimestamp, normalizeUsage, normalizeUsageLimit, ollamaHostIsLocal, topicRefinementAllowed, terminate, rateForModel, estimateValue, valueSummary, alignDailyTokens, localDayKey, loadPricing, todayValueEstimate, herdrSocketFromEnvironment, herdrClientPids, herdrWindowFor, boomuxClientShellId, boomuxWindowFor, backgroundDaemonKind, parseClaudeAgents, sessionStaleness, STALE_AFTER_MS, decodeBase32, grokBotLine, grokBotRow, grokBotAttention, attachGrokBotRoster, validNetDevice, observationalGitCommand, observationalGitEnv, grokUsageFromUpdate, grokUsageFromUpdatesText, foldGrokSessionSnaps } from "./collector.ts";
 import { sessionEventId } from "./notification-events.ts";
 
 const testRoot = mkdtempSync(join(tmpdir(), "infomarchy-test-"));
@@ -495,6 +495,61 @@ describe("history collection", () => {
     });
     rmSync(root, { recursive: true, force: true });
   });
+
+  test("OpenCode assistant tokens become a local usage row", async () => {
+    const root = join(testRoot, "opencode-usage");
+    const data = join(root, "data");
+    mkdirSync(join(data, "opencode"), { recursive: true });
+    const db = new Database(join(data, "opencode", "opencode.db"));
+    db.exec(`CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT);`);
+    const ts = Date.now();
+    db.query("INSERT INTO message VALUES (?, ?, ?, ?)").run("a1", "ses_aaaaaaa1", ts, JSON.stringify({
+      role: "assistant", modelID: "qwen3.8-flash", tokens: { input: 10, output: 20, reasoning: 5, cache: { read: 100, write: 50 } },
+    }));
+    db.query("INSERT INTO message VALUES (?, ?, ?, ?)").run("u1", "ses_aaaaaaa1", ts, JSON.stringify({ role: "user" }));
+    db.close();
+    const proc = Bun.spawn(["bun", join(import.meta.dir, "collector.ts")], {
+      env: { HOME: root, USER: "tester", XDG_DATA_HOME: data, XDG_STATE_HOME: join(root, "state"), PATH: process.env.PATH || "", INFOMARCHY_SKIP_EXTERNAL_IP: "1" },
+      stdout: "pipe", stderr: "pipe",
+    });
+    const snap = decodeFrames(await new Response(proc.stdout).text());
+    expect(await proc.exited).toBe(0);
+    expect(snap.ai.usage.opencode.tierLabel).toBe("local");
+    expect(snap.ai.usage.opencode.limits).toEqual([]);
+    expect(snap.ai.usage.opencode.usageStatusText).toContain("not subscription");
+    expect(snap.ai.usage.opencode.modelUsage["qwen3.8-flash"]).toMatchObject({
+      inputTokens: 10, outputTokens: 25, cacheReadInputTokens: 100, cacheCreationInputTokens: 50,
+    });
+    expect(snap.ai.usage.opencode.todayTotalTokens).toBe(185);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("Grok updates.jsonl cumulative usage becomes a local usage row", async () => {
+    const root = join(testRoot, "grok-usage");
+    const session = join(root, ".grok", "sessions", "proj", "session-aaaa");
+    mkdirSync(session, { recursive: true });
+    const t1 = Date.now() - 3600_000, t2 = Date.now();
+    const line = (ts: number, input: number, output: number) => JSON.stringify({
+      timestamp: ts,
+      params: { update: { usage: {
+        inputTokens: input, outputTokens: output, reasoningTokens: 0, cachedReadTokens: 0, cacheCreationTokens: 0, totalTokens: input + output,
+        modelUsage: { "grok-4.6-build": { inputTokens: input, outputTokens: output, reasoningTokens: 0, cachedReadTokens: 0, cacheCreationTokens: 0 } },
+      } } },
+    });
+    writeFileSync(join(session, "updates.jsonl"), [line(t1, 100, 10), line(t2, 250, 40)].join("\n") + "\n");
+    writeFileSync(join(session, "..", "prompt_history.jsonl"), JSON.stringify({ timestamp: new Date(t2).toISOString(), session_id: "session-aaaa", prompt: "hello" }) + "\n");
+    const proc = Bun.spawn(["bun", join(import.meta.dir, "collector.ts")], {
+      env: { HOME: root, USER: "tester", GROK_HOME: join(root, ".grok"), XDG_STATE_HOME: join(root, "state"), PATH: process.env.PATH || "", INFOMARCHY_SKIP_EXTERNAL_IP: "1" },
+      stdout: "pipe", stderr: "pipe",
+    });
+    const snap = decodeFrames(await new Response(proc.stdout).text());
+    expect(await proc.exited).toBe(0);
+    expect(snap.ai.usage.grok.tierLabel).toBe("local");
+    expect(snap.ai.usage.grok.limits).toEqual([]);
+    expect(snap.ai.usage.grok.modelUsage["grok-4.6-build"].inputTokens).toBe(250);
+    expect(snap.ai.usage.grok.todayTotalTokens).toBe(290);
+    rmSync(root, { recursive: true, force: true });
+  });
 });
 
 describe("degrading instead of crashing", () => {
@@ -689,6 +744,19 @@ describe("second-reviewer findings (2026-09-04)", () => {
     expect(plausibleTimestamp(Date.UTC(2099, 0, 1), stamp)).toBe(false);
     expect(plausibleTimestamp(0, stamp)).toBe(false);
     expect(plausibleTimestamp("nope", stamp)).toBe(false);
+  });
+
+  test("Grok usage snapshots fold cumulative totals into per-day deltas", () => {
+    const snaps = grokUsageFromUpdatesText([
+      JSON.stringify({ timestamp: Date.UTC(2026, 8, 5, 12), params: { usage: { inputTokens: 100, outputTokens: 20, cachedReadTokens: 0, cacheCreationTokens: 0, modelUsage: { m: { inputTokens: 100, outputTokens: 20 } } } } }),
+      JSON.stringify({ timestamp: Date.UTC(2026, 8, 6, 12), params: { usage: { inputTokens: 180, outputTokens: 40, cachedReadTokens: 0, cacheCreationTokens: 0, modelUsage: { m: { inputTokens: 180, outputTokens: 40 } } } } }),
+    ].join("\n"));
+    expect(snaps).toHaveLength(2);
+    const folded = foldGrokSessionSnaps(snaps);
+    expect(folded.last?.usage.inputTokens).toBe(180);
+    expect(folded.daily.get("2026-09-05")).toBe(120);
+    expect(folded.daily.get("2026-09-06")).toBe(100);
+    expect(grokUsageFromUpdate({ inputTokens: 0, outputTokens: 0 })).toBeNull();
   });
 
   test("usage caches are normalized to displayed fields with hard bounds", () => {

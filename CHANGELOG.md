@@ -5,6 +5,7 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 ## [Unreleased]
 
 ### Security
+- USAGE shows local Grok and OpenCode token totals from session files (`updates.jsonl`, `opencode.db`) when Omarchy has no collector for them. Rows are labelled `local` with no 5-hour/weekly meters. Omarchy cache records are never overwritten, and nothing is written into `omarchy/agents/usage`.
 - Observational git in an agent working tree pins `core.fsmonitor=false`, `core.hooksPath=/dev/null`, empty `diff.external` and `credential.helper`, and ignores global/system git config. `git diff` also passes `--no-ext-diff --no-textconv`.
 - GitHub Actions polling uses `gh run list --repo owner/name` after parsing `origin` as github.com. Non-github remotes are skipped. The agent's cwd is not the `gh` process cwd.
 - Grok Bot redacts credentials before flattening markdown, so underscore stripping cannot split `ghp_` / `ntn_` prefixes.

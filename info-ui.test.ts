@@ -97,6 +97,7 @@ describe("usage trend chart", () => {
     expect(view).toContain("readonly property var usageSeries");
     expect(view).toContain("id: trendCanvas");
     expect(view).toContain('text: view.usageMetric === "value" ? "≈ $ VALUE" : "TOKENS"');
+    expect(view).toContain("up.u.usageStatusText");
     expect(view).toContain("usageTrend.hovered");
     expect(view).toContain('"% cache reads"');
     expect(view).toContain('"unpriced"');
