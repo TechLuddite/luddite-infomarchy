@@ -16,11 +16,11 @@ The wallpaper desk, the collector, and the design are theirs. Use [the original]
 
 **Git and GitHub CI.** Observational git in an agent working tree pins `core.fsmonitor=false`, `core.hooksPath=/dev/null`, empty `diff.external` and `credential.helper`, and ignores global/system git config. `git diff` also passes `--no-ext-diff --no-textconv`. `gh run list` uses `--repo owner/name` after parsing `origin` as github.com. Non-github remotes are skipped. The agent's cwd is not the `gh` process cwd.
 
-**Stream privacy.** SUPER+SHIFT+I (or `omarchy-shell infomarchy togglePrivacy`) hides WAN, LAN, Wi-Fi SSID, `user@host`, GitHub login, `/home/<user>` mounts, and window previews. Recent-task prompts keep the first four words and mask the rest. OSS project names stay.
+**Stream privacy.** SUPER+SHIFT+I (or `omarchy-shell infomarchy togglePrivacy`) hides WAN, LAN, Wi-Fi SSID, `user@host`, GitHub login, `/home/<user>` mounts, and window previews. Recent-task prompts keep the first four words and mask the rest, including the inspect drawer. COPY EXCERPT still copies the full text. OSS project names stay.
 
 **Pi.** Live sessions and recent prompts come from the Pi agent (`~/.pi/agent/sessions`). The default recent-task window keeps each provider's newest prompts, including OpenCode.
 
-**LOCAL AI.** Load/unload and the model list talk to `OLLAMA_HOST`, or to a persisted origin (`ollamaHost` in `dashboard.json`, `omarchy-shell infomarchy setOllamaHost http://127.0.0.1:11435`). Empty keeps the collector default of `http://127.0.0.1:11434`. Topic refinement still requires loopback unless `INFOMARCHY_ALLOW_REMOTE_OLLAMA=1`. A loopback port that is an SSH tunnel is treated as local.
+**LOCAL AI.** Load/unload and the model list talk to a persisted origin (`ollamaHost` in `dashboard.json`, `omarchy-shell infomarchy setOllamaHost` / `getOllamaHost`), else `OLLAMA_HOST`, else `http://127.0.0.1:11434`. Topic refinement still requires loopback unless `INFOMARCHY_ALLOW_REMOTE_OLLAMA=1`. A loopback port that is an SSH tunnel is treated as local.
 
 **Phone view.** Tap **PHONE** on the strip. Overlay **COPY PHONE URL** (or `omarchy-shell infomarchy getWebUrl`) gives `http://<lan-ip>:8787/t/<token>/`. Never print that URL in logs, commits, or chat. Read-only. Source IPs must be loopback, RFC1918, or Tailscale CGNAT (`100.64.0.0/10`). Add a VPN VLAN with `omarchy-shell infomarchy setWebCidrs 10.x.x.x/24` and toggle PHONE off/on. PRIVACY is on by default and hides WAN, LAN, SSID, `user@host`, and home mounts in the layout. Those fields remain in the HTML source when PRIVACY is on. GitHub login is never shown. USAGE meters match the desk without the 7-day charts. MACHINE uses the same meter grid as the desk. The page swaps in place every 5s and keeps scroll. Refresh is also a link. Token lives in `$XDG_STATE_HOME/infomarchy/web.json` (0600), not in argv. Incoming TCP 8787 must be allowed on the LAN firewall (UFW defaults to deny). Bounce PHONE off/on rotates the token. The git checkout and the live plugin under `~/.config/omarchy/plugins/techluddite.luddite-infomarchy` are separate trees. Copy changed files into the live plugin, then `omarchy restart shell`, if the desk is what you run.
 
@@ -44,7 +44,7 @@ o.bind("SUPER + I", "Infomarchy: toggle wallpaper dashboard", "omarchy-shell inf
 o.bind("SUPER + SHIFT + I", "Infomarchy: stream privacy", "omarchy-shell infomarchy togglePrivacy")
 ```
 
-**SUPER+SHIFT+I** hides WAN, LAN, Wi-Fi SSID, `user@host`, GitHub login, `/home/<user>` mounts, and window previews. Recent-task prompts keep the first four words and mask the rest. OSS project names, repos, and session topics stay. It persists in `dashboard.json` until toggled off. The module strip shows **PRIVACY ON** in yellow while it is active.
+**SUPER+SHIFT+I** hides WAN, LAN, Wi-Fi SSID, `user@host`, GitHub login, `/home/<user>` mounts, and window previews. Recent-task prompts keep the first four words and mask the rest, including the inspect drawer. COPY EXCERPT still copies the full text. OSS project names, repos, and session topics stay. It persists in `dashboard.json` until toggled off. The module strip shows **PRIVACY ON** in yellow while it is active.
 
 ## Remove
 
