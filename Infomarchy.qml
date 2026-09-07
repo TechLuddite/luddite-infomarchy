@@ -148,6 +148,9 @@ Scope {
     function setDashboardVisible(v: string): void { dashboardSettings.setDashboardVisible(["1", "true", "on", "yes"].indexOf(String(v).toLowerCase()) >= 0) }
     function toggleDashboard(): void { dashboardSettings.toggleDashboardVisible() }
     function getDashboardVisible(): string { return dashboardSettings.dashboardVisible ? "true" : "false" }
+    function setPrivacy(v: string): void { dashboardSettings.setPrivacyMode(["1", "true", "on", "yes"].indexOf(String(v).toLowerCase()) >= 0) }
+    function togglePrivacy(): void { dashboardSettings.togglePrivacyMode() }
+    function getPrivacy(): string { return dashboardSettings.privacyMode ? "true" : "false" }
     function geometry(): string { return root.deskView ? root.deskView.geometryReport() : "{}" }
     function setSection(id: string, v: string): void { dashboardSettings.setSection(id, ["1", "true", "on", "yes"].indexOf(String(v).toLowerCase()) >= 0) }
     function toggleSection(id: string): void { dashboardSettings.toggleSection(id) }

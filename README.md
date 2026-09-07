@@ -16,6 +16,8 @@ The wallpaper desk, the collector, and the design are theirs. Use [the original]
 
 **Git and GitHub CI.** Observational git in an agent working tree pins `core.fsmonitor=false`, `core.hooksPath=/dev/null`, empty `diff.external` and `credential.helper`, and ignores global/system git config. `git diff` also passes `--no-ext-diff --no-textconv`. `gh run list` uses `--repo owner/name` after parsing `origin` as github.com. Non-github remotes are skipped. The agent's cwd is not the `gh` process cwd.
 
+**Stream privacy.** SUPER+SHIFT+I (or `omarchy-shell infomarchy togglePrivacy`) hides WAN, LAN, Wi-Fi SSID, `user@host`, GitHub login, `/home/<user>` mounts, and window previews. OSS project names stay.
+
 **Other hardening.** Grok Bot redacts credentials before flattening markdown. `INFOMARCHY_SKIP_GITHUB=1` also skips `gh run list`. Herdr window matching requires the agent's socket. `safePrompt` also covers `github_pat_`, `xai-`, `glpat-`, `hf_`, Stripe `sk_live_`/`sk_test_`, and `npm_`. Resume uses the same project-directory guard as Open Project. Default-route interface names are shape-checked before sysfs reads. `0.0.0.0` is no longer treated as loopback Ollama.
 
 ## Install
@@ -31,7 +33,10 @@ Bind in `~/.config/hypr/bindings.lua`:
 ```lua
 o.bind("SUPER + D", "Infomarchy: AI info desk", "omarchy-shell shell toggle techluddite.luddite-infomarchy '{}'")
 o.bind("SUPER + I", "Infomarchy: toggle wallpaper dashboard", "omarchy-shell infomarchy toggleDashboard")
+o.bind("SUPER + SHIFT + I", "Infomarchy: stream privacy", "omarchy-shell infomarchy togglePrivacy")
 ```
+
+**SUPER+SHIFT+I** hides WAN, LAN, Wi-Fi SSID, `user@host`, GitHub login, `/home/<user>` mounts, and window previews. OSS project names, repos, and session topics stay. It persists in `dashboard.json` until toggled off. The module strip shows **PRIVACY ON** in yellow while it is active.
 
 ## Remove
 
