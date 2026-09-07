@@ -158,8 +158,8 @@ describe("right column fits a 1080p desk", () => {
   test("MACHINE is a two-column grid with a one-line footer, and the SUPER legend sits under it", () => {
     const view = readFileSync(join(import.meta.dir, "InfoView.qml"), "utf8");
     expect(view).toContain("// Cockpit density: two meters per row");
-    expect(view).toContain('text: "WAN " + (view.machine.externalIp || "—")');
-    expect(view).toContain('"SUPER+I hide desk  ·  SUPER+D show desktop") + "  ·  right-click a card to inspect"');
+    expect(view).toContain('text: "WAN " + view.wanText()');
+    expect(view).toContain('"SUPER+I hide desk  ·  SUPER+D show desktop") + "  ·  SUPER+SHIFT+I privacy  ·  right-click a card to inspect"');
     expect(view).toContain("readonly property int metaWidth");
   });
 });
@@ -191,6 +191,31 @@ describe("session card lines never spill into the neighbouring card", () => {
     // neighbour's git line ("git mainc·uclean · ram 360M"). Fill-width, one line ⇒ elide.
     for (const line of block.split("\n").filter(l => l.includes("PlainText {") && l.includes("Layout.fillWidth: true") && !l.includes("wrapMode")))
       expect(line).toMatch(/elide: Text\.Elide(Right|Middle|Left)/);
+  });
+});
+
+describe("stream privacy mode", () => {
+  test("persists a toggle that masks identity and leaves OSS project names", () => {
+    expect(settings).toContain("property bool privacyMode: false");
+    expect(settings).toContain("function togglePrivacyMode()");
+    expect(settings).toContain("privacyMode: privacyMode");
+    expect(service).toContain("function togglePrivacy(): void { dashboardSettings.togglePrivacyMode() }");
+    expect(service).toContain("function getPrivacy(): string");
+    expect(view).toContain("function wanText()");
+    expect(view).toContain("function wifiLabel(net)");
+    expect(view).toContain("function machineHint()");
+    expect(view).toContain("function displayPath(path)");
+    expect(view).toContain('return privacyMode ? "—" : (view.machine.externalIp || "—")');
+    expect(view).toContain('return privacyMode ? "WIFI" : ("WIFI " + (n.ssid || ""))');
+    expect(view).toContain('if (privacyMode) return "privacy · " + up');
+    expect(view).toContain("p.replace(/^\\/home\\/[^/]+/, \"~\")");
+    expect(view).toContain("visible: !view.privacyMode && !!mc.net.addr");
+    expect(view).toContain("privacyMode || !github.login");
+    expect(view).toContain("onPrivacyModeChanged: if (privacyMode && previewsEnabled) previewsEnabled = false");
+    expect(view).toContain("view.previewsEnabled && !view.privacyMode");
+    expect(view).toContain('text: view.privacyMode ? "PRIVACY ON" : "PRIVACY"');
+    expect(view).not.toContain('text: "WAN " + (view.machine.externalIp || "—")');
+    expect(view).not.toContain("WIFI \" + (mc.net.ssid");
   });
 });
 

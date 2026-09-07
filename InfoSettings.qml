@@ -36,6 +36,9 @@ Item {
   // restart from briefly re-enabling a dashboard the user turned off.
   property bool ready: false
   property bool dashboardVisible: false
+  // Stream/screenshot mask: hide WAN, LAN, SSID, user@host, GitHub login.
+  // OSS project names stay. Default off; persists until toggled.
+  property bool privacyMode: false
   property var rightOrder: ["usage", "localAi", "machine"]
   property var opsOrder: ["changes", "needs", "projects"]
 
@@ -67,6 +70,7 @@ Item {
       quietEndHour = parsed && Number.isInteger(parsed.quietEndHour) ? Math.max(0, Math.min(23, parsed.quietEndHour)) : 8
       selectedOllamaModel = parsed && /^[A-Za-z0-9][A-Za-z0-9._:\/-]{0,255}$/.test(String(parsed.selectedOllamaModel || "")) ? String(parsed.selectedOllamaModel) : ""
       dashboardVisible = parsed && typeof parsed.dashboardVisible === "boolean" ? parsed.dashboardVisible : true
+      privacyMode = !!(parsed && parsed.privacyMode === true)
       rightOrder = normalizedRightOrder(parsed ? parsed.rightOrder : null)
       opsOrder = normalizedOpsOrder(parsed ? parsed.opsOrder : null)
     } catch (e) {
@@ -82,6 +86,7 @@ Item {
       quietEndHour = 8
       selectedOllamaModel = ""
       dashboardVisible = true
+      privacyMode = false
       rightOrder = normalizedRightOrder(null)
       opsOrder = normalizedOpsOrder(null)
     }
@@ -140,6 +145,7 @@ Item {
       quietEndHour: quietEndHour,
       selectedOllamaModel: selectedOllamaModel,
       dashboardVisible: dashboardVisible,
+      privacyMode: privacyMode,
       rightOrder: normalizedRightOrder(rightOrder),
       opsOrder: normalizedOpsOrder(opsOrder)
     }, null, 2) + "\n")
@@ -255,6 +261,11 @@ Item {
     persist()
   }
   function toggleDashboardVisible() { setDashboardVisible(!dashboardVisible) }
+  function setPrivacyMode(enabled) {
+    privacyMode = !!enabled
+    persist()
+  }
+  function togglePrivacyMode() { setPrivacyMode(!privacyMode) }
   function rightIndex(id) { var index = rightOrder.indexOf(id); return index < 0 ? 99 : index }
   function moveRight(id, direction) {
     var next = normalizedRightOrder(rightOrder), from = next.indexOf(id), to = adjacentEnabledIndex(next, from, direction, sections)
