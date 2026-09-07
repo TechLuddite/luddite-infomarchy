@@ -8,7 +8,7 @@
 import { readFileSync } from "fs";
 
 const JOB_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/;
-const AGENT_BINARY = /(^|\/)(claude|codex|grok|gemini|hermes|opencode|aider|copilot|ollama)(\.js|\.mjs|\.cjs|\.py)?$/;
+const AGENT_BINARY = /(^|\/)(claude|codex|grok|gemini|hermes|opencode|aider|copilot|ollama|pi)(\.js|\.mjs|\.cjs|\.py)?$/;
 const START_TOLERANCE_MS = 2500;
 
 export function validJobId(value: unknown): string {

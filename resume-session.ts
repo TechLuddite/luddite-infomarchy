@@ -10,6 +10,7 @@ const RESUME_COMMANDS: Record<string, (id: string) => string[]> = {
   "claude-attach": id => ["claude", "attach", id],
   grok: id => ["grok", "--resume", id],
   opencode: id => ["opencode", "--session", id],
+  pi: id => ["pi", "--session", id],
 };
 
 export function validSessionId(value: unknown): boolean {
