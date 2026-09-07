@@ -52,6 +52,9 @@ and screen placement are described in the work log/conversation.
 - [x] Grok weekly/build meters from CLI billing (`cli-chat-proxy.grok.com`), cache `grok-billing.json`.
 - [x] Overlay SUPER+I while the layer has exclusive keyboard focus.
 - [x] Claude USAGE: refresh lapsed CLI OAuth via `claude -p ping --max-turns 0`, then re-read Omarchy limits. Do not write `omarchy/agents/usage`.
+- [x] Stream privacy: RECENT TASKS · WHAT GOT ASKED keeps the first four words and masks the rest.
+- [x] LOCAL AI: persist `ollamaHost` (this machine: Pi tunnel `127.0.0.1:11435`).
+- [x] Claude USAGE: drop Omarchy's leftover `Run claude auth login` help unless a real status is set.
 
 ## Follow-up batch
 
