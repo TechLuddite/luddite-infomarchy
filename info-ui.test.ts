@@ -201,6 +201,9 @@ describe("stream privacy mode", () => {
     expect(settings).toContain("privacyMode: privacyMode");
     expect(service).toContain("function togglePrivacy(): void { dashboardSettings.togglePrivacyMode() }");
     expect(service).toContain("function getPrivacy(): string");
+    expect(service).toContain("function toggleWeb(): void { dashboardSettings.toggleWebEnabled() }");
+    expect(view).toContain('text: view.settings.webEnabled ? (view.settings.webUrl ? "PHONE ON" : "PHONE …") : "PHONE"');
+    expect(view).toContain('text: "COPY PHONE URL"');
     expect(view).toContain("function wanText()");
     expect(view).toContain("function wifiLabel(net)");
     expect(view).toContain("function machineHint()");
