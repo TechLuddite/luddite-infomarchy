@@ -48,9 +48,41 @@ Scope {
     id: infoModel
     refreshMs: dashboardSettings.dashboardVisible ? 4000 : 16000
     demoMode: root.demoMode
-    active: dashboardSettings.ready && (dashboardSettings.dashboardVisible || dashboardSettings.notificationsEnabled)
+    active: dashboardSettings.ready && (dashboardSettings.dashboardVisible || dashboardSettings.notificationsEnabled || dashboardSettings.webEnabled)
   }
   InfoSettings { id: dashboardSettings }
+  readonly property string webServerPath: Qt.resolvedUrl("web-server.ts").toString().replace(/^file:\/\//, "")
+  Process {
+    id: webServer
+    command: ["bun", root.webServerPath]
+    running: dashboardSettings.ready && dashboardSettings.webEnabled
+    stdout: SplitParser {
+      splitMarker: "\n"
+      onRead: function(line) {
+        var raw = String(line || "")
+        if (raw.length > 512) return
+        try {
+          var parsed = JSON.parse(raw)
+          if (parsed && parsed.ok === true && typeof parsed.url === "string" && parsed.url.indexOf("http://") === 0)
+            dashboardSettings.webUrl = parsed.url.slice(0, 256)
+        } catch (e) {}
+      }
+    }
+    onRunningChanged: if (!running) dashboardSettings.webUrl = ""
+  }
+  Process {
+    id: webDisable
+    property var pending: ["bun", root.webServerPath, "disable"]
+    command: pending
+  }
+  Connections {
+    target: dashboardSettings
+    function onWebEnabledChanged() {
+      if (dashboardSettings.webEnabled) return
+      webDisable.pending = ["bun", root.webServerPath, "disable"]
+      webDisable.running = true
+    }
+  }
 
   function imageUrl(path) { return Util.fileUrl(path) }
   function refreshBackground() { if (!readlinkProc.running) readlinkProc.running = true }
@@ -151,6 +183,18 @@ Scope {
     function setPrivacy(v: string): void { dashboardSettings.setPrivacyMode(["1", "true", "on", "yes"].indexOf(String(v).toLowerCase()) >= 0) }
     function togglePrivacy(): void { dashboardSettings.togglePrivacyMode() }
     function getPrivacy(): string { return dashboardSettings.privacyMode ? "true" : "false" }
+    function toggleWeb(): void { dashboardSettings.toggleWebEnabled() }
+    function getWebUrl(): string { return dashboardSettings.webEnabled ? String(dashboardSettings.webUrl || "") : "" }
+    function setWebCidrs(v: string): void {
+      var parts = String(v || "").split(/[\s,]+/)
+      var cidrs = []
+      for (var i = 0; i < parts.length && cidrs.length < 8; i++) {
+        if (/^\d{1,3}(?:\.\d{1,3}){3}\/\d{1,2}$/.test(parts[i])) cidrs.push(parts[i])
+      }
+      if (!cidrs.length) return
+      webDisable.pending = ["bun", root.webServerPath, "cidrs"].concat(cidrs)
+      webDisable.running = true
+    }
     function geometry(): string { return root.deskView ? root.deskView.geometryReport() : "{}" }
     function setSection(id: string, v: string): void { dashboardSettings.setSection(id, ["1", "true", "on", "yes"].indexOf(String(v).toLowerCase()) >= 0) }
     function toggleSection(id: string): void { dashboardSettings.toggleSection(id) }

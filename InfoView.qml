@@ -818,6 +818,17 @@ Item {
           tone: view.privacyMode ? view.desk.yellow : view.textFaint
           MouseArea { anchors.fill: parent; enabled: view.interactive; cursorShape: Qt.PointingHandCursor; onClicked: view.settings.togglePrivacyMode() }
         }
+        Tag {
+          text: view.settings.webEnabled ? (view.settings.webUrl ? "PHONE ON" : "PHONE …") : "PHONE"
+          tone: view.settings.webEnabled ? view.desk.green : view.textFaint
+          MouseArea { anchors.fill: parent; enabled: view.interactive; cursorShape: Qt.PointingHandCursor; onClicked: view.settings.toggleWebEnabled() }
+        }
+        Tag {
+          visible: view.keyboardAvailable && view.settings.webEnabled && !!view.settings.webUrl
+          text: "COPY PHONE URL"
+          tone: view.desk.cyan
+          MouseArea { anchors.fill: parent; enabled: view.interactive; cursorShape: Qt.PointingHandCursor; onClicked: view.desk.copyText(view.settings.webUrl) }
+        }
         Tag { text: view.keyboardAvailable ? "SUPER+I HIDE DESK · SUPER+D / ESC CLOSE" : "SUPER+I HIDE DESK · SUPER+D SHOW OVER WINDOWS"; tone: view.textFaint }
         // Keyboard shortcuts only reach the overlay (the wallpaper layer has no keyboard focus).
         Tag { visible: view.keyboardAvailable; text: "1–9, 0 MODULES · J/K SESSION · ENTER FOCUS · A CLEAR"; tone: view.textFaint }

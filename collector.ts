@@ -2513,6 +2513,9 @@ async function runCollector() {
     },
   };
 
+  if (readRegularFileLimited(join(STATE_DIR, "web.json"), 4096)) {
+    writePrivateStateFile(STATE_DIR, "web-snapshot.json", JSON.stringify(snapshot));
+  }
   try {
     writePrivateStateFile(STATE_DIR, basename(PREV_FILE), JSON.stringify({
       ts: now,
