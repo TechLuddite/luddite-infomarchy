@@ -193,31 +193,321 @@ function take(list: unknown, n: number): any[] {
   return Array.isArray(list) ? list.slice(0, n) : [];
 }
 
-export function renderPage(snap: any, refreshPath: string): string {
+const PROVIDER_COLORS: Record<string, string> = {
+  claude: "#e5c07b",
+  codex: "#56b6c2",
+  grok: "#c678dd",
+  "grok-bot": "#c678dd",
+  gemini: "#61afef",
+  hermes: "#98c379",
+  ollama: "#98c379",
+  opencode: "#61afef",
+  pi: "#98c379",
+  aider: "#e5c07b",
+  copilot: "#c678dd",
+};
+
+export function providerColorHex(provider: string): string {
+  return PROVIDER_COLORS[String(provider || "").toLowerCase()] || "#abb2bf";
+}
+
+export function fmtTokens(n: unknown): string {
+  const v = Number(n || 0);
+  if (!Number.isFinite(v) || v < 0) return "0";
+  if (v >= 1e9) return (v / 1e9).toFixed(1) + "B";
+  if (v >= 1e6) return (v / 1e6).toFixed(1) + "M";
+  if (v >= 1e3) return (v / 1e3).toFixed(0) + "K";
+  return String(Math.round(v));
+}
+
+export function fmtMoney(n: unknown): string {
+  const v = Number(n || 0);
+  if (!Number.isFinite(v) || v < 0) return "$0.00";
+  if (v >= 1000) return "$" + (v / 1000).toFixed(1) + "k";
+  if (v >= 100) return "$" + v.toFixed(0);
+  return "$" + v.toFixed(2);
+}
+
+export function fmtUntil(iso: string, now = Date.now()): string {
+  const ts = Date.parse(iso);
+  if (!Number.isFinite(ts)) return "";
+  const s = Math.max(0, (ts - now) / 1000);
+  if (s < 60) return "now";
+  if (s < 3600) return Math.floor(s / 60) + "m";
+  if (s < 86400) return Math.floor(s / 3600) + "h " + Math.floor(s % 3600 / 60) + "m";
+  return Math.floor(s / 86400) + "d " + Math.floor(s % 86400 / 3600) + "h";
+}
+
+export function fmtBytes(n: unknown): string {
+  let v = Number(n || 0);
+  if (!Number.isFinite(v) || v < 0) return "0B";
+  const units = ["B", "K", "M", "G", "T"];
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return (i === 0 ? v.toFixed(0) : v.toFixed(v >= 100 ? 0 : 1)) + units[i];
+}
+
+export function fmtRate(n: unknown): string {
+  if (n === null || n === undefined || n === "") return "—";
+  let v = Number(n) * 8;
+  if (!Number.isFinite(v) || v < 0) return "—";
+  const units = ["b", "Kb", "Mb", "Gb"];
+  let i = 0;
+  while (v >= 1000 && i < units.length - 1) { v /= 1000; i++; }
+  return (v >= 100 ? v.toFixed(0) : v.toFixed(1)) + units[i] + "/s";
+}
+
+export function fmtPct(v: unknown): string {
+  if (v === null || v === undefined || v === "") return "—";
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return Math.round(n) + "%";
+}
+
+export function fmtDur(sec: unknown): string {
+  const s = Math.max(0, Math.floor(Number(sec || 0)));
+  if (!Number.isFinite(s)) return "";
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+  if (d > 0) return d + "d " + h + "h";
+  if (h > 0) return h + "h " + m + "m";
+  return m + "m";
+}
+
+export function displayMount(path: unknown): string {
+  return String(path || "").replace(/^\/home\/[^/]+/, "~").slice(0, 24);
+}
+
+export function wifiLabel(net: any): string {
+  const n = net && typeof net === "object" ? net : {};
+  if (!n.wireless) return ("NET " + String(n.dev || "—")).slice(0, 20);
+  return "WIFI";
+}
+
+export function newNonce(): string {
+  return randomBytes(16).toString("hex");
+}
+
+export function contentSecurityPolicy(nonce = ""): string {
+  const n = /^[0-9a-f]{32}$/.test(nonce) ? nonce : "";
+  const extra = n ? ` script-src 'nonce-${n}'; connect-src 'self';` : "";
+  return `default-src 'none'; style-src 'unsafe-inline';${extra} img-src 'none'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'`;
+}
+
+const BLUE = "#61afef";
+const GREEN = "#98c379";
+const YELLOW = "#e5c07b";
+const RED = "#e06c75";
+const LIVE_SCRIPT = '(function(){function on(){try{return sessionStorage.getItem("im-privacy")!=="0"}catch(e){return true}}function apply(){var p=on();document.body.classList.toggle("privacy",p);var b=document.getElementById("privacy");if(b){b.textContent=p?"PRIVACY ON":"PRIVACY";b.classList.toggle("on",p)}}document.addEventListener("click",function(e){var t=e.target;if(!t||t.id!=="privacy")return;try{sessionStorage.setItem("im-privacy",on()?"0":"1")}catch(x){}apply()});apply();var busy=0;function g(){if(busy)return;busy=1;fetch(location.pathname,{cache:"no-store",credentials:"omit"}).then(function(r){return r.ok?r.text():Promise.reject()}).then(function(h){var d=new DOMParser().parseFromString(h,"text/html");var n=d.getElementById("view"),c=document.getElementById("view");if(!n||!c)return;var y=scrollY;c.replaceWith(document.importNode(n,true));scrollTo(0,y);apply()}).catch(function(){}).then(function(){busy=0})}setInterval(g,5000)})();';
+
+function renderBar(label: string, value: string, fraction: number, fill: string, rawLabel = false): string {
+  const pct = Math.max(0, Math.min(1, Number(fraction) || 0));
+  const width = Math.round(pct * 1000) / 10;
+  const color = /^#[0-9a-fA-F]{6}$/.test(fill) ? fill : "#abb2bf";
+  const shown = rawLabel ? label : escapeHtml(label, 32);
+  return `<div class="meter"><div class="meter-row"><span>${shown}</span><span>${escapeHtml(value, 48)}</span></div><div class="track"><div class="fill" style="width:${width}%;background:${color}"></div></div></div>`;
+}
+
+function usageKeysOf(usage: any): string[] {
+  return Object.keys(usage || {}).filter(key => usage[key] && usage[key].ready !== false).slice(0, 8);
+}
+
+export function usageSeriesOf(usage: any, metric: "tokens" | "value"): { provider: string; points: number[] }[] {
+  const out: { provider: string; points: number[] }[] = [];
+  for (const key of usageKeysOf(usage)) {
+    const row = usage[key] || {};
+    const daily = Array.isArray(row.dailyTokens) ? row.dailyTokens.map((x: unknown) => Number(x) || 0) : [];
+    if (!daily.some((x: number) => x > 0)) continue;
+    if (metric === "tokens") {
+      out.push({ provider: key, points: daily.slice(0, 7) });
+      continue;
+    }
+    const totals = (row.value || {}).totals || {};
+    const tokens = Number(totals.inputTokens || 0) + Number(totals.outputTokens || 0) + Number(totals.cacheReadInputTokens || 0) + Number(totals.cacheCreationInputTokens || 0);
+    const lifetime = Number((row.value || {}).lifetime);
+    if (!Number.isFinite(lifetime) || tokens <= 0) continue;
+    const rate = lifetime / tokens;
+    out.push({ provider: key, points: daily.slice(0, 7).map((x: number) => x * rate) });
+  }
+  return out;
+}
+
+export function renderTrendSvg(series: { provider: string; points: number[] }[], days: string[], fmt: (n: number) => string): string {
+  if (!series.length) return "";
+  const n = series[0].points.length;
+  if (n < 1) return "";
+  let max = 1;
+  for (const row of series) for (const p of row.points) max = Math.max(max, p);
+  const w = 320, h = 88, left = 44, top = 10, bottom = 72, plot = w - left - 6;
+  const xAt = (i: number) => left + (n === 1 ? plot / 2 : i * plot / (n - 1));
+  const yAt = (v: number) => bottom - (v / max) * (bottom - top);
+  const grid: string[] = [];
+  for (let t = 0; t < 3; t++) {
+    const y = top + (bottom - top) * t / 2;
+    grid.push(`<line x1="${left}" y1="${y.toFixed(1)}" x2="${w}" y2="${y.toFixed(1)}" stroke="#444" stroke-width="1"/>`);
+    grid.push(`<text x="2" y="${(y + 3).toFixed(1)}" fill="#888" font-size="9" font-family="ui-monospace,monospace">${escapeHtml(fmt(max * (1 - t / 2)), 12)}</text>`);
+  }
+  const lines: string[] = [];
+  for (const row of series) {
+    const color = providerColorHex(row.provider);
+    const pts = row.points.map((v, i) => `${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`).join(" ");
+    const area = `${xAt(0).toFixed(1)},${bottom} ${pts} ${xAt(n - 1).toFixed(1)},${bottom}`;
+    lines.push(`<polygon points="${area}" fill="${color}" fill-opacity="0.08"/>`);
+    lines.push(`<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2"/>`);
+  }
+  const labels: string[] = [];
+  if (n > 1) {
+    const first = String(days[0] || "").slice(5);
+    const last = String(days[n - 1] || "").slice(5);
+    labels.push(`<text x="${left}" y="84" fill="#888" font-size="9" font-family="ui-monospace,monospace">${escapeHtml(first, 8)}</text>`);
+    labels.push(`<text x="${w - 2}" y="84" fill="#888" font-size="9" font-family="ui-monospace,monospace" text-anchor="end">${escapeHtml(last, 8)}</text>`);
+  }
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" aria-hidden="true">${grid.join("")}${lines.join("")}${labels.join("")}</svg>`;
+}
+
+function renderMeter(limit: any, tone: string): string {
+  const pct = Math.max(0, Math.min(1, Number(limit.percent) || 0));
+  const width = Math.round(pct * 1000) / 10;
+  const until = limit.resetsAt ? "  ↻ " + fmtUntil(String(limit.resetsAt)) : "";
+  const fill = pct > 0.85 ? "#e06c75" : pct > 0.6 ? "#e5c07b" : tone;
+  return `<div class="meter"><div class="meter-row"><span>${escapeHtml(limit.label || limit.title, 32)}</span><span>${escapeHtml(Math.round(pct * 100) + "%" + until, 40)}</span></div><div class="track"><div class="fill" style="width:${width}%;background:${fill}"></div></div></div>`;
+}
+
+export function renderUsageSection(snap: any): string {
   const ai = snap.ai || {};
-  const machine = snap.machine || {};
+  const usage = ai.usage && typeof ai.usage === "object" ? ai.usage : {};
+  const keys = usageKeysOf(usage);
+  const parts: string[] = [];
+  parts.push(`<h2>USAGE &amp; LIMITS</h2>`);
+  if (!keys.length) {
+    parts.push(`<div class="card meta">no usage cache yet</div>`);
+    return parts.join("");
+  }
+  const chips = keys.map(key => `<span class="chip" style="color:${providerColorHex(key)};border-color:${providerColorHex(key)}">${escapeHtml(usage[key].name || key, 24)}</span>`).join("");
+  parts.push(`<div class="chips">${chips}</div>`);
+  for (const key of keys) {
+    const row = usage[key] || {};
+    const tone = providerColorHex(key);
+    const v = row.value || {}, t = v.totals || {};
+    const all = Number(t.inputTokens || 0) + Number(t.outputTokens || 0) + Number(t.cacheReadInputTokens || 0) + Number(t.cacheCreationInputTokens || 0);
+    const life: string[] = [];
+    if (all > 0) life.push("lifetime " + fmtTokens(all) + " tok");
+    if (all > 0) life.push(Math.round(100 * Number(t.cacheReadInputTokens || 0) / all) + "% cache reads");
+    if (v.lifetime !== null && v.lifetime !== undefined) life.push("≈" + fmtMoney(v.lifetime) + " est.");
+    else if (all > 0) life.push("unpriced");
+    if (row.totalSessions) life.push(row.totalSessions + " sessions");
+    const todayValue = v.today !== null && v.today !== undefined ? " · ≈" + fmtMoney(v.today) : "";
+    const limits = take(row.limits, 8).map((limit: any) => renderMeter(limit, tone)).join("");
+    const status = row.authHelpText || row.usageStatusText;
+    parts.push(`<div class="card" style="border-color:${tone}44"><div class="usage-head"><span class="tag" style="color:${tone}">${escapeHtml(row.name || key, 40)}</span> <span class="meta">${escapeHtml(row.tierLabel, 32)}</span></div><div class="meta">today ${escapeHtml(row.todayPrompts || 0, 12)}p · ${escapeHtml(fmtTokens(row.todayTotalTokens), 16)} tok${escapeHtml(todayValue, 24)}</div>${status ? `<div class="meta">${escapeHtml(status, 200)}</div>` : ""}${life.length ? `<div class="meta">${escapeHtml(life.join(" · "), 220)}</div>` : ""}${limits}</div>`);
+  }
+  return parts.join("");
+}
+
+export function renderMachineSection(snap: any): string {
+  const machine = snap && snap.machine && typeof snap.machine === "object" ? snap.machine : {};
+  const cpu = machine.cpu && typeof machine.cpu === "object" ? machine.cpu : {};
+  const mem = machine.mem && typeof machine.mem === "object" ? machine.mem : {};
+  const net = machine.net && typeof machine.net === "object" ? machine.net : {};
+  const ping = machine.ping && typeof machine.ping === "object" ? machine.ping : {};
+  const bat = machine.battery && typeof machine.battery === "object" ? machine.battery : null;
+  const disks = take(machine.disks, 2);
+  const cpuPct = Number(cpu.pct);
+  const ramPct = Number(mem.pct);
+  const load = Array.isArray(cpu.load) ? Number(cpu.load[0]) : NaN;
+  const temp = Number(machine.temp);
+  const cpuBits = [fmtPct(cpu.pct)];
+  if (Number.isFinite(load)) cpuBits.push(load.toFixed(2));
+  if (Number.isFinite(temp)) cpuBits.push(Math.round(temp) + "°");
+  const ramBits: string[] = [];
+  if (mem.used && mem.total) ramBits.push(fmtBytes(mem.used) + "/" + fmtBytes(mem.total));
+  ramBits.push(fmtPct(mem.pct));
+  const parts: string[] = [];
+  parts.push(`<h2>MACHINE</h2><div class="card"><div class="grid">`);
+  parts.push(renderBar("CPU", cpuBits.join(" · "), (Number.isFinite(cpuPct) ? cpuPct : 0) / 100, cpuPct > 85 ? RED : BLUE));
+  parts.push(renderBar("RAM", ramBits.join(" · "), (Number.isFinite(ramPct) ? ramPct : 0) / 100, ramPct > 90 ? RED : GREEN));
+  for (const disk of disks) {
+    const d = disk && typeof disk === "object" ? disk : {};
+    const pct = Number(d.pct);
+    const rawMount = String(d.mount || "/").slice(0, 24);
+    const hiddenMount = displayMount(d.mount || "/") || "/";
+    const labelHtml = hiddenMount === rawMount
+      ? escapeHtml("DISK " + rawMount, 32)
+      : `<span class="shut">${escapeHtml("DISK " + hiddenMount, 32)}</span><span class="open">${escapeHtml("DISK " + rawMount, 32)}</span>`;
+    const value = (d.used && d.size ? fmtBytes(d.used) + "/" + fmtBytes(d.size) + " · " : "") + fmtPct(d.pct);
+    parts.push(renderBar(labelHtml, value, (Number.isFinite(pct) ? pct : 0) / 100, pct > 90 ? RED : YELLOW, true));
+  }
+  const hasSignal = net.signal !== null && net.signal !== undefined && net.signal !== "";
+  const signal = hasSignal ? Number(net.signal) : NaN;
+  const wifiFrac = Number.isFinite(signal) ? Math.max(0, Math.min(1, (signal + 90) / 60)) : (net.dev ? 1 : 0);
+  const wifiVal = Number.isFinite(signal) ? signal + " dBm" : (net.dev ? "up" : "—");
+  const wifiFill = Number.isFinite(signal) && signal < -75 ? YELLOW : GREEN;
+  const ssid = String(net.ssid || "").slice(0, 32);
+  const wifiShut = wifiLabel(net);
+  const wifiOpen = net.wireless ? ("WIFI" + (ssid ? " " + ssid : "")) : wifiShut;
+  const wifiLabelHtml = wifiShut === wifiOpen
+    ? wifiShut
+    : `<span class="shut">${escapeHtml(wifiShut, 20)}</span><span class="open">${escapeHtml(wifiOpen, 40)}</span>`;
+  parts.push(renderBar(wifiLabelHtml, wifiVal, wifiFrac, wifiFill, true));
+  const pingOk = !!ping.ok;
+  const pingMs = Number(ping.ms);
+  const pingText = pingOk && Number.isFinite(pingMs) ? Math.round(pingMs) + " ms" : "timeout";
+  const pingClass = !pingOk ? "bad" : pingMs > 80 ? "warn" : "ok";
+  const batText = bat ? "BAT " + fmtPct(bat.pct) + " " + String(bat.status || "").toLowerCase() : "";
+  const batHot = !!(bat && Number(bat.pct) < 20 && String(bat.status || "") !== "Charging");
+  const up = machine.uptime ? "up " + fmtDur(machine.uptime) : "";
+  const wan = String(machine.externalIp || "").slice(0, 40);
+  const lan = String(net.addr || "").slice(0, 40);
+  const who = [snap.user, snap.host].filter(Boolean).join("@");
+  const openBits = [up, who, wan ? "WAN " + wan : "", lan ? "LAN " + lan : ""].filter(Boolean);
+  parts.push(`<div class="span foot"><span class="ok">${escapeHtml("↓" + fmtRate(net.rxRate) + " ↑" + fmtRate(net.txRate), 40)}</span><span class="${pingClass}">${escapeHtml("⇄ " + pingText, 24)}</span>${batText ? `<span class="${batHot ? "bad" : "meta"}">${escapeHtml(batText, 40)}</span>` : ""}</div>`);
+  parts.push(`<div class="span meta"><span class="shut">${escapeHtml([up, "WAN/LAN/SSID hidden"].filter(Boolean).join(" · "), 80)}</span><span class="open">${escapeHtml(openBits.join(" · ") || "up", 120)}</span></div>`);
+  parts.push(`</div></div>`);
+  return parts.join("");
+}
+
+export function renderPage(snap: any, refreshPath: string, nonce = ""): string {
+  const ai = snap.ai || {};
   const sessions = take(ai.sessions, 12);
   const attention = take(ai.attention, 8);
-  const recent = take(ai.recent, 40);
-  const usage = ai.usage && typeof ai.usage === "object" ? ai.usage : {};
-  const mem = machine.mem || {};
-  const cpu = machine.cpu || {};
+  const n = /^[0-9a-f]{32}$/.test(nonce) ? nonce : "";
   const rows: string[] = [];
   rows.push(`<!doctype html><html lang="en"><head><meta charset="utf-8">`);
   rows.push(`<meta name="viewport" content="width=device-width,initial-scale=1">`);
-  rows.push(`<meta http-equiv="refresh" content="5;url=${escapeHtml(refreshPath, 200)}">`);
   rows.push(`<title>Infomarchy</title><style>
 :root { color-scheme: dark; }
 body { margin: 0; font: 15px/1.4 ui-sans-serif, system-ui, sans-serif; background: #111; color: #ddd; }
 main { max-width: 42rem; margin: 0 auto; padding: 12px; }
-h1 { font-size: 1.1rem; margin: 0 0 8px; }
+h1 { font-size: 1.1rem; margin: 0 0 8px; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+h1 .tools { display: flex; gap: 12px; align-items: baseline; }
 h2 { font-size: 0.8rem; letter-spacing: 0.08em; color: #8ad; margin: 18px 0 8px; }
 .card { background: #1b1b1b; border: 1px solid #333; border-radius: 10px; padding: 10px 12px; margin: 0 0 8px; }
 .meta { color: #888; font-size: 0.8rem; }
 .prompt { color: #eee; }
-.tag { display: inline-block; font-size: 0.7rem; letter-spacing: 0.04em; color: #8ad; }
-</style></head><body><main>`);
-  rows.push(`<h1>Infomarchy</h1><p class="meta">read-only · identity hidden · refreshes every 5s</p>`);
+.tag { display: inline-block; font-size: 0.75rem; letter-spacing: 0.04em; font-weight: 700; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+.chip { font: 11px ui-monospace, monospace; border: 1px solid; border-radius: 6px; padding: 2px 7px; }
+.chart { padding: 8px 8px 4px; }
+.chart-label { font: 11px ui-monospace, monospace; color: #8ad; letter-spacing: 0.06em; margin-bottom: 4px; }
+.usage-head { display: flex; gap: 8px; align-items: baseline; }
+.meter { margin-top: 8px; }
+.meter-row { display: flex; justify-content: space-between; font: 12px ui-monospace, monospace; color: #ccc; }
+.track { height: 7px; background: #2a2a2a; border-radius: 4px; margin-top: 4px; overflow: hidden; }
+.fill { height: 100%; border-radius: 4px; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+.grid .meter { margin-top: 0; }
+.span { grid-column: 1 / -1; }
+.foot { display: flex; flex-wrap: wrap; gap: 10px 14px; font: 12px ui-monospace, monospace; }
+.ok { color: #98c379; }
+.warn { color: #e5c07b; }
+.bad { color: #e06c75; }
+a.refresh, button.privacy-btn { color: #8ad; font-size: 0.8rem; font-weight: 600; letter-spacing: 0.06em; text-decoration: none; background: none; border: 0; padding: 0; font-family: inherit; cursor: pointer; }
+button.privacy-btn.on { color: #e5c07b; }
+body.privacy .open { display: none; }
+body:not(.privacy) .shut { display: none; }
+@media (max-width: 520px) { .grid { grid-template-columns: 1fr; } }
+</style></head><body class="privacy"><main id="view">`);
+  rows.push(`<h1>Infomarchy <span class="tools"><button type="button" id="privacy" class="privacy-btn on">PRIVACY ON</button> <a class="refresh" href="${escapeHtml(refreshPath, 200)}">Refresh</a></span></h1><p class="meta">read-only</p>`);
+  rows.push(renderUsageSection(snap));
 
   rows.push(`<h2>NEXT ACTIONS</h2>`);
   if (!attention.length) rows.push(`<div class="card meta">none</div>`);
@@ -231,24 +521,10 @@ h2 { font-size: 0.8rem; letter-spacing: 0.08em; color: #8ad; margin: 18px 0 8px;
     rows.push(`<div class="card"><span class="tag">${escapeHtml(item.provider, 32)}</span> ${escapeHtml(item.project || item.name, 80)}<div class="prompt">${escapeHtml(item.topic || "", 240)}</div><div class="meta">${escapeHtml(item.git?.branch ? "git " + item.git.branch : "", 80)}</div></div>`);
   }
 
-  rows.push(`<h2>RECENT</h2>`);
-  if (!recent.length) rows.push(`<div class="card meta">none</div>`);
-  for (const item of recent) {
-    rows.push(`<div class="card"><span class="tag">${escapeHtml(item.provider, 32)}</span> ${escapeHtml(item.project, 80)}<div class="prompt">${escapeHtml(item.text, 280)}</div></div>`);
-  }
-
-  const usageKeys = Object.keys(usage).slice(0, 8);
-  rows.push(`<h2>USAGE</h2>`);
-  if (!usageKeys.length) rows.push(`<div class="card meta">none</div>`);
-  for (const key of usageKeys) {
-    const row = usage[key] || {};
-    rows.push(`<div class="card"><span class="tag">${escapeHtml(row.name || key, 40)}</span> <span class="meta">${escapeHtml(row.tierLabel, 40)} · ${escapeHtml(row.todayPrompts, 12)} prompts today</span></div>`);
-  }
-
-  const cpuPct = cpu.pct == null ? "—" : Math.round(Number(cpu.pct)) + "%";
-  const ram = mem.used && mem.total ? Math.round(Number(mem.pct)) + "%" : "—";
-  rows.push(`<h2>MACHINE</h2><div class="card">CPU ${escapeHtml(cpuPct, 16)} · RAM ${escapeHtml(ram, 16)}<div class="meta">WAN/LAN/SSID hidden on the phone view</div></div>`);
-  rows.push(`</main></body></html>`);
+  rows.push(renderMachineSection(snap));
+  rows.push(`</main>`);
+  if (n) rows.push(`<script nonce="${n}">${LIVE_SCRIPT}</script>`);
+  rows.push(`</body></html>`);
   return rows.join("");
 }
 
@@ -258,11 +534,11 @@ export const SECURITY_HEADERS: Record<string, string> = {
   "Referrer-Policy": "no-referrer",
   "Cache-Control": "no-store",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
-  "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src 'none'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'",
+  "Content-Security-Policy": contentSecurityPolicy(),
 };
 
-function reply(status: number, body: string, type = "text/html; charset=utf-8"): { status: number; headers: Record<string, string>; body: string } {
-  return { status, headers: { ...SECURITY_HEADERS, "Content-Type": type }, body };
+function reply(status: number, body: string, type = "text/html; charset=utf-8", nonce = ""): { status: number; headers: Record<string, string>; body: string } {
+  return { status, headers: { ...SECURITY_HEADERS, "Content-Type": type, "Content-Security-Policy": contentSecurityPolicy(nonce) }, body };
 }
 
 export function hostAllowed(hostHeader: string, allowedHosts: string[], port: number): boolean {
@@ -319,13 +595,14 @@ export function handleRequest(input: {
   const masked = maskSnapshot(input.snapshot);
   const pagePath = `/t/${input.token}/`;
   if (match[2] === "snapshot.json") {
-    const body = JSON.stringify({ ts: masked.ts || 0, ai: { sessions: take(masked.ai?.sessions, 12), attention: take(masked.ai?.attention, 8), recent: take(masked.ai?.recent, 40) } });
+    const body = JSON.stringify({ ts: masked.ts || 0, ai: { sessions: take(masked.ai?.sessions, 12), attention: take(masked.ai?.attention, 8), usage: masked.ai?.usage || {} } });
     const result = reply(200, body, "application/json; charset=utf-8");
     if (method === "HEAD") result.body = "";
     return result;
   }
-  const html = renderPage(masked, pagePath);
-  const result = reply(200, html);
+  const nonce = newNonce();
+  const html = renderPage(input.snapshot, pagePath, nonce);
+  const result = reply(200, html, "text/html; charset=utf-8", nonce);
   if (method === "HEAD") result.body = "";
   return result;
 }
@@ -380,7 +657,7 @@ async function serve() {
   const bind = advertisedBind(localPrivateIPv4());
   const cidrs = parseCidrList(config.extraCidrs);
   const allowedHosts = [...localPrivateIPv4(), "127.0.0.1"];
-  const requestedPort = validPort(process.env.INFOMARCHY_WEB_PORT) || config.port;
+  const requestedPort = process.env.INFOMARCHY_WEB_PORT === "0" ? 0 : (validPort(process.env.INFOMARCHY_WEB_PORT) || config.port);
   const server = Bun.serve({
     hostname: "0.0.0.0",
     port: requestedPort,

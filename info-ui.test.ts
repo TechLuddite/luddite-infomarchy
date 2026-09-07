@@ -128,6 +128,7 @@ describe("overlay shows the real desktop", () => {
     expect(overlay).toContain("source: Util.fileUrl(root.background)");
     expect(overlay).toContain("opacity: dashboardSettings.ready && dashboardSettings.dashboardVisible ? root.wallpaperOpacity : 1.0");
     expect(overlay).toContain("visible: dashboardSettings.ready && dashboardSettings.dashboardVisible\n          onNavigated: root.close()");
+    expect(overlay).toContain("toggleDashboardVisible()");
     expect(overlay).not.toContain("Util.alpha(infoModel.themeBackground, 0.88)");
   });
 });
@@ -204,6 +205,10 @@ describe("stream privacy mode", () => {
     expect(service).toContain("function toggleWeb(): void { dashboardSettings.toggleWebEnabled() }");
     expect(view).toContain('text: view.settings.webEnabled ? (view.settings.webUrl ? "PHONE ON" : "PHONE …") : "PHONE"');
     expect(view).toContain('text: "COPY PHONE URL"');
+    expect(settings).toContain('command: ["bun", root.webServerPath, "url"]');
+    expect(settings).toContain("function refreshWebUrl()");
+    expect(view).toContain("visible: view.settings.webEnabled && !!view.settings.webUrl");
+    expect(view).not.toContain("visible: view.keyboardAvailable && view.settings.webEnabled && !!view.settings.webUrl");
     expect(view).toContain("function wanText()");
     expect(view).toContain("function wifiLabel(net)");
     expect(view).toContain("function machineHint()");

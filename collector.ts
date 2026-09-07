@@ -2056,8 +2056,10 @@ export function normalizeUsage(j: any, stamp = now): any {
     // the QML re-derive it (the copy there had drifted out of test coverage).
     limits: (Array.isArray(j.limits) ? j.limits : []).slice(0, 16).map((limit: any) => normalizeUsageLimit(limit, stamp)).filter(Boolean),
     todayPrompts: count(j.todayPrompts), todaySessions: count(j.todaySessions), todayTotalTokens: count(j.todayTotalTokens),
-    totalPrompts: count(j.totalPrompts), totalSessions: count(j.totalSessions), updatedAt: count(j.updatedAt),
+    totalPrompts: count(j.totalPrompts), totalSessions: count(j.totalSessions),
+    updatedAt: typeof j.updatedAt === "string" ? uiString(j.updatedAt, 40) : count(j.updatedAt),
     modelUsage, recentDays, usageStatusText: uiString(j.usageStatusText, 160),
+    authHelpText: uiString(j.authHelpText, 200),
     // Seven aligned daily token totals (oldest first) for the trend chart, and
     // API-value estimates from the attributed price table.
     dailyTokens: alignDailyTokens(j.recentDays, dayKeys),
@@ -2070,6 +2072,143 @@ export function normalizeUsage(j: any, stamp = now): any {
   };
 }
 const LOCAL_USAGE_STATUS = "local session totals, not subscription limits";
+const GROK_BILLING_FILE = "grok-billing.json";
+const GROK_BILLING_URL = "https://cli-chat-proxy.grok.com/v1/billing?format=credits";
+const GROK_BILLING_REFRESH_MS = 15 * 60 * 1000;
+const GROK_PRODUCT_LABELS: Record<string, string> = {
+  GrokBuild: "BUILD", PRODUCT_GROK_BUILD: "BUILD",
+  GrokVoice: "VOICE", PRODUCT_GROK_VOICE: "VOICE",
+  GrokChat: "CHAT", PRODUCT_GROK_CHAT: "CHAT",
+  GrokImagine: "IMAGINE", PRODUCT_GROK_IMAGINE: "IMAGINE",
+};
+export function parseGrokCreditsConfig(value: any): { percent: number; resetsAt: string; products: { label: string; percent: number }[] } | null {
+  if (!value || typeof value !== "object") return null;
+  const cfg = value.config && typeof value.config === "object" ? value.config : value;
+  const raw = Number(cfg.creditUsagePercent);
+  if (!Number.isFinite(raw) || raw < 0) return null;
+  const percent = Math.max(0, Math.min(1, raw / 100));
+  const period = cfg.currentPeriod && typeof cfg.currentPeriod === "object" ? cfg.currentPeriod : {};
+  const resetsAt = uiString(period.end || cfg.billingPeriodEnd, 40);
+  const products: { label: string; percent: number }[] = [];
+  const rows = Array.isArray(cfg.productUsage) ? cfg.productUsage : [];
+  for (const row of rows.slice(0, 4)) {
+    if (!row || typeof row !== "object") continue;
+    const p = Number(row.usagePercent);
+    if (!Number.isFinite(p) || p < 0) continue;
+    const key = uiString(row.product, 32);
+    const label = GROK_PRODUCT_LABELS[key] || key.replace(/^Grok/i, "").toUpperCase().slice(0, 12);
+    if (label) products.push({ label, percent: Math.max(0, Math.min(1, p / 100)) });
+  }
+  return { percent, resetsAt, products };
+}
+export function grokBillingFromUnifiedLog(text: string): { percent: number; resetsAt: string; products: { label: string; percent: number }[] } | null {
+  let latest: any = null;
+  for (const line of String(text || "").split("\n")) {
+    if (!line.includes("billing: fetched credits config")) continue;
+    const parsed = parseJsonBounded(line, 4096, 8);
+    if (parsed && typeof parsed === "object" && parsed.msg === "billing: fetched credits config") latest = parsed;
+  }
+  const ctx = latest && latest.ctx && typeof latest.ctx === "object" ? latest.ctx : null;
+  return ctx ? parseGrokCreditsConfig(ctx) : null;
+}
+function grokBillingMeters(parsed: { percent: number; resetsAt: string; products: { label: string; percent: number }[] } | null): any[] {
+  if (!parsed) return [];
+  const out: any[] = [{ label: "WEEKLY", title: "WEEKLY", percent: parsed.percent, resetsAt: parsed.resetsAt }];
+  for (const row of parsed.products.slice(0, 3)) {
+    if (row.label === "WEEKLY") continue;
+    out.push({ label: row.label, title: row.label, percent: row.percent, resetsAt: parsed.resetsAt });
+  }
+  return out;
+}
+function grokCliAccessToken(): string {
+  const path = join(process.env.GROK_HOME || join(HOME, ".grok"), "auth.json");
+  let fd = -1;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const st = fstatSync(fd);
+    const uid = typeof process.getuid === "function" ? process.getuid() : -1;
+    if (!st.isFile() || st.nlink !== 1 || (uid >= 0 && st.uid !== uid) || (st.mode & 0o077) || st.size > 16_384) return "";
+    const buf = Buffer.allocUnsafe(st.size);
+    const n = readSync(fd, buf, 0, buf.byteLength, 0);
+    const parsed = parseJsonBounded(buf.subarray(0, n).toString("utf8"), 16_384, 8);
+    if (!parsed || typeof parsed !== "object") return "";
+    for (const rec of Object.values(parsed)) {
+      if (!rec || typeof rec !== "object") continue;
+      const key = String((rec as any).key || "");
+      if (key.length < 20 || key.length > 4000) continue;
+      const exp = Date.parse(String((rec as any).expires_at || ""));
+      if (Number.isFinite(exp) && exp < now - 30_000) continue;
+      return key;
+    }
+  } catch { return ""; }
+  finally { if (fd >= 0) try { closeSync(fd); } catch {} }
+  return "";
+}
+async function fetchGrokBilling(): Promise<any | null> {
+  const token = grokCliAccessToken();
+  if (!token) return null;
+  try {
+    const r = await fetch(GROK_BILLING_URL, {
+      redirect: "error",
+      signal: AbortSignal.timeout(4000),
+      headers: {
+        Authorization: "Bearer " + token,
+        "X-XAI-Token-Auth": "xai-grok-cli",
+        Accept: "application/json",
+        "user-agent": "xai-grok-cli",
+      },
+    });
+    if (!r.ok) return null;
+    const text = await boundedStream(r.body, 16 * 1024);
+    if (text === null) return null;
+    const parsed = parseJsonBounded(text, 16 * 1024, 8);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch { return null; }
+}
+async function refreshGrokBilling() {
+  try {
+  if (instanceId() === "overlay") return;
+  if (process.env.INFOMARCHY_SKIP_GROK_BILLING === "1") return;
+  const path = join(STATE_DIR, GROK_BILLING_FILE);
+  const existing = parseJsonBounded(readRegularFileLimited(path, 4096) || "", 4096, 8);
+  const attemptedAt = Number(existing && existing.attemptedAt || existing && existing.fetchedAt || 0);
+  if (attemptedAt && now - attemptedAt < GROK_BILLING_REFRESH_MS && Array.isArray(existing?.limits) && existing.limits.length) return;
+  const live = parseGrokCreditsConfig(await fetchGrokBilling());
+  const fromLog = live ? null : grokBillingFromUnifiedLog(readHistoryTail(join(process.env.GROK_HOME || join(HOME, ".grok"), "logs", "unified.jsonl"), 64 * 1024) || "");
+  const parsed = live || fromLog;
+  const next = parsed
+    ? { fetchedAt: now, attemptedAt: now, source: live ? "live" : "log", percent: parsed.percent, resetsAt: parsed.resetsAt, products: parsed.products, limits: grokBillingMeters(parsed) }
+    : { ...(existing && typeof existing === "object" ? existing : {}), attemptedAt: now };
+  writePrivateStateFile(STATE_DIR, GROK_BILLING_FILE, JSON.stringify(next) + "\n");
+  } catch {}
+}
+function normalizeLimitRows(rows: unknown, fallbackReset = ""): any[] {
+  const out: any[] = [];
+  if (!Array.isArray(rows)) return out;
+  for (const row of rows.slice(0, 4)) {
+    if (!row || typeof row !== "object") continue;
+    const percent = Number((row as any).percent);
+    const label = uiString((row as any).label ?? (row as any).title, 32);
+    const resetsAt = uiString((row as any).resetsAt, 40) || fallbackReset;
+    if (!label || !Number.isFinite(percent) || percent < 0) continue;
+    out.push({ label, title: label, percent: Math.max(0, Math.min(1, percent)), resetsAt });
+  }
+  return out;
+}
+export function grokObservedLimits(directory = STATE_DIR): any[] {
+  const liveRaw = readRegularFileLimited(join(directory, GROK_BILLING_FILE), 4096);
+  const live = liveRaw ? parseJsonBounded(liveRaw, 4096, 8) : null;
+  const fromLive = normalizeLimitRows(live && live.limits, uiString(live && live.resetsAt, 40));
+  if (fromLive.length) return fromLive;
+  if (directory === STATE_DIR) {
+    const meters = grokBillingMeters(grokBillingFromUnifiedLog(readHistoryTail(join(process.env.GROK_HOME || join(HOME, ".grok"), "logs", "unified.jsonl"), 64 * 1024) || ""));
+    if (meters.length) return meters;
+  }
+  const raw = readRegularFileLimited(join(directory, "grok-limits.json"), 4096);
+  if (!raw) return [];
+  const parsed = parseJsonBounded(raw, 4096, 8);
+  return normalizeLimitRows(parsed && typeof parsed === "object" ? parsed.limits : []);
+}
 const MAX_GROK_USAGE_SESSIONS = 256;
 const MAX_GROK_UPDATE_TAIL = 512 * 1024;
 const MAX_OPENCODE_USAGE_ROWS = 20_000;
@@ -2196,7 +2335,14 @@ function grokLocalUsage(): any | null {
   const identity = files.map(path => {
     try { const state = lstatSync(path); return `${path}:${state.size}:${Math.round(state.mtimeMs)}`; } catch { return path; }
   }).join("|");
-  const hashed = String(Bun.hash(identity));
+  let limitsIdentity = "";
+  for (const name of ["grok-limits.json", GROK_BILLING_FILE]) {
+    try {
+      const limitsState = lstatSync(join(STATE_DIR, name));
+      if (limitsState.isFile()) limitsIdentity += `|${name}:${limitsState.size}:${Math.round(limitsState.mtimeMs)}`;
+    } catch {}
+  }
+  const hashed = String(Bun.hash(identity + "|" + limitsIdentity));
   const cached = prev.grokLocalUsage && prev.grokLocalUsage.identity === hashed ? prev.grokLocalUsage : null;
   if (cached?.record) { currentGrokUsageCache = cached; return cached.record; }
   const modelUsage: Record<string, TokenUsage> = {};
@@ -2220,6 +2366,7 @@ function grokLocalUsage(): any | null {
   if (!sessions.size) return null;
   const dayKeys = heatDays.map(localDayKey);
   const todayTotalTokens = daily.get(today) || 0;
+  const observed = grokObservedLimits();
   const record = localUsageRecord({
     name: "Grok",
     todayPrompts: counts.grok?.today || 0, todaySessions: todaySessions.size, todayTotalTokens,
@@ -2227,6 +2374,11 @@ function grokLocalUsage(): any | null {
     modelUsage, todayTokensByModel,
     recentDays: dayKeys.map(date => ({ date, messageCount: daily.get(date) || 0 })),
   });
+  if (observed.length) {
+    record.limits = observed;
+    record.tierLabel = "weekly";
+    record.usageStatusText = "weekly pool from Grok billing, plus local token totals";
+  }
   currentGrokUsageCache = { identity: hashed, record };
   return record;
 }
@@ -2470,7 +2622,7 @@ async function runCollector() {
   }
   const pids = scanProcs();
   const [cpuS, memS, diskS, netS, pingS, gpuS, sessions, ollama, externalIpS, github] = await Promise.all([
-    Promise.resolve(cpu()), Promise.resolve(mem()), disk(), net(), ping(), gpu(), liveSessions(pids), ollamaState(), externalIp(), githubActivity(),
+    Promise.resolve(cpu()), Promise.resolve(mem()), disk(), net(), ping(), gpu(), liveSessions(pids), ollamaState(), externalIp(), githubActivity(), refreshGrokBilling(),
   ]);
   const claude = claudeHistory(), codex = codexHistory(), grok = grokHistory(), grokBot = grokBotHistory(), opencode = opencodeHistory(), pi = piHistory();
   recent.sort((a, b) => b.ts - a.ts);

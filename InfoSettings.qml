@@ -41,6 +41,7 @@ Item {
   property bool privacyMode: false
   property bool webEnabled: false
   property string webUrl: ""
+  readonly property string webServerPath: Qt.resolvedUrl("web-server.ts").toString().replace(/^file:\/\//, "")
   property var rightOrder: ["usage", "localAi", "machine"]
   property var opsOrder: ["changes", "needs", "projects"]
 
@@ -74,6 +75,8 @@ Item {
       dashboardVisible = parsed && typeof parsed.dashboardVisible === "boolean" ? parsed.dashboardVisible : true
       privacyMode = !!(parsed && parsed.privacyMode === true)
       webEnabled = !!(parsed && parsed.webEnabled === true)
+      if (webEnabled) Qt.callLater(refreshWebUrl)
+      else webUrl = ""
       rightOrder = normalizedRightOrder(parsed ? parsed.rightOrder : null)
       opsOrder = normalizedOpsOrder(parsed ? parsed.opsOrder : null)
     } catch (e) {
@@ -275,9 +278,37 @@ Item {
   function setWebEnabled(enabled) {
     webEnabled = !!enabled
     if (!webEnabled) webUrl = ""
+    else Qt.callLater(refreshWebUrl)
     persist()
   }
   function toggleWebEnabled() { setWebEnabled(!webEnabled) }
+  function refreshWebUrl() {
+    if (!webEnabled) { webUrl = ""; return }
+    webUrlReader.running = false
+    webUrlReader.running = true
+  }
+  Process {
+    id: webUrlReader
+    command: ["bun", root.webServerPath, "url"]
+    stdout: SplitParser {
+      splitMarker: "\n"
+      onRead: function(line) {
+        var raw = String(line || "")
+        if (raw.length > 512) return
+        try {
+          var parsed = JSON.parse(raw)
+          if (parsed && parsed.ok === true && typeof parsed.url === "string" && parsed.url.indexOf("http://") === 0)
+            root.webUrl = parsed.url.slice(0, 256)
+        } catch (e) {}
+      }
+    }
+  }
+  Timer {
+    interval: 400
+    running: root.ready && root.webEnabled && root.webUrl === ""
+    repeat: true
+    onTriggered: root.refreshWebUrl()
+  }
   function rightIndex(id) { var index = rightOrder.indexOf(id); return index < 0 ? 99 : index }
   function moveRight(id, direction) {
     var next = normalizedRightOrder(rightOrder), from = next.indexOf(id), to = adjacentEnabledIndex(next, from, direction, sections)

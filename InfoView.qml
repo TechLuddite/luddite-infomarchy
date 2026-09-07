@@ -824,7 +824,7 @@ Item {
           MouseArea { anchors.fill: parent; enabled: view.interactive; cursorShape: Qt.PointingHandCursor; onClicked: view.settings.toggleWebEnabled() }
         }
         Tag {
-          visible: view.keyboardAvailable && view.settings.webEnabled && !!view.settings.webUrl
+          visible: view.settings.webEnabled && !!view.settings.webUrl
           text: "COPY PHONE URL"
           tone: view.desk.cyan
           MouseArea { anchors.fill: parent; enabled: view.interactive; cursorShape: Qt.PointingHandCursor; onClicked: view.desk.copyText(view.settings.webUrl) }
