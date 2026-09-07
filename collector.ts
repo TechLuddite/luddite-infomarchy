@@ -14,7 +14,7 @@ import { join, basename } from "path";
 import { isIP } from "net";
 import { Database } from "bun:sqlite";
 import { localDayIndex, localDayStarts } from "./history-time";
-import { githubRefreshDue, githubSnapshot, parseGithubStoreText, refreshGithubActivity } from "./github-activity";
+import { githubFetchEnabled, githubRefreshDue, githubSnapshot, parseGithubStoreText, refreshGithubActivity } from "./github-activity";
 import { attentionSignal, parseCommitSummary, parseDiffNumstat, parseGitStatus, projectHealth, repoCollisions, workspaceGroups, resourceDelta, limitForecast } from "./ai-ops";
 import { deriveNotificationEvents } from "./notification-events";
 
@@ -349,7 +349,7 @@ const GITHUB_WRITER = instanceId() !== "overlay";
 async function githubActivity() {
   const ghAvailable = !!Bun.which("gh");
   const store = parseGithubStoreText(read(GITHUB_FILE));
-  if (GITHUB_WRITER && ghAvailable && process.env.INFOMARCHY_SKIP_GITHUB !== "1" && githubRefreshDue(store, now)) {
+  if (GITHUB_WRITER && ghAvailable && githubFetchEnabled() && githubRefreshDue(store, now)) {
     await refreshGithubActivity(store, now, run, ghAvailable);
     try { writePrivateStateFile(STATE_DIR, basename(GITHUB_FILE), JSON.stringify(store)); } catch {}
   }
@@ -396,9 +396,14 @@ export function parseDfRows(out: string): any[] {
 async function disk() {
   return parseDfRows(await run(["df", "-B1", "--output=target,size,used,avail", "/", HOME]));
 }
+export function validNetDevice(value: unknown): string {
+  const dev = String(value || "");
+  return /^[A-Za-z][A-Za-z0-9_.-]{0,14}$/.test(dev) ? dev : "";
+}
 async function net() {
   const route = await run(["ip", "-j", "route", "get", "1.1.1.1"], 800);
-  let dev = ""; try { dev = parseJsonBounded(route, 2048, 12)?.[0]?.dev || ""; } catch {}
+  let raw = ""; try { raw = parseJsonBounded(route, 2048, 12)?.[0]?.dev || ""; } catch {}
+  const dev = validNetDevice(raw);
   if (!dev) return { dev: null };
   const rx = +(read(`/sys/class/net/${dev}/statistics/rx_bytes`) || 0);
   const tx = +(read(`/sys/class/net/${dev}/statistics/tx_bytes`) || 0);
@@ -920,7 +925,7 @@ export function ollamaHostIsLocal(hostValue: unknown): boolean {
   try {
     const url = new URL(raw.startsWith("http://") || raw.startsWith("https://") ? raw : "http://" + raw);
     const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
-    return host === "localhost" || host === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) || host === "0.0.0.0";
+    return host === "localhost" || host === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
   } catch { return false; }
 }
 export function topicRefinementAllowed(env = process.env): boolean {
@@ -1019,7 +1024,7 @@ async function githubCiState(cwd: string): Promise<any> {
     currentCiByRepo[cwd] = previous;
     return previous;
   }
-  if (!Bun.which("gh")) {
+  if (!githubFetchEnabled() || !Bun.which("gh")) {
     const unavailable = previous ? { ...previous, checkedAt: now, stale: true } : { state: "unavailable", checkedAt: now };
     currentCiByRepo[cwd] = unavailable;
     return unavailable;
@@ -1127,10 +1132,10 @@ export function herdrClientPids(commands: Map<number, string[]>): number[] {
   return result.slice(0, 32);
 }
 export function herdrWindowFor(host: SessionHost, clients: HerdrClient[]): any {
-  const withWindow = clients.filter(client => client.window);
-  if (!withWindow.length) return null;
-  const same = host.socket ? withWindow.find(client => client.socket === host.socket) : null;
-  return (same || withWindow[0]).window;
+  const socket = String(host.socket || "");
+  if (!socket) return null;
+  const match = clients.find(client => client.window && client.socket === socket);
+  return match ? match.window : null;
 }
 // `claude agents --json` is Claude Code's own registry of every running
 // session on this machine: pid → session id, kind (interactive | background),
@@ -1410,7 +1415,7 @@ async function liveSessions(pids: number[]) {
 }
 
 // ---------------------------------------------------------------- AI history
-export function safePrompt(value: unknown): string {
+export function redactCredentials(value: unknown): string {
   return String(typeof value === "object" ? "" : (value || ""))
     // PEM blocks, JWTs, authenticated URLs, cloud-style keys and env-style
     // credential assignments. Best-effort by design: it cannot know every
@@ -1423,16 +1428,17 @@ export function safePrompt(value: unknown): string {
     .replace(/\b(xox[abprs]-)[A-Za-z0-9-]{10,}\b/g, "$1[redacted]")
     .replace(/\b([A-Z][A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|APIKEY|PRIVATE_KEY|ACCESS_KEY|AUTH)[A-Z0-9_]*)(\s*=\s*)(?:"[^"]{4,}"|'[^']{4,}'|[^\s"']{4,})/g, "$1$2[redacted]")
     // Common token formats. Keep a small prefix so the redaction is still recognizable.
-    .replace(/\b(sk-(?:proj-|ant-)?|gh[opusr]_)[A-Za-z0-9_-]{12,}\b/gi, "$1[redacted]")
-    .replace(/\b(ntn_)[A-Za-z0-9_-]{12,}\b/gi, "$1[redacted]")
+    .replace(/\b(sk-(?:proj-|ant-)?|sk[_-](?:live|test)_|gh[opusr]_|github_pat_|xai-|glpat-|hf_|npm_|ntn_)[A-Za-z0-9_-]{12,}\b/gi, "$1[redacted]")
     .replace(/\b(authorization\s*:\s*(?:bearer|basic)\s+)[^\s"']+/gi, "$1[redacted]")
     // Credential CLI flags, with either a separate value or --flag=value.
     .replace(/(--(?:api[-_]?key|access[-_]?token|auth[-_]?token|token|password|passwd|secret))\b(\s+|=)(?:"[^"]*"|'[^']*'|[^\s"']+)/gi, "$1$2[redacted]")
     // Credentials pasted as explicit assignments or natural-language "token/key: value" pairs.
     // An explicitly labeled credential is redacted whatever its length —
     // "password: hunter2" is still a password.
-    .replace(/\b(api[_ -]?key|access[_ -]?token|auth[_ -]?token|token|password|passwd|secret)\b(\s*(?:is|=|:)\s*)(?:"[^"]+"|'[^']+'|[^\s"']+)/gi, "$1$2[redacted]")
-    .slice(0, 140);
+    .replace(/\b(api[_ -]?key|access[_ -]?token|auth[_ -]?token|token|password|passwd|secret)\b(\s*(?:is|=|:)\s*)(?:"[^"]+"|'[^']+'|[^\s"']+)/gi, "$1$2[redacted]");
+}
+export function safePrompt(value: unknown): string {
+  return redactCredentials(value).slice(0, 140);
 }
 function heatmapInit() {
   // 7 days x 24 hours, local time, oldest first; each cell {total, byProvider}
@@ -1610,13 +1616,15 @@ export function decodeBase32(value: string): string {
 }
 // Bot replies are markdown; a card is one wrapped line of plain text.
 export function grokBotLine(value: unknown): string {
-  // Redact last, so a credential inside a code fence is still caught, and let
-  // safePrompt apply the same length cap every other prompt on the desk gets.
-  return safePrompt(uiString(value, 480)
+  // Redact before flattening markdown: stripping _ would turn ghp_ into ghp
+  // and leave the secret body. Redact again after flatten for tokens that
+  // were wrapped in markup. Cap last, same 140 as every other prompt.
+  const flattened = redactCredentials(uiString(value, 480))
     .replace(/```[\s\S]*?(?:```|$)/g, " ")
     .replace(/[*_`#>]+/g, "")
     .replace(/\s+/g, " ")
-    .trim());
+    .trim();
+  return redactCredentials(flattened).slice(0, 140);
 }
 export function grokBotRow(row: any): any | null {
   if (!row || typeof row !== "object") return null;

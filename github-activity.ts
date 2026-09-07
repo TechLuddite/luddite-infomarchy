@@ -82,6 +82,10 @@ export function emptyGithubStore(): GithubStore {
   };
 }
 
+export function githubFetchEnabled(env: NodeJS.Dict<string> | NodeJS.ProcessEnv = process.env): boolean {
+  return env.INFOMARCHY_SKIP_GITHUB !== "1";
+}
+
 export function validGithubLogin(value: unknown): string {
   if (typeof value !== "string") return "";
   const login = value.trim();

@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, sy
 import { Database } from "bun:sqlite";
 import { tmpdir } from "os";
 import { join, relative } from "path";
-import { providerOf, titleLooksBusy, cmdIsTurnInhibitor, sessionIdFrom, sessionHostsFromEnvironment, tmuxSocketFromEnvironment, parseTmuxPanes, parseTmuxClients, tmuxPaneForAncestors, linkRecentToLive, inferSessionIdsFromRecent, attachSessionTopics, localSessionSummary, cleanGeneratedSummary, activityCellIndex, parseExternalIpTrace, externalIpCacheFresh, frameSnapshot, parseJsonBounded, readRegularFileLimited, safePrompt, sessionPresentation, writePrivateStateFile, decodeProjectDir, dropPartialFirstLine, readHistoryTail, readRegularFileHead, rolloutSessionId, rolloutCwd, topicCacheHit, topicRetryBlocked, pruneTopicCache, reapStateTempFiles, parseGpuLine, parseDfRows, plausibleTimestamp, normalizeUsage, normalizeUsageLimit, ollamaHostIsLocal, topicRefinementAllowed, terminate, rateForModel, estimateValue, valueSummary, alignDailyTokens, localDayKey, loadPricing, todayValueEstimate, herdrSocketFromEnvironment, herdrClientPids, herdrWindowFor, boomuxClientShellId, boomuxWindowFor, backgroundDaemonKind, parseClaudeAgents, sessionStaleness, STALE_AFTER_MS, decodeBase32, grokBotLine, grokBotRow, grokBotAttention, attachGrokBotRoster } from "./collector.ts";
+import { providerOf, titleLooksBusy, cmdIsTurnInhibitor, sessionIdFrom, sessionHostsFromEnvironment, tmuxSocketFromEnvironment, parseTmuxPanes, parseTmuxClients, tmuxPaneForAncestors, linkRecentToLive, inferSessionIdsFromRecent, attachSessionTopics, localSessionSummary, cleanGeneratedSummary, activityCellIndex, parseExternalIpTrace, externalIpCacheFresh, frameSnapshot, parseJsonBounded, readRegularFileLimited, safePrompt, sessionPresentation, writePrivateStateFile, decodeProjectDir, dropPartialFirstLine, readHistoryTail, readRegularFileHead, rolloutSessionId, rolloutCwd, topicCacheHit, topicRetryBlocked, pruneTopicCache, reapStateTempFiles, parseGpuLine, parseDfRows, plausibleTimestamp, normalizeUsage, normalizeUsageLimit, ollamaHostIsLocal, topicRefinementAllowed, terminate, rateForModel, estimateValue, valueSummary, alignDailyTokens, localDayKey, loadPricing, todayValueEstimate, herdrSocketFromEnvironment, herdrClientPids, herdrWindowFor, boomuxClientShellId, boomuxWindowFor, backgroundDaemonKind, parseClaudeAgents, sessionStaleness, STALE_AFTER_MS, decodeBase32, grokBotLine, grokBotRow, grokBotAttention, attachGrokBotRoster, validNetDevice } from "./collector.ts";
 import { sessionEventId } from "./notification-events.ts";
 
 const testRoot = mkdtempSync(join(tmpdir(), "infomarchy-test-"));
@@ -627,6 +627,14 @@ describe("machine parsers refuse garbage", () => {
     expect(parseDfRows("Mounted on Size Used Avail\n/ x y z\n/ 1 2")).toEqual([]);
     expect(parseDfRows("")).toEqual([]);
   });
+  test("default-route interface names are shape-checked before sysfs reads", () => {
+    expect(validNetDevice("wlan0")).toBe("wlan0");
+    expect(validNetDevice("enp7s0")).toBe("enp7s0");
+    expect(validNetDevice("br-lan")).toBe("br-lan");
+    expect(validNetDevice("../etc")).toBe("");
+    expect(validNetDevice("-c")).toBe("");
+    expect(validNetDevice("a".repeat(16))).toBe("");
+  });
 });
 
 describe("second-reviewer findings (2026-09-04)", () => {
@@ -700,6 +708,7 @@ describe("prompt text never leaves the machine by default", () => {
     expect(ollamaHostIsLocal("localhost:11434")).toBe(true);
     expect(ollamaHostIsLocal("http://[::1]:11434")).toBe(true);
     expect(ollamaHostIsLocal("http://100.68.193.41:11434")).toBe(false);
+    expect(ollamaHostIsLocal("http://0.0.0.0:11434")).toBe(false);
     expect(ollamaHostIsLocal("https://shared.example")).toBe(false);
     expect(ollamaHostIsLocal("not a url at all ::")).toBe(false);
     expect(topicRefinementAllowed({ OLLAMA_HOST: "http://100.68.193.41:11434" } as any)).toBe(false);
@@ -716,6 +725,12 @@ describe("prompt text never leaves the machine by default", () => {
     expect(safePrompt("key AKIAIOSFODNN7EXAMPLE used")).toBe("key AKIA[redacted] used");
     // Ordinary text with the same words is left alone.
     expect(safePrompt("rotate the api key in the secret manager")).toBe("rotate the api key in the secret manager");
+    expect(safePrompt("github_pat_" + "A".repeat(20))).toBe("github_pat_[redacted]");
+    expect(safePrompt("xai-" + "B".repeat(20))).toBe("xai-[redacted]");
+    expect(safePrompt("glpat-" + "C".repeat(20))).toBe("glpat-[redacted]");
+    expect(safePrompt("hf_" + "D".repeat(20))).toBe("hf_[redacted]");
+    expect(safePrompt("sk_live_" + "E".repeat(20))).toBe("sk_live_[redacted]");
+    expect(safePrompt("npm_" + "F".repeat(20))).toBe("npm_[redacted]");
   });
 });
 
@@ -838,7 +853,7 @@ describe("Herdr-hosted agents get their client's window", () => {
     expect(herdrSocketFromEnvironment("")).toBe("");
   });
 
-  test("prefers the client attached to the same socket, else any client with a window", () => {
+  test("only the client attached to the same socket is used, never a fallback window", () => {
     const a = { address: "0xa" }, b = { address: "0xb" };
     const clients = [
       { pid: 1, socket: "/s/one.sock", window: a },
@@ -846,8 +861,8 @@ describe("Herdr-hosted agents get their client's window", () => {
       { pid: 3, socket: "/s/three.sock", window: null },
     ];
     expect(herdrWindowFor({ kind: "herdr", label: "", socket: "/s/two.sock" }, clients)).toBe(b);
-    expect(herdrWindowFor({ kind: "herdr", label: "", socket: "/s/nine.sock" }, clients)).toBe(a);
-    expect(herdrWindowFor({ kind: "herdr", label: "" }, clients)).toBe(a);
+    expect(herdrWindowFor({ kind: "herdr", label: "", socket: "/s/nine.sock" }, clients)).toBeNull();
+    expect(herdrWindowFor({ kind: "herdr", label: "" }, clients)).toBeNull();
     expect(herdrWindowFor({ kind: "herdr", label: "" }, [clients[2]])).toBeNull();
   });
 });
@@ -924,6 +939,12 @@ describe("Grok Bot roster becomes the card the app cannot draw", () => {
     expect(grokBotLine("before ```js\nconst secret = 1\n``` after")).toBe("before after");
     expect(grokBotLine("I sent eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefghij upstream")).toBe("I sent eyJ[redacted] upstream");
     expect(grokBotLine("x".repeat(400)).length).toBe(140);
+    const ghp = "ghp_" + "A".repeat(36);
+    const ntn = "ntn_" + "B".repeat(36);
+    expect(grokBotLine("paste " + ghp)).toContain("[redacted]");
+    expect(grokBotLine("paste " + ghp)).not.toContain("A".repeat(12));
+    expect(grokBotLine("**" + ntn + "**")).toContain("[redacted]");
+    expect(grokBotLine("**" + ntn + "**")).not.toContain("B".repeat(12));
   });
 
   test("a row without a name is not a bot", () => {

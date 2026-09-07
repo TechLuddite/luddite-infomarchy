@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 
+import { normalizeProjectDirectory } from "./session-actions";
+
 const RESUME_COMMANDS: Record<string, (id: string) => string[]> = {
   codex: id => ["codex", "resume", id],
   claude: id => ["claude", "--resume", id],
@@ -24,10 +26,8 @@ export function resumeAgentCommand(provider: unknown, sessionId: unknown): strin
 export function terminalResumeCommand(provider: unknown, sessionId: unknown, cwd: unknown, home = process.env.HOME || ""): string[] | null {
   const agent = resumeAgentCommand(provider, sessionId);
   if (!agent) return null;
-  let directory = String(cwd || "").trim();
-  if (directory === "~") directory = home;
-  else if (directory.startsWith("~/")) directory = home + directory.slice(1);
   const command = ["uwsm-app", "--", "xdg-terminal-exec"];
+  const directory = normalizeProjectDirectory(cwd, home);
   if (directory) command.push("--dir=" + directory);
   command.push(...agent);
   return command;

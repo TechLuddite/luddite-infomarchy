@@ -4,6 +4,14 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 
 ## [Unreleased]
 
+### Security
+- Grok Bot redacts credentials before flattening markdown, so underscore stripping cannot split `ghp_` / `ntn_` prefixes.
+- `INFOMARCHY_SKIP_GITHUB=1` now also skips `gh run list` CI polling.
+- Herdr window matching requires the agent's socket. No first-client fallback.
+- `safePrompt` also covers `github_pat_`, `xai-`, `glpat-`, `hf_`, Stripe `sk_live_`/`sk_test_`, and `npm_`.
+- Resume uses the same project-directory guard as Open Project.
+- Default-route interface names are shape-checked before sysfs reads. `0.0.0.0` is no longer treated as loopback Ollama.
+
 ### Added
 - **GITHUB · LAST 7 DAYS.** The activity row is now two half-width cards: the AI prompt heatmap on the left and, on the right, the same hour-by-hour grid fed from GitHub — commits, PRs, reviews, issues, comments and other events, coloured by dominant kind, hover for the breakdown and the repositories, today/week counts in the header. Click pins a cell; a legend kind recolours the grid to that kind alone. It is a removable module (**4** in the overlay; the modules after it shift one key and **0** reaches the tenth) and either card takes the full row when the other is hidden.
 - **Grok Bot gets a card per bot.** The xAI desktop app runs its whole roster inside one Electron process, so `/proc` can only ever show one agent. Infomarchy reads the app's own local roster (`~/.config/Grok Bot/sand-client-persistence`, one plain-JSON file per state slice, named by the base32 of its key) and expands it into one **Live AI session** card per bot: the bot's name, the last line it wrote (markdown flattened, secrets redacted the same way prompts are), and its **Needs You** state — *waiting for your answer*, or *has replies you have not read* with the count on the card. Hidden-from-sidebar bots get no card, and transcripts are never opened. Because the bots share one process, its CPU/RAM/GPU counters are attributed once — to the bot the app currently has open — and the other cards report `—` rather than repeating the same process nine times. The alert key omits the unread count, so a bot notifies when it goes unread, not again on every further reply.

@@ -4,7 +4,7 @@ import { localDayStarts } from "./history-time.ts";
 import {
   GITHUB_BACKFILL_MS, GITHUB_LOGIN_TTL_MS, GITHUB_RECONCILE_MS, GITHUB_REFRESH_MS, GITHUB_STALE_AFTER_MS, GITHUB_WINDOW_MS, compareEventIds, emptyGithubStore,
   githubCells, githubCounts, githubCoverageComplete, githubEventKind, githubKindLabel, githubRefreshDue, githubRefreshInterval, githubSearchQuery,
-  githubSnapshot, normalizeGithubStore, parseGithubCommits, parseGithubEvents, parseGithubStoreText, pruneGithubStore, refreshGithubActivity,
+  githubFetchEnabled, githubSnapshot, normalizeGithubStore, parseGithubCommits, parseGithubEvents, parseGithubStoreText, pruneGithubStore, refreshGithubActivity,
   validGithubLogin,
 } from "./github-activity.ts";
 
@@ -392,6 +392,12 @@ describe("github refresh", () => {
     expect(githubSnapshot(pending, now, days, activityCellIndex, true).state).toBe("pending");
     pending.error = "commits fetch failed";
     expect(githubSnapshot(pending, now, days, activityCellIndex, true).state).toBe("unavailable");
+  });
+
+  test("INFOMARCHY_SKIP_GITHUB disables fetching", () => {
+    expect(githubFetchEnabled({})).toBe(true);
+    expect(githubFetchEnabled({ INFOMARCHY_SKIP_GITHUB: "0" })).toBe(true);
+    expect(githubFetchEnabled({ INFOMARCHY_SKIP_GITHUB: "1" })).toBe(false);
   });
 
   test("snapshot exposes the grid shape the view expects", () => {
