@@ -45,7 +45,7 @@ and screen placement are described in the work log/conversation.
 
 ## This fork, shipped 2026-09-07
 
-- [x] Stream privacy SUPER+SHIFT+I.
+- [x] Stream privacy SUPER+SHIFT+I. One press on, three presses within 2s off.
 - [x] Pi sessions and recent-task fairness for OpenCode and Pi.
 - [x] LAN phone view: token URL, CIDR allowlist, Host/Origin, CSP, GET/HEAD.
 - [x] Phone USAGE meters without 7-day charts. PRIVACY chip. MACHINE meter grid. Same-origin HTML swap instead of meta refresh.
@@ -56,6 +56,7 @@ and screen placement are described in the work log/conversation.
 - [x] LOCAL AI: persist `ollamaHost` (this machine: Pi tunnel `127.0.0.1:11435`).
 - [x] Claude USAGE: drop Omarchy's leftover `Run claude auth login` help unless a real status is set.
 - [x] CONTAINERS: lower-right card, per-row on/off for Docker/Podman.
+- [x] Stream privacy: three SUPER+SHIFT+I within 2s to disable. Chip shows 1/3 then 2/3. `setPrivacy false` is the one-shot off.
 
 ## Follow-up batch
 
