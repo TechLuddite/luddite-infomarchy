@@ -225,6 +225,25 @@ describe("stream privacy mode", () => {
     expect(view).not.toContain('text: "WAN " + (view.machine.externalIp || "—")');
     expect(view).not.toContain("WIFI \" + (mc.net.ssid");
   });
+
+  test("recent-task prompts keep the first four words and mask the rest", () => {
+    const source = view.match(/function obfuscatePrompt\([\s\S]*?\n  \}/)?.[0];
+    expect(source).toBeTruthy();
+    const obfuscatePrompt = Function(`return (${source})`)();
+    expect(obfuscatePrompt("one two three four five six seven")).toBe("one two three four ···");
+    expect(obfuscatePrompt("one two three four five")).toBe("one two three four ···");
+    expect(obfuscatePrompt("one two three four")).toBe("one two three four");
+    expect(obfuscatePrompt("one two three")).toBe("one two three");
+    expect(obfuscatePrompt("  one   two  three four   five  ")).toBe("one two three four ···");
+    expect(obfuscatePrompt("")).toBe("");
+    expect(obfuscatePrompt(null)).toBe("");
+    expect(view).toContain("function displayPrompt(text)");
+    expect(view).toContain("view.displayPrompt(ri.modelData.text)");
+    expect(view).toContain("view.displayPrompt(promptDrawer.prompt.text)");
+    expect(view).toContain("view.displayPrompt(modelData.text)");
+    expect(view).not.toContain("text: ri.modelData.text || \"\"");
+    expect(view).not.toContain("text: promptDrawer.prompt.text || \"\"");
+  });
 });
 
 describe("recent tasks keep quieter providers", () => {

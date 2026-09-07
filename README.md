@@ -16,7 +16,7 @@ The wallpaper desk, the collector, and the design are theirs. Use [the original]
 
 **Git and GitHub CI.** Observational git in an agent working tree pins `core.fsmonitor=false`, `core.hooksPath=/dev/null`, empty `diff.external` and `credential.helper`, and ignores global/system git config. `git diff` also passes `--no-ext-diff --no-textconv`. `gh run list` uses `--repo owner/name` after parsing `origin` as github.com. Non-github remotes are skipped. The agent's cwd is not the `gh` process cwd.
 
-**Stream privacy.** SUPER+SHIFT+I (or `omarchy-shell infomarchy togglePrivacy`) hides WAN, LAN, Wi-Fi SSID, `user@host`, GitHub login, `/home/<user>` mounts, and window previews. OSS project names stay.
+**Stream privacy.** SUPER+SHIFT+I (or `omarchy-shell infomarchy togglePrivacy`) hides WAN, LAN, Wi-Fi SSID, `user@host`, GitHub login, `/home/<user>` mounts, and window previews. Recent-task prompts keep the first four words and mask the rest. OSS project names stay.
 
 **Pi.** Live sessions and recent prompts come from the Pi agent (`~/.pi/agent/sessions`). The default recent-task window keeps each provider's newest prompts, including OpenCode.
 
@@ -42,7 +42,7 @@ o.bind("SUPER + I", "Infomarchy: toggle wallpaper dashboard", "omarchy-shell inf
 o.bind("SUPER + SHIFT + I", "Infomarchy: stream privacy", "omarchy-shell infomarchy togglePrivacy")
 ```
 
-**SUPER+SHIFT+I** hides WAN, LAN, Wi-Fi SSID, `user@host`, GitHub login, `/home/<user>` mounts, and window previews. OSS project names, repos, and session topics stay. It persists in `dashboard.json` until toggled off. The module strip shows **PRIVACY ON** in yellow while it is active.
+**SUPER+SHIFT+I** hides WAN, LAN, Wi-Fi SSID, `user@host`, GitHub login, `/home/<user>` mounts, and window previews. Recent-task prompts keep the first four words and mask the rest. OSS project names, repos, and session topics stay. It persists in `dashboard.json` until toggled off. The module strip shows **PRIVACY ON** in yellow while it is active.
 
 ## Remove
 
