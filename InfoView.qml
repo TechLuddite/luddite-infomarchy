@@ -212,6 +212,19 @@ Item {
     var p = String(path || "")
     return privacyMode ? p.replace(/^\/home\/[^/]+/, "~") : p
   }
+  // Stream privacy: keep the first four words of a recent-task prompt (in the
+  // 3 to 5 range), then a fixed mask so the rest of the ask and its length stay off
+  // the desk. Four or fewer words pass through.
+  function obfuscatePrompt(text) {
+    var s = String(text || "").replace(/\s+/g, " ").trim()
+    if (!s) return ""
+    var words = s.split(" ")
+    if (words.length <= 4) return s
+    return words.slice(0, 4).join(" ") + " ···"
+  }
+  function displayPrompt(text) {
+    return privacyMode ? obfuscatePrompt(text) : String(text || "")
+  }
   function machineHint() {
     var up = "up " + view.desk.dur(view.machine.uptime)
     if (privacyMode) return "privacy · " + up
@@ -1353,7 +1366,7 @@ Item {
                 PlainText { text: (ri.pinned ? "★" : "") + view.desk.ago(ri.modelData.ts); color: ri.pinned ? ri.tone : view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption; Layout.preferredWidth: Math.round(28 * Style.fontScale); horizontalAlignment: Text.AlignRight }
                 Tag { text: view.desk.providerLabel(ri.modelData.provider); tone: view.desk.providerColor(ri.modelData.provider) }
                 PlainText { text: (ri.modelData.project || "").replace(/^.*\//, "") ; color: view.textDim; font.family: view.mono; font.pixelSize: Style.font.caption; Layout.preferredWidth: Math.round(110 * Style.fontScale); elide: Text.ElideLeft }
-                PlainText { Layout.fillWidth: true; text: ri.modelData.text || ""; color: view.desk.themeForeground; font.family: view.mono; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight; maximumLineCount: 1 }
+                PlainText { Layout.fillWidth: true; text: view.displayPrompt(ri.modelData.text); color: view.desk.themeForeground; font.family: view.mono; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight; maximumLineCount: 1 }
                 PlainText {
                   visible: recentHover.hovered && (ri.navigable || ri.resumable)
                   text: ri.navigable ? "FOCUS" : "RESUME"
@@ -2036,7 +2049,7 @@ Item {
         Item { Layout.fillWidth: true }
         Tag { text: "CLOSE"; tone: view.textDim; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: view.selectedPrompt = null } }
       }
-      PlainText { Layout.fillWidth: true; text: promptDrawer.prompt.text || ""; color: view.desk.themeForeground; font.family: view.mono; font.pixelSize: Style.font.body; wrapMode: Text.Wrap }
+      PlainText { Layout.fillWidth: true; text: view.displayPrompt(promptDrawer.prompt.text); color: view.desk.themeForeground; font.family: view.mono; font.pixelSize: Style.font.body; wrapMode: Text.Wrap }
       RowLayout {
         spacing: Style.spacing.sm
         Tag { text: "COPY EXCERPT"; tone: view.desk.cyan; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: view.desk.copyText(promptDrawer.prompt.text) } }
@@ -2047,7 +2060,7 @@ Item {
       PlainText { visible: promptDrawer.group.length > 1; text: "SAME SESSION · " + promptDrawer.group.length + " RECENT PROMPTS"; color: view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption; font.bold: true }
       Repeater {
         model: promptDrawer.group
-        delegate: PlainText { required property var modelData; Layout.fillWidth: true; text: "• " + modelData.text; color: view.textDim; font.family: view.mono; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight }
+        delegate: PlainText { required property var modelData; Layout.fillWidth: true; text: "• " + view.displayPrompt(modelData.text); color: view.textDim; font.family: view.mono; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight }
       }
     }
   }
