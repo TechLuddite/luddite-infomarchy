@@ -4,7 +4,7 @@ import { localDayStarts } from "./history-time.ts";
 import {
   GITHUB_BACKFILL_MS, GITHUB_LOGIN_TTL_MS, GITHUB_RECONCILE_MS, GITHUB_REFRESH_MS, GITHUB_STALE_AFTER_MS, GITHUB_WINDOW_MS, compareEventIds, emptyGithubStore,
   githubCells, githubCounts, githubCoverageComplete, githubEventKind, githubKindLabel, githubRefreshDue, githubRefreshInterval, githubSearchQuery,
-  githubFetchEnabled, githubSnapshot, normalizeGithubStore, parseGithubCommits, parseGithubEvents, parseGithubStoreText, pruneGithubStore, refreshGithubActivity,
+  githubFetchEnabled, githubRepoFromRemote, githubSnapshot, normalizeGithubStore, parseGithubCommits, parseGithubEvents, parseGithubStoreText, pruneGithubStore, refreshGithubActivity,
   validGithubLogin,
 } from "./github-activity.ts";
 
@@ -392,6 +392,17 @@ describe("github refresh", () => {
     expect(githubSnapshot(pending, now, days, activityCellIndex, true).state).toBe("pending");
     pending.error = "commits fetch failed";
     expect(githubSnapshot(pending, now, days, activityCellIndex, true).state).toBe("unavailable");
+  });
+
+  test("CI remotes resolve only to github.com owner/name", () => {
+    expect(githubRepoFromRemote("https://github.com/TechLuddite/luddite-infomarchy.git")).toBe("TechLuddite/luddite-infomarchy");
+    expect(githubRepoFromRemote("git@github.com:nixfred/infomarchy.git")).toBe("nixfred/infomarchy");
+    expect(githubRepoFromRemote("ssh://git@github.com/nixfred/blip")).toBe("nixfred/blip");
+    expect(githubRepoFromRemote("https://ghp_notarealtoken@github.com/owner/repo.git")).toBe("owner/repo");
+    expect(githubRepoFromRemote("https://evil.example/owner/repo.git")).toBe("");
+    expect(githubRepoFromRemote("https://github.com.evil.example/owner/repo")).toBe("");
+    expect(githubRepoFromRemote("https://github.com/owner/repo/extra")).toBe("");
+    expect(githubRepoFromRemote("git@github.com:../etc")).toBe("");
   });
 
   test("INFOMARCHY_SKIP_GITHUB disables fetching", () => {

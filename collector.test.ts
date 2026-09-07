@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, sy
 import { Database } from "bun:sqlite";
 import { tmpdir } from "os";
 import { join, relative } from "path";
-import { providerOf, titleLooksBusy, cmdIsTurnInhibitor, sessionIdFrom, sessionHostsFromEnvironment, tmuxSocketFromEnvironment, parseTmuxPanes, parseTmuxClients, tmuxPaneForAncestors, linkRecentToLive, inferSessionIdsFromRecent, attachSessionTopics, localSessionSummary, cleanGeneratedSummary, activityCellIndex, parseExternalIpTrace, externalIpCacheFresh, frameSnapshot, parseJsonBounded, readRegularFileLimited, safePrompt, sessionPresentation, writePrivateStateFile, decodeProjectDir, dropPartialFirstLine, readHistoryTail, readRegularFileHead, rolloutSessionId, rolloutCwd, topicCacheHit, topicRetryBlocked, pruneTopicCache, reapStateTempFiles, parseGpuLine, parseDfRows, plausibleTimestamp, normalizeUsage, normalizeUsageLimit, ollamaHostIsLocal, topicRefinementAllowed, terminate, rateForModel, estimateValue, valueSummary, alignDailyTokens, localDayKey, loadPricing, todayValueEstimate, herdrSocketFromEnvironment, herdrClientPids, herdrWindowFor, boomuxClientShellId, boomuxWindowFor, backgroundDaemonKind, parseClaudeAgents, sessionStaleness, STALE_AFTER_MS, decodeBase32, grokBotLine, grokBotRow, grokBotAttention, attachGrokBotRoster, validNetDevice } from "./collector.ts";
+import { providerOf, titleLooksBusy, cmdIsTurnInhibitor, sessionIdFrom, sessionHostsFromEnvironment, tmuxSocketFromEnvironment, parseTmuxPanes, parseTmuxClients, tmuxPaneForAncestors, linkRecentToLive, inferSessionIdsFromRecent, attachSessionTopics, localSessionSummary, cleanGeneratedSummary, activityCellIndex, parseExternalIpTrace, externalIpCacheFresh, frameSnapshot, parseJsonBounded, readRegularFileLimited, safePrompt, sessionPresentation, writePrivateStateFile, decodeProjectDir, dropPartialFirstLine, readHistoryTail, readRegularFileHead, rolloutSessionId, rolloutCwd, topicCacheHit, topicRetryBlocked, pruneTopicCache, reapStateTempFiles, parseGpuLine, parseDfRows, plausibleTimestamp, normalizeUsage, normalizeUsageLimit, ollamaHostIsLocal, topicRefinementAllowed, terminate, rateForModel, estimateValue, valueSummary, alignDailyTokens, localDayKey, loadPricing, todayValueEstimate, herdrSocketFromEnvironment, herdrClientPids, herdrWindowFor, boomuxClientShellId, boomuxWindowFor, backgroundDaemonKind, parseClaudeAgents, sessionStaleness, STALE_AFTER_MS, decodeBase32, grokBotLine, grokBotRow, grokBotAttention, attachGrokBotRoster, validNetDevice, observationalGitCommand, observationalGitEnv } from "./collector.ts";
 import { sessionEventId } from "./notification-events.ts";
 
 const testRoot = mkdtempSync(join(tmpdir(), "infomarchy-test-"));
@@ -627,6 +627,42 @@ describe("machine parsers refuse garbage", () => {
     expect(parseDfRows("Mounted on Size Used Avail\n/ x y z\n/ 1 2")).toEqual([]);
     expect(parseDfRows("")).toEqual([]);
   });
+  test("observational git argv pins fsmonitor, hooks, and credential helper", () => {
+    const cmd = observationalGitCommand("/tmp/repo", ["status", "--porcelain=v2", "--branch"]);
+    expect(cmd[0]).toBe("git");
+    expect(cmd[1]).toBe("-C");
+    expect(cmd[2]).toBe("/tmp/repo");
+    expect(cmd).toContain("core.fsmonitor=false");
+    expect(cmd).toContain("core.hooksPath=/dev/null");
+    expect(cmd).toContain("diff.external=");
+    expect(cmd).toContain("credential.helper=");
+    const env = observationalGitEnv({ PATH: "/usr/bin", HOME: "/home/tester", GIT_CONFIG_GLOBAL: "/tmp/hostile" });
+    expect(env.GIT_CONFIG_GLOBAL).toBe("/dev/null");
+    expect(env.GIT_CONFIG_SYSTEM).toBe("/dev/null");
+    expect(env.GIT_OPTIONAL_LOCKS).toBe("0");
+    expect(env.GIT_TERMINAL_PROMPT).toBe("0");
+  });
+
+  test("observational git status does not run a repository fsmonitor helper", () => {
+    const dir = mkdtempSync(join(tmpdir(), "infomarchy-git-observe-"));
+    const hook = join(dir, "fsmonitor");
+    const marker = join(dir, "hook-ran");
+    writeFileSync(hook, `#!/bin/sh\nprintf executed > "${marker}"\nprintf "token\\0"\n`, { mode: 0o700 });
+    const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null", GIT_OPTIONAL_LOCKS: "0" };
+    const git = (args: string[], env = gitEnv) => Bun.spawnSync(["git", "-C", dir, ...args], { env, stdout: "pipe", stderr: "pipe" });
+    expect(git(["init", "-q"]).exitCode).toBe(0);
+    expect(git(["config", "core.fsmonitor", hook]).exitCode).toBe(0);
+    git(["-c", "core.quotePath=off", "status", "--porcelain=v2", "--branch"]);
+    expect(existsSync(marker)).toBe(true);
+    rmSync(marker);
+    const observed = Bun.spawnSync(observationalGitCommand(dir, ["status", "--porcelain=v2", "--branch"]), {
+      env: observationalGitEnv(gitEnv), stdout: "pipe", stderr: "pipe",
+    });
+    expect(observed.exitCode).toBe(0);
+    expect(existsSync(marker)).toBe(false);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   test("default-route interface names are shape-checked before sysfs reads", () => {
     expect(validNetDevice("wlan0")).toBe("wlan0");
     expect(validNetDevice("enp7s0")).toBe("enp7s0");

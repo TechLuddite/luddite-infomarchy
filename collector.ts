@@ -14,7 +14,7 @@ import { join, basename } from "path";
 import { isIP } from "net";
 import { Database } from "bun:sqlite";
 import { localDayIndex, localDayStarts } from "./history-time";
-import { githubFetchEnabled, githubRefreshDue, githubSnapshot, parseGithubStoreText, refreshGithubActivity } from "./github-activity";
+import { githubFetchEnabled, githubRefreshDue, githubRepoFromRemote, githubSnapshot, parseGithubStoreText, refreshGithubActivity } from "./github-activity";
 import { attentionSignal, parseCommitSummary, parseDiffNumstat, parseGitStatus, projectHealth, repoCollisions, workspaceGroups, resourceDelta, limitForecast } from "./ai-ops";
 import { deriveNotificationEvents } from "./notification-events";
 
@@ -253,9 +253,9 @@ export async function terminate(proc: { kill: (signal?: any) => void; exited: Pr
     await Promise.race([proc.exited, new Promise(resolve => setTimeout(resolve, graceMs))]);
   }
 }
-async function run(cmd: string[], timeoutMs = 1500, cwd?: string): Promise<string> {
+async function run(cmd: string[], timeoutMs = 1500, cwd?: string, env?: Record<string, string>): Promise<string> {
   try {
-    const proc = Bun.spawn(cmd, { cwd, stdout: "pipe", stderr: "ignore" });
+    const proc = Bun.spawn(cmd, { cwd, env, stdout: "pipe", stderr: "ignore" });
     let expired: ReturnType<typeof setTimeout> | null = null;
     const deadline = new Promise<null>(resolve => { expired = setTimeout(() => resolve(null), timeoutMs); });
     try {
@@ -269,6 +269,32 @@ async function run(cmd: string[], timeoutMs = 1500, cwd?: string): Promise<strin
       if (expired) clearTimeout(expired);
     }
   } catch { return ""; }
+}
+// Observational git in an agent cwd must not honour repo-configured helpers
+// (core.fsmonitor, hooks, diff.external, credential.helper, global/system
+// config). Command-line -c wins over local include.path. --no-ext-diff and
+// --no-textconv belong on diff only: rev-parse rejects unknown flags.
+export const GIT_OBSERVE_FLAGS = [
+  "-c", "core.fsmonitor=false",
+  "-c", "core.hooksPath=/dev/null",
+  "-c", "diff.external=",
+  "-c", "credential.helper=",
+  "-c", "core.quotePath=off",
+] as const;
+export function observationalGitEnv(base: NodeJS.Dict<string> | NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(base)) if (value !== undefined) env[key] = value;
+  env.GIT_CONFIG_GLOBAL = "/dev/null";
+  env.GIT_CONFIG_SYSTEM = "/dev/null";
+  env.GIT_OPTIONAL_LOCKS = "0";
+  env.GIT_TERMINAL_PROMPT = "0";
+  return env;
+}
+export function observationalGitCommand(cwd: string, args: string[]): string[] {
+  return ["git", "-C", cwd, ...GIT_OBSERVE_FLAGS, ...args];
+}
+function observationalGit(cwd: string, args: string[], timeoutMs: number): Promise<string> {
+  return run(observationalGitCommand(cwd, args), timeoutMs, undefined, observationalGitEnv());
 }
 async function fetchJson(url: string, ms = 600): Promise<any> {
   try {
@@ -1029,7 +1055,14 @@ async function githubCiState(cwd: string): Promise<any> {
     currentCiByRepo[cwd] = unavailable;
     return unavailable;
   }
-  const output = await run(["gh", "run", "list", "--limit", "1", "--json", "status,conclusion,name,headSha,updatedAt"], 1800, cwd);
+  const origin = await observationalGit(cwd, ["remote", "get-url", "origin"], 700);
+  const repo = githubRepoFromRemote(origin);
+  if (!repo) {
+    const unavailable = previous ? { ...previous, checkedAt: now, stale: true } : { state: "unavailable", checkedAt: now };
+    currentCiByRepo[cwd] = unavailable;
+    return unavailable;
+  }
+  const output = await run(["gh", "run", "list", "--repo", repo, "--limit", "1", "--json", "status,conclusion,name,headSha,updatedAt"], 1800);
   const rows = parseJsonBounded(output, 256, 10);
   const latest = Array.isArray(rows) && rows.length && rows[0] && typeof rows[0] === "object" ? rows[0] : null;
   const state = String(latest?.conclusion || latest?.status || "").toLowerCase();
@@ -1048,10 +1081,10 @@ async function githubCiState(cwd: string): Promise<any> {
 async function repoState(cwd: string) {
   if (!cwd) return { root: "", state: null, changes: null, ci: null };
   const [root, status, diff, commitLine, ci] = await Promise.all([
-    run(["git", "-C", cwd, "rev-parse", "--show-toplevel"], 700),
-    run(["git", "-C", cwd, "-c", "core.quotePath=off", "status", "--porcelain=v2", "--branch"], 900),
-    run(["git", "-C", cwd, "diff", "--numstat", "HEAD", "--"], 900),
-    run(["git", "-C", cwd, "log", "-1", "--format=%H%x09%h%x09%ct%x09%s"], 700),
+    observationalGit(cwd, ["rev-parse", "--show-toplevel"], 700),
+    observationalGit(cwd, ["status", "--porcelain=v2", "--branch"], 900),
+    observationalGit(cwd, ["diff", "--no-ext-diff", "--no-textconv", "--numstat", "HEAD", "--"], 900),
+    observationalGit(cwd, ["log", "-1", "--format=%H%x09%h%x09%ct%x09%s"], 700),
     githubCiState(cwd),
   ]);
   const state = parseGitStatus(status), stats = parseDiffNumstat(diff), commit = parseCommitSummary(commitLine);

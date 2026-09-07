@@ -5,6 +5,8 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 ## [Unreleased]
 
 ### Security
+- Observational git in an agent working tree pins `core.fsmonitor=false`, `core.hooksPath=/dev/null`, empty `diff.external` and `credential.helper`, and ignores global/system git config. `git diff` also passes `--no-ext-diff --no-textconv`.
+- GitHub Actions polling uses `gh run list --repo owner/name` after parsing `origin` as github.com. Non-github remotes are skipped. The agent's cwd is not the `gh` process cwd.
 - Grok Bot redacts credentials before flattening markdown, so underscore stripping cannot split `ghp_` / `ntn_` prefixes.
 - `INFOMARCHY_SKIP_GITHUB=1` now also skips `gh run list` CI polling.
 - Herdr window matching requires the agent's socket. No first-client fallback.
