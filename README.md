@@ -16,7 +16,7 @@ The wallpaper desk, the collector, and the design are theirs. Use [the original]
 
 **Git and GitHub CI.** Observational git in an agent working tree pins `core.fsmonitor=false`, `core.hooksPath=/dev/null`, empty `diff.external` and `credential.helper`, and ignores global/system git config. `git diff` also passes `--no-ext-diff --no-textconv`. `gh run list` uses `--repo owner/name` after parsing `origin` as github.com. Non-github remotes are skipped. The agent's cwd is not the `gh` process cwd.
 
-**Stream privacy.** SUPER+SHIFT+I (or `omarchy-shell infomarchy togglePrivacy`) hides WAN, LAN, Wi-Fi SSID, `user@host`, GitHub login, `/home/<user>` mounts, and window previews. One press turns it on. Three presses within two seconds turn it off. Recent-task prompts keep the first four words and mask the rest, including the inspect drawer. COPY EXCERPT still copies the full text. OSS project names stay.
+**Stream privacy.** SUPER+SHIFT+I (or `omarchy-shell infomarchy togglePrivacy`) hides WAN, LAN, Wi-Fi SSID, `user@host`, GitHub login, `/home/<user>` mounts, and window previews. One press turns it on. Three presses within two seconds turn it off (the chip shows 1/3, then 2/3). Overlay ignores key-repeat. `omarchy-shell infomarchy setPrivacy false` still clears it in one shot. Recent-task prompts keep the first four words and mask the rest, including the inspect drawer. COPY EXCERPT still copies the full text. OSS project names stay. Phone-view PRIVACY is a separate CSS toggle and stays one click.
 
 **Pi.** Live sessions and recent prompts come from the Pi agent (`~/.pi/agent/sessions`). The default recent-task window keeps each provider's newest prompts, including OpenCode.
 
@@ -46,7 +46,7 @@ o.bind("SUPER + I", "Infomarchy: toggle wallpaper dashboard", "omarchy-shell inf
 o.bind("SUPER + SHIFT + I", "Infomarchy: stream privacy", "omarchy-shell infomarchy togglePrivacy")
 ```
 
-**SUPER+SHIFT+I** hides WAN, LAN, Wi-Fi SSID, `user@host`, GitHub login, `/home/<user>` mounts, and window previews. One press turns it on. Three presses within two seconds turn it off (the chip shows 1/3, then 2/3). `omarchy-shell infomarchy setPrivacy false` still clears it in one shot. Recent-task prompts keep the first four words and mask the rest, including the inspect drawer. COPY EXCERPT still copies the full text. OSS project names, repos, and session topics stay. It persists in `dashboard.json`. The module strip shows **PRIVACY ON** in yellow while it is active.
+**SUPER+SHIFT+I** hides WAN, LAN, Wi-Fi SSID, `user@host`, GitHub login, `/home/<user>` mounts, and window previews. One press turns it on. Three presses within two seconds turn it off (the chip shows 1/3, then 2/3). Overlay ignores key-repeat so holding the chord cannot unmask. `omarchy-shell infomarchy setPrivacy false` still clears it in one shot. Recent-task prompts keep the first four words and mask the rest, including the inspect drawer. COPY EXCERPT still copies the full text. OSS project names, repos, and session topics stay. It persists in `dashboard.json`. The module strip shows **PRIVACY ON** in yellow while it is active. Phone-view PRIVACY is a separate CSS toggle and stays one click.
 
 ## Remove
 

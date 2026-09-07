@@ -12,6 +12,6 @@ Do not write into `omarchy/agents/usage`. Grok billing cache is `$XDG_STATE_HOME
 
 LOCAL AI talks to `dashboard.json` `ollamaHost`, else `OLLAMA_HOST`, else `http://127.0.0.1:11434`. Topic refinement stays loopback-only unless `INFOMARCHY_ALLOW_REMOTE_OLLAMA=1`.
 
-Stream privacy (SUPER+SHIFT+I) one press on, three presses within 2s off. Also keeps the first four words of RECENT TASKS · WHAT GOT ASKED and masks the rest. COPY EXCERPT still copies the full text.
+Stream privacy (SUPER+SHIFT+I) one press on, three presses within 2s off (chip shows 1/3 then 2/3). Overlay ignores auto-repeat. `omarchy-shell infomarchy setPrivacy false` is the one-shot off. Also keeps the first four words of RECENT TASKS · WHAT GOT ASKED and masks the rest. COPY EXCERPT still copies the full text.
 
 CONTAINERS is the last right-column card by default. Docker (`/usr/bin/docker`), else Podman. Start/stop goes through `container-control.ts`: live `ps -a` inventory, then the name as its own argv element. Snapshot rows are id, name, label, service, project, image, state, running, health. Compose working_dir, env files, commands, mounts, and ports are dropped. `INFOMARCHY_SKIP_CONTAINERS=1` skips collection.

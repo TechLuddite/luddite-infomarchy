@@ -27,7 +27,7 @@ Start here. Details and dead ends: `~/Work/luddite-infomarchy/`.
 
 ## Stream privacy (desktop)
 
-- SUPER+SHIFT+I. One press on, three presses within 2s off. WAN, LAN, SSID, `user@host`, GitHub login, home mounts, window previews. `setPrivacy false` is the one-shot off.
+- SUPER+SHIFT+I. One press on, three presses within 2s off (chip 1/3, 2/3). Overlay ignores auto-repeat. WAN, LAN, SSID, `user@host`, GitHub login, home mounts, window previews. `omarchy-shell infomarchy setPrivacy false` is the one-shot off. Phone PRIVACY is a separate CSS toggle and stays one click.
 - RECENT TASKS · WHAT GOT ASKED keeps the first four words and masks the rest (`obfuscatePrompt` / `displayPrompt`). Inspect drawer matches. COPY EXCERPT still copies the full text. OSS project names and session topics stay.
 
 ## CONTAINERS
