@@ -169,6 +169,18 @@ describe("zombie cleanup is explicit and two-click", () => {
   });
 });
 
+describe("module strip spacing matches the rest of the desk", () => {
+  test("the gap under the chip row is view.gap, not the tighter chip-to-chip sm", () => {
+    const start = view.indexOf("id: moduleStrip");
+    const column = view.lastIndexOf("ColumnLayout {", start);
+    const beforeFlow = view.slice(column, view.lastIndexOf("Flow {", start));
+    expect(beforeFlow).toContain("spacing: view.gap");
+    expect(beforeFlow).not.toContain("spacing: Style.spacing.sm");
+    const flow = view.slice(view.lastIndexOf("Flow {", start), view.indexOf("Repeater {", start));
+    expect(flow).toContain("spacing: Style.spacing.sm");
+  });
+});
+
 describe("right column fits a 1080p desk", () => {
   test("MACHINE is a two-column grid with a one-line footer, and the SUPER legend sits under it", () => {
     const view = readFileSync(join(import.meta.dir, "InfoView.qml"), "utf8");

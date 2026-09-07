@@ -41,6 +41,9 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 - Session cards and the inspector print `—` for a resource counter that is genuinely unavailable, rather than `0B` / `0 proc`.
 - The heatmap canvas, tooltip and legend are one `HeatPanel` component used by both cards. Card header hints now elide instead of pushing past a half-width card.
 
+### Fixed
+- The module strip sat `Style.spacing.sm` (4px at scale 1) above the cards while every other desk gap is `view.gap` / `Style.spacing.lg` (8px). The outer column now uses `view.gap`. Chip-to-chip spacing inside the strip is unchanged.
+
 ## [1.0.0] — 2026-09-05
 
 1.0 marks the desk as complete for daily use: every card reaches its session (terminal, Herdr, tmux, Boomux or a Claude background job), the whole desk fits a 1920×1080 screen with nothing clipped or running off the edge, and the layout is instrumented so future fixes are measured rather than guessed.
