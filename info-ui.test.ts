@@ -219,6 +219,22 @@ describe("stream privacy mode", () => {
   });
 });
 
+describe("recent tasks keep quieter providers", () => {
+  test("the default 80-row window still includes OpenCode and Pi when Claude dominates", () => {
+    const source = view.match(/function fairRecentWindow\([\s\S]*?\n  \}/)?.[0];
+    expect(source).toBeTruthy();
+    const fairRecentWindow = Function(`return (${source})`)();
+    const rows = [];
+    for (let i = 0; i < 90; i++) rows.push({ provider: "claude", ts: 1000 - i, session: "c" + i, text: "c" + i });
+    rows.push({ provider: "opencode", ts: 10, session: "o1", text: "oc" });
+    rows.push({ provider: "pi", ts: 9, session: "p1", text: "pi" });
+    const mixed = fairRecentWindow(rows, 80, 6);
+    expect(mixed.some((row: any) => row.provider === "opencode")).toBe(true);
+    expect(mixed.some((row: any) => row.provider === "pi")).toBe(true);
+    expect(mixed).toHaveLength(80);
+  });
+});
+
 describe("github activity heatmap", () => {
   test("registers GITHUB as a removable module beside ACTIVITY and reaches it from the keyboard", () => {
     const ids = [...settings.matchAll(/\{ id: "([a-zA-Z]+)", label: "[^"]+" \}/g)].map(match => match[1]);
@@ -242,6 +258,7 @@ describe("github activity heatmap", () => {
     expect(view).toContain("cells: view.github.cells || []");
     expect(view).toContain("kindFiltersCells: true");
     expect(view).toContain("showRepos: true");
+    expect(view).toContain('kinds: ["claude", "codex", "grok", "opencode", "pi", "gemini", "ollama"]');
   });
 
   test("explains every GitHub feed state and keeps the AI activity filter wiring intact", () => {

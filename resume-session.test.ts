@@ -7,6 +7,7 @@ describe("provider-specific session resume", () => {
     expect(resumeAgentCommand("claude", "session-123")).toEqual(["claude", "--resume", "session-123"]);
     expect(resumeAgentCommand("grok", "session-123")).toEqual(["grok", "--resume", "session-123"]);
     expect(resumeAgentCommand("opencode", "session-123")).toEqual(["opencode", "--session", "session-123"]);
+    expect(resumeAgentCommand("pi", "01a079f4-d5cd-7401-b539-8d9e6d780c9f")).toEqual(["pi", "--session", "01a079f4-d5cd-7401-b539-8d9e6d780c9f"]);
   });
 
   test("rejects unsupported providers and unsafe identifiers", () => {
