@@ -41,6 +41,7 @@ Item {
     return v.lifetime === null || v.lifetime === undefined || tokens <= 0 ? null : Number(v.lifetime) / tokens
   }
   readonly property var usageSeries: {
+    var _g = view.desk.dataGeneration
     var out = []
     var keys = Object.keys(usage).filter(function(k) { return usage[k] && usage[k].ready !== false && (!usageProviderFilter || usageProviderFilter === k) })
     for (var i = 0; i < keys.length; i++) {
@@ -843,6 +844,16 @@ Item {
         Layout.fillWidth: true
         Layout.preferredHeight: implicitHeight
         spacing: Style.spacing.sm
+        Tag {
+          text: view.desk.hardRefreshing ? "HARD REFRESH …" : "HARD REFRESH"
+          tone: view.desk.hardRefreshing ? view.desk.yellow : view.desk.cyan
+          MouseArea {
+            anchors.fill: parent
+            enabled: view.interactive && !view.desk.hardRefreshing
+            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+            onClicked: view.desk.hardRefresh()
+          }
+        }
         Repeater {
           model: view.settings.definitions
           delegate: SectionChip { required property var modelData; section: modelData }
@@ -1515,7 +1526,10 @@ Item {
               Layout.fillWidth: true
               spacing: Style.spacing.xs
               Repeater {
-                model: Object.keys(view.usage).filter(function(k) { return view.usage[k] && view.usage[k].ready !== false })
+                model: {
+                  var _g = view.desk.dataGeneration
+                  return Object.keys(view.usage).filter(function(k) { return view.usage[k] && view.usage[k].ready !== false })
+                }
                 delegate: Tag {
                   required property string modelData
                   text: view.desk.providerLabel(modelData)
@@ -1624,7 +1638,10 @@ Item {
               }
             }
             Repeater {
-              model: Object.keys(view.usage).filter(function(k) { return view.usage[k] && view.usage[k].ready !== false && (!view.usageProviderFilter || view.usageProviderFilter === k) })
+              model: {
+                var _g = view.desk.dataGeneration
+                return Object.keys(view.usage).filter(function(k) { return view.usage[k] && view.usage[k].ready !== false && (!view.usageProviderFilter || view.usageProviderFilter === k) })
+              }
               delegate: Rectangle {
                 id: up
                 required property string modelData

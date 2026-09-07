@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, sy
 import { Database } from "bun:sqlite";
 import { tmpdir } from "os";
 import { join, relative } from "path";
-import { providerOf, titleLooksBusy, cmdIsTurnInhibitor, sessionIdFrom, sessionHostsFromEnvironment, tmuxSocketFromEnvironment, parseTmuxPanes, parseTmuxClients, tmuxPaneForAncestors, linkRecentToLive, inferSessionIdsFromRecent, attachSessionTopics, localSessionSummary, cleanGeneratedSummary, activityCellIndex, parseExternalIpTrace, externalIpCacheFresh, frameSnapshot, parseJsonBounded, readRegularFileLimited, safePrompt, sessionPresentation, writePrivateStateFile, decodeProjectDir, dropPartialFirstLine, readHistoryTail, readRegularFileHead, rolloutSessionId, rolloutCwd, topicCacheHit, topicRetryBlocked, pruneTopicCache, reapStateTempFiles, parseGpuLine, parseDfRows, plausibleTimestamp, normalizeUsage, normalizeUsageLimit, ollamaHostIsLocal, topicRefinementAllowed, terminate, rateForModel, estimateValue, valueSummary, alignDailyTokens, localDayKey, loadPricing, todayValueEstimate, herdrSocketFromEnvironment, herdrClientPids, herdrWindowFor, boomuxClientShellId, boomuxWindowFor, backgroundDaemonKind, parseClaudeAgents, sessionStaleness, STALE_AFTER_MS, decodeBase32, grokBotLine, grokBotRow, grokBotAttention, attachGrokBotRoster, validNetDevice, observationalGitCommand, observationalGitEnv, grokUsageFromUpdate, grokUsageFromUpdatesText, foldGrokSessionSnaps, piUserText, piSessionIdFromName, grokObservedLimits, parseGrokCreditsConfig, grokBillingFromUnifiedLog, claudeOauthExpiredAt } from "./collector.ts";
+import { providerOf, titleLooksBusy, cmdIsTurnInhibitor, sessionIdFrom, sessionHostsFromEnvironment, tmuxSocketFromEnvironment, parseTmuxPanes, parseTmuxClients, tmuxPaneForAncestors, linkRecentToLive, inferSessionIdsFromRecent, attachSessionTopics, localSessionSummary, cleanGeneratedSummary, activityCellIndex, parseExternalIpTrace, externalIpCacheFresh, frameSnapshot, parseJsonBounded, readRegularFileLimited, safePrompt, sessionPresentation, writePrivateStateFile, decodeProjectDir, dropPartialFirstLine, readHistoryTail, readRegularFileHead, rolloutSessionId, rolloutCwd, topicCacheHit, topicRetryBlocked, pruneTopicCache, reapStateTempFiles, parseGpuLine, parseDfRows, plausibleTimestamp, normalizeUsage, normalizeUsageLimit, ollamaHostIsLocal, topicRefinementAllowed, terminate, rateForModel, estimateValue, valueSummary, alignDailyTokens, localDayKey, loadPricing, todayValueEstimate, herdrSocketFromEnvironment, herdrClientPids, herdrWindowFor, boomuxClientShellId, boomuxWindowFor, backgroundDaemonKind, parseClaudeAgents, sessionStaleness, STALE_AFTER_MS, decodeBase32, grokBotLine, grokBotRow, grokBotAttention, attachGrokBotRoster, validNetDevice, observationalGitCommand, observationalGitEnv, grokUsageFromUpdate, grokUsageFromUpdatesText, foldGrokSessionSnaps, piUserText, piSessionIdFromName, grokObservedLimits, parseGrokCreditsConfig, grokBillingFromUnifiedLog, grokBillingRefreshDue, GROK_BILLING_REFRESH_MS, forceRefreshRequested, claudeOauthExpiredAt } from "./collector.ts";
 import { sessionEventId } from "./notification-events.ts";
 
 const testRoot = mkdtempSync(join(tmpdir(), "infomarchy-test-"));
@@ -633,6 +633,25 @@ describe("history collection", () => {
     expect(grokObservedLimits(dir).map((row: any) => row.label)).toEqual(["WEEKLY", "BUILD"]);
     expect(grokObservedLimits(dir)[0].percent).toBe(0.17);
   });
+
+  test("Grok billing refresh is due after 60s, immediately on force, and never when skipped", () => {
+    const stamp = 1_000_000;
+    const fresh = { attemptedAt: stamp - GROK_BILLING_REFRESH_MS + 1, limits: [{ label: "WEEKLY", percent: 0.02 }] };
+    expect(grokBillingRefreshDue(fresh, stamp)).toBe(false);
+    expect(grokBillingRefreshDue(fresh, stamp, true)).toBe(true);
+    expect(grokBillingRefreshDue({ attemptedAt: stamp - GROK_BILLING_REFRESH_MS, limits: [{ label: "WEEKLY", percent: 0.02 }] }, stamp)).toBe(true);
+    expect(grokBillingRefreshDue({ attemptedAt: stamp, limits: [] }, stamp)).toBe(true);
+    expect(grokBillingRefreshDue({}, stamp)).toBe(true);
+    expect(forceRefreshRequested(["bun", "collector.ts"])).toBe(false);
+    expect(forceRefreshRequested(["bun", "collector.ts", "--force-refresh"])).toBe(true);
+    const previous = process.env.INFOMARCHY_SKIP_GROK_BILLING;
+    process.env.INFOMARCHY_SKIP_GROK_BILLING = "1";
+    try { expect(grokBillingRefreshDue(fresh, stamp)).toBe(false); }
+    finally {
+      if (previous === undefined) delete process.env.INFOMARCHY_SKIP_GROK_BILLING;
+      else process.env.INFOMARCHY_SKIP_GROK_BILLING = previous;
+    }
+  });
 });
 
 describe("degrading instead of crashing", () => {
@@ -840,6 +859,14 @@ describe("second-reviewer findings (2026-09-04)", () => {
     expect(folded.daily.get("2026-09-05")).toBe(120);
     expect(folded.daily.get("2026-09-06")).toBe(100);
     expect(grokUsageFromUpdate({ inputTokens: 0, outputTokens: 0 })).toBeNull();
+    const lines = [];
+    for (let i = 0; i < 300; i++) {
+      lines.push(JSON.stringify({ timestamp: Date.UTC(2026, 8, 6, 12, i), params: { usage: { inputTokens: i + 1, outputTokens: 0, modelUsage: { m: { inputTokens: i + 1, outputTokens: 0 } } } } }));
+    }
+    const kept = grokUsageFromUpdatesText(lines.join("\n"));
+    expect(kept).toHaveLength(256);
+    expect(kept[0].usage.inputTokens).toBe(45);
+    expect(kept[kept.length - 1].usage.inputTokens).toBe(300);
   });
 
   test("usage caches are normalized to displayed fields with hard bounds", () => {

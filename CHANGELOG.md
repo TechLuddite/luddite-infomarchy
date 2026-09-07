@@ -26,8 +26,10 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 - **Grok Bot is detected at all.** Electron rewrites its process title, so the whole command line arrives as a single `argv[0]` — and the install path itself contains a space. The browser process is now matched on that line, while the zygote/renderer/gpu/utility helpers (`--type=`) and the `local-exec-daemon` script are not.
 - **Grok CLI sessions are counted from disk.** Grok ≥ 1.0 gives every session its own directory under the encoded cwd, so sessions that have not been prompted yet were invisible. `GROK_HOME` is honoured, and a project path too long to encode is read back from the group's `.cwd` file instead of showing as a slug plus a hash.
 - `github-activity.ts`: commits from `gh api search/commits` by author date (one row per commit, default branches only), everything else from the user's own events feed; both slimmed by `gh --jq` so no commit message or issue body is ever parsed. A private `github-activity.json` store, written by the wallpaper collector and read by the overlay, fills the week incrementally (one step a minute until covered, then every five minutes, at most a handful of calls per step), pages the events feed until a known id, walks one search query page by page so timestamp ties cannot stall it, re-walks the window every six hours for late-indexed commits, backs off on failures, resets on an account change, and survives restarts and dropped connections as a *stale* grid. `INFOMARCHY_SKIP_GITHUB=1` disables it.
+- **HARD REFRESH.** First chip on the module strip. Runs the collector with `--force-refresh` so Grok billing, GitHub, external IP, and local usage identity caches are bypassed, Claude limits are re-read in memory, and the snapshot is reloaded. `omarchy-shell infomarchy hardRefresh` hits the wallpaper collector.
 
 ### Changed
+- Grok WEEKLY/BUILD meters refresh at most every 60 seconds instead of 15 minutes. Overlay collector fetches billing too; `grok-billing.json` `attemptedAt` is the lock. A lapsed CLI token is still tried. HARD REFRESH bypasses the TTL.
 - Stream privacy on the desk takes one SUPER+SHIFT+I to enable and three presses within two seconds to disable. The chip shows 1/3 then 2/3. `omarchy-shell infomarchy setPrivacy false` still clears it immediately.
 - LIVE AI SESSIONS cards clip and elide long topic, git, and pid lines, and the STALE chip shrinks instead of painting into the next card.
 - LOCAL AI can persist an Ollama origin (`ollamaHost` in `dashboard.json`, `omarchy-shell infomarchy setOllamaHost`). Empty inherits `OLLAMA_HOST`, then `http://127.0.0.1:11434`. Topic refinement still requires loopback unless `INFOMARCHY_ALLOW_REMOTE_OLLAMA=1`.
@@ -36,7 +38,7 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 - Phone MACHINE uses the same meter grid as the desk: CPU (load, temp), RAM, two disks, wifi signal, ↓↑ rates, ping, battery.
 - Phone USAGE drops the 7-day token and $ charts. A PRIVACY button (on by default) hides WAN, LAN, SSID, `user@host`, and home mounts. Turn it off to show them.
 - Overlay SUPER+I hides the desk while SUPER+D is open. Exclusive keyboard focus was swallowing the Hyprland bind.
-- Grok WEEKLY/BUILD meters read live billing (`cli-chat-proxy.grok.com`, same route as Grok `/usage`), cached 15 minutes in `grok-billing.json`. Falls back to `~/.grok/logs/unified.jsonl`, then `grok-limits.json`. The token stays in `auth.json` and only travels as an `Authorization` header.
+- Grok WEEKLY/BUILD meters read live billing (`cli-chat-proxy.grok.com`, same route as Grok `/usage`), cached 60 seconds in `grok-billing.json`. Falls back to `~/.grok/logs/unified.jsonl`, then `grok-limits.json`. The token stays in `auth.json` and only travels as an `Authorization` header.
 - Claude USAGE meters: when Omarchy reports Sign-in expired because the saved access token lapsed, the wallpaper collector asks the Claude CLI to refresh it (one `claude -p` with `--max-turns 0`, at most every 15 minutes) and re-reads limits. It does not write into `omarchy/agents/usage`. Omarchy's collector leaves `Run claude auth login…` on a successful probe; Infomarchy now drops that help line unless a real status is set, so the desk does not look expired while the meters are live.
 - Plugin id is `techluddite.luddite-infomarchy`. Install, remove, binds, overlay toggle, and notification `--exec` all use that id.
 - A live Grok card now resolves its own session id from the session files the CLI holds open, instead of inferring one from the project's prompt history.
@@ -44,6 +46,7 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 - The heatmap canvas, tooltip and legend are one `HeatPanel` component used by both cards. Card header hints now elide instead of pushing past a half-width card.
 
 ### Fixed
+- Grok USAGE meters stayed on a 15-minute billing cache, and the overlay collector skipped the fetch entirely, so WEEKLY/BUILD could sit a percent behind the live route. Billing is now 60s, both collectors share `attemptedAt`, and session usage keeps the last 256 snaps in a tail rather than the first 256.
 - The module strip sat `Style.spacing.sm` (4px at scale 1) above the cards while every other desk gap is `view.gap` / `Style.spacing.lg` (8px). The outer column now uses `view.gap`. Chip-to-chip spacing inside the strip is unchanged.
 
 ## [1.0.0] — 2026-09-05

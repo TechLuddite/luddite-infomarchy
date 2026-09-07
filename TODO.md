@@ -57,6 +57,7 @@ and screen placement are described in the work log/conversation.
 - [x] Claude USAGE: drop Omarchy's leftover `Run claude auth login` help unless a real status is set.
 - [x] CONTAINERS: lower-right card, per-row on/off for Docker/Podman.
 - [x] Stream privacy: three SUPER+SHIFT+I within 2s to disable. Chip shows 1/3 then 2/3. `setPrivacy false` is the one-shot off.
+- [x] Grok billing 60s cache, overlay fetches too. HARD REFRESH chip bypasses cached feeds.
 
 ## Follow-up batch
 

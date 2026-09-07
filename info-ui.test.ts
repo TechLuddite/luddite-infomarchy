@@ -267,6 +267,21 @@ describe("session card lines never spill into the neighbouring card", () => {
   });
 });
 
+describe("hard refresh", () => {
+  test("HARD REFRESH is the first module-strip control and forces a collector pass", () => {
+    const strip = view.slice(view.indexOf("id: moduleStrip"), view.indexOf("id: leftColumn"));
+    expect(strip.indexOf("HARD REFRESH")).toBeGreaterThan(-1);
+    expect(strip.indexOf("HARD REFRESH")).toBeLessThan(strip.indexOf("Repeater {"));
+    expect(strip.indexOf("HARD REFRESH")).toBeLessThan(strip.indexOf("PRIVACY"));
+    expect(strip.indexOf("HARD REFRESH")).toBeLessThan(strip.indexOf("PHONE"));
+    expect(view).toContain("onClicked: view.desk.hardRefresh()");
+    expect(model).toContain("function hardRefresh()");
+    expect(model).toContain('cmd.push("--force-refresh")');
+    expect(service).toContain("function hardRefresh(): void { infoModel.hardRefresh() }");
+    expect(overlay).toContain("function hardRefresh() { infoModel.hardRefresh() }");
+  });
+});
+
 describe("stream privacy mode", () => {
   test("persists a toggle that masks identity and leaves OSS project names", () => {
     expect(settings).toContain("property bool privacyMode: false");
