@@ -6,7 +6,7 @@ import qs.Commons
 import qs.Ui
 
 // Summonable fullscreen twin of the desk, for when windows cover the
-// wallpaper. Bind e.g. SUPER+D → `omarchy-shell shell toggle nixfred.infomarchy`.
+// wallpaper. Bind e.g. SUPER+D → `omarchy-shell shell toggle techluddite.luddite-infomarchy`.
 // Esc or a click outside the cards closes it.
 Scope {
   id: root
@@ -47,7 +47,7 @@ Scope {
   }
   function close() { root.opened = false }
   function toggle(payload) { if (root.opened) close(); else open(payload) }
-  // `omarchy-shell shell call nixfred.infomarchy refresh` hits the overlay
+  // `omarchy-shell shell call techluddite.luddite-infomarchy refresh` hits the overlay
   // loader, not the wallpaper IpcHandler.
   function refresh() { infoModel.refresh() }
 

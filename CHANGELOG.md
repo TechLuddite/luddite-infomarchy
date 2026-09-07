@@ -20,6 +20,7 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 - `github-activity.ts`: commits from `gh api search/commits` by author date (one row per commit, default branches only), everything else from the user's own events feed; both slimmed by `gh --jq` so no commit message or issue body is ever parsed. A private `github-activity.json` store, written by the wallpaper collector and read by the overlay, fills the week incrementally (one step a minute until covered, then every five minutes, at most a handful of calls per step), pages the events feed until a known id, walks one search query page by page so timestamp ties cannot stall it, re-walks the window every six hours for late-indexed commits, backs off on failures, resets on an account change, and survives restarts and dropped connections as a *stale* grid. `INFOMARCHY_SKIP_GITHUB=1` disables it.
 
 ### Changed
+- Plugin id is `techluddite.luddite-infomarchy`. Install, remove, binds, overlay toggle, and notification `--exec` all use that id.
 - A live Grok card now resolves its own session id from the session files the CLI holds open, instead of inferring one from the project's prompt history.
 - Session cards and the inspector print `—` for a resource counter that is genuinely unavailable, rather than `0B` / `0 proc`.
 - The heatmap canvas, tooltip and legend are one `HeatPanel` component used by both cards. Card header hints now elide instead of pushing past a half-width card.

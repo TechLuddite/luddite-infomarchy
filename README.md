@@ -146,7 +146,7 @@ The module strip doubles as a keyboard command strip in the overlay: **1–9** t
 
 ```bash
 sudo pacman -S --needed bun   # the collector runs on bun; Omarchy does not ship it
-omarchy plugin add https://github.com/nixfred/infomarchy.git --enable --yes
+omarchy plugin add https://github.com/TechLuddite/luddite-infomarchy.git --enable --yes
 omarchy restart shell    # first time only: services load at shell start
 ```
 
@@ -157,7 +157,7 @@ The plugin declares itself as a clone of `omarchy.background`, so Omarchy hands 
 Bind the fullscreen overlay and wallpaper-dashboard toggle in `~/.config/hypr/bindings.lua` (pick any free chords):
 
 ```lua
-o.bind("SUPER + D", "Infomarchy: AI info desk", "omarchy-shell shell toggle nixfred.infomarchy '{}'")
+o.bind("SUPER + D", "Infomarchy: AI info desk", "omarchy-shell shell toggle techluddite.luddite-infomarchy '{}'")
 -- Hide the cards to see the plain desktop; press again to restore them.
 o.bind("SUPER + I", "Infomarchy: toggle wallpaper dashboard", "omarchy-shell infomarchy toggleDashboard")
 ```
@@ -166,9 +166,9 @@ o.bind("SUPER + I", "Infomarchy: toggle wallpaper dashboard", "omarchy-shell inf
 <summary>Manual install</summary>
 
 ```bash
-git clone https://github.com/nixfred/infomarchy.git ~/.config/omarchy/plugins/nixfred.infomarchy
+git clone https://github.com/TechLuddite/luddite-infomarchy.git ~/.config/omarchy/plugins/techluddite.luddite-infomarchy
 omarchy-shell shell rescanPlugins
-omarchy plugin enable nixfred.infomarchy
+omarchy plugin enable techluddite.luddite-infomarchy
 omarchy restart shell
 ```
 </details>
@@ -178,7 +178,7 @@ omarchy restart shell
 Remove Infomarchy and return to the stock wallpaper service with:
 
 ```bash
-omarchy plugin remove nixfred.infomarchy --yes
+omarchy plugin remove techluddite.luddite-infomarchy --yes
 omarchy restart shell
 ```
 
@@ -228,7 +228,7 @@ No usernames, hostnames or absolute paths are hardcoded anywhere. The collector 
 
 ```bash
 omarchy-shell infomarchy refresh                                      # wallpaper collector now
-omarchy-shell shell call nixfred.infomarchy refresh                   # overlay collector (only while summoned)
+omarchy-shell shell call techluddite.luddite-infomarchy refresh                   # overlay collector (only while summoned)
 omarchy-shell infomarchy setWallpaperOpacity 0.5                      # 0 = solid theme bg
 omarchy-shell infomarchy toggleDashboard                              # hide/show cards; keep wallpaper
 omarchy-shell infomarchy setDashboardVisible true                     # explicit on/off control
@@ -264,7 +264,7 @@ Prompt and session data stays on the machine. Prompt text is stored as a 140-cha
 
 **Clicking a card doesn't focus anything.** The card says *no window* — the agent isn't under a Hyprland client (SSH session, systemd service, or started from a launcher that already exited). That's expected.
 
-**Can I keep the stock wallpaper behaviour too?** Yes: disable `nixfred.infomarchy` and Omarchy restores `omarchy.background`. Or keep it enabled and set `wallpaperOpacity` to taste.
+**Can I keep the stock wallpaper behaviour too?** Yes: disable `techluddite.luddite-infomarchy` and Omarchy restores `omarchy.background`. Or keep it enabled and set `wallpaperOpacity` to taste.
 
 **Two monitors?** One desk per screen, each sized to its own resolution.
 

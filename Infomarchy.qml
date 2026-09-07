@@ -73,7 +73,7 @@ Scope {
       var urgency = event.urgency === "normal" ? "normal" : "low"
       Quickshell.execDetached([
         "omarchy-notification-send", "--app-name", "Infomarchy", "-u", urgency, "-t", "8000",
-        title, body, "--exec", "omarchy-shell", "shell", "toggle", "nixfred.infomarchy", "{}"
+        title, body, "--exec", "omarchy-shell", "shell", "toggle", "techluddite.luddite-infomarchy", "{}"
       ])
     }
   }

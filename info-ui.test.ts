@@ -86,7 +86,7 @@ describe("interactive information modules", () => {
     expect(view).not.toContain('"QUIET 22–08 "');
     expect(service).toContain('"omarchy-notification-send"');
     expect(service).toContain("dashboardSettings.claimNotificationEvent");
-    expect(service).toContain('"nixfred.infomarchy", "{}"');
+    expect(service).toContain('"techluddite.luddite-infomarchy", "{}"');
   });
 });
 

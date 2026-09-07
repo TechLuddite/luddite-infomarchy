@@ -15,7 +15,7 @@ Item {
   property bool ready: false
   property string error: ""
   // Resolve the script itself so a missing trailing slash on a directory URL
-  // cannot produce ".../nixfred.infomarchicollector.ts".
+  // cannot produce ".../techluddite.luddite-infomarchycollector.ts".
   property string collectorPath: Qt.resolvedUrl("collector.ts").toString().replace(/^file:\/\//, "")
   property string resumePath: Qt.resolvedUrl("resume-session.ts").toString().replace(/^file:\/\//, "")
   property string sessionActionsPath: Qt.resolvedUrl("session-actions.ts").toString().replace(/^file:\/\//, "")
