@@ -32,6 +32,8 @@ Item {
   property int quietStartHour: 22
   property int quietEndHour: 8
   property string selectedOllamaModel: ""
+  // Empty means inherit OLLAMA_HOST, else the collector default (127.0.0.1:11434).
+  property string ollamaHost: ""
   // Stay hidden until the persisted value has loaded. This prevents a shell
   // restart from briefly re-enabling a dashboard the user turned off.
   property bool ready: false
@@ -72,6 +74,7 @@ Item {
       quietStartHour = parsed && Number.isInteger(parsed.quietStartHour) ? Math.max(0, Math.min(23, parsed.quietStartHour)) : 22
       quietEndHour = parsed && Number.isInteger(parsed.quietEndHour) ? Math.max(0, Math.min(23, parsed.quietEndHour)) : 8
       selectedOllamaModel = parsed && /^[A-Za-z0-9][A-Za-z0-9._:\/-]{0,255}$/.test(String(parsed.selectedOllamaModel || "")) ? String(parsed.selectedOllamaModel) : ""
+      ollamaHost = parsed ? normalizeOllamaHost(parsed.ollamaHost) : ""
       dashboardVisible = parsed && typeof parsed.dashboardVisible === "boolean" ? parsed.dashboardVisible : true
       privacyMode = !!(parsed && parsed.privacyMode === true)
       webEnabled = !!(parsed && parsed.webEnabled === true)
@@ -91,6 +94,7 @@ Item {
       quietStartHour = 22
       quietEndHour = 8
       selectedOllamaModel = ""
+      ollamaHost = ""
       dashboardVisible = true
       privacyMode = false
       webEnabled = false
@@ -152,6 +156,7 @@ Item {
       quietStartHour: quietStartHour,
       quietEndHour: quietEndHour,
       selectedOllamaModel: selectedOllamaModel,
+      ollamaHost: ollamaHost,
       dashboardVisible: dashboardVisible,
       privacyMode: privacyMode,
       webEnabled: webEnabled,
@@ -234,6 +239,26 @@ Item {
     for (var i = 0; i < Math.min(255, recent.length); i++) next[recent[i].key] = recent[i].at
     next[eventKey] = now
     notificationEvents = next
+    persist()
+    return true
+  }
+  function normalizeOllamaHost(raw) {
+    var value = String(raw || "").trim()
+    if (!value) return ""
+    if (value.indexOf("http://") !== 0 && value.indexOf("https://") !== 0) value = "http://" + value
+    if (value.indexOf("@") >= 0 || value.indexOf("?") >= 0 || value.indexOf("#") >= 0) return ""
+    var match = value.match(/^(https?):\/\/(\[[0-9a-fA-F:]+\]|localhost|[A-Za-z0-9.-]{1,253})(?::(\d{1,5}))?\/?$/)
+    if (!match) return ""
+    var port = match[3] ? Number(match[3]) : (match[1] === "https" ? 443 : 80)
+    if (!isFinite(port) || port < 1 || port > 65535) return ""
+    return match[1] + "://" + match[2] + (match[3] ? ":" + match[3] : "")
+  }
+  function setOllamaHost(host) {
+    var trimmed = String(host || "").trim()
+    var next = normalizeOllamaHost(trimmed)
+    if (trimmed && !next) return false
+    if (ollamaHost === next) return true
+    ollamaHost = next
     persist()
     return true
   }

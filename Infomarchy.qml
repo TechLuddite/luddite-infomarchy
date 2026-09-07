@@ -48,6 +48,7 @@ Scope {
     id: infoModel
     refreshMs: dashboardSettings.dashboardVisible ? 4000 : 16000
     demoMode: root.demoMode
+    ollamaHost: dashboardSettings.ollamaHost
     active: dashboardSettings.ready && (dashboardSettings.dashboardVisible || dashboardSettings.notificationsEnabled || dashboardSettings.webEnabled)
   }
   InfoSettings { id: dashboardSettings }
@@ -185,6 +186,8 @@ Scope {
     function getPrivacy(): string { return dashboardSettings.privacyMode ? "true" : "false" }
     function toggleWeb(): void { dashboardSettings.toggleWebEnabled() }
     function getWebUrl(): string { return dashboardSettings.webEnabled ? String(dashboardSettings.webUrl || "") : "" }
+    function setOllamaHost(v: string): void { dashboardSettings.setOllamaHost(v) }
+    function getOllamaHost(): string { return String(dashboardSettings.ollamaHost || "") }
     function setWebCidrs(v: string): void {
       var parts = String(v || "").split(/[\s,]+/)
       var cidrs = []
