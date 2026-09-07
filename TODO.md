@@ -55,6 +55,7 @@ and screen placement are described in the work log/conversation.
 - [x] Stream privacy: RECENT TASKS · WHAT GOT ASKED keeps the first four words and masks the rest.
 - [x] LOCAL AI: persist `ollamaHost` (this machine: Pi tunnel `127.0.0.1:11435`).
 - [x] Claude USAGE: drop Omarchy's leftover `Run claude auth login` help unless a real status is set.
+- [x] CONTAINERS: lower-right card, per-row on/off for Docker/Podman.
 
 ## Follow-up batch
 
