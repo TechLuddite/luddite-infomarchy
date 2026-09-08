@@ -122,10 +122,50 @@ describe("multiplexer-aware focus", () => {
 describe("overlay shows the real desktop", () => {
   test("SUPER+D paints the wallpaper, and SUPER+I applies inside the overlay", () => {
     const overlay = readFileSync(join(import.meta.dir, "Overlay.qml"), "utf8");
-    expect(overlay).toContain("source: Util.fileUrl(root.background)");
+    expect(overlay).toContain('source: root.videoBackground ? "" : Util.fileUrl(root.background)');
     expect(overlay).toContain("opacity: dashboardSettings.ready && dashboardSettings.dashboardVisible ? root.wallpaperOpacity : 1.0");
     expect(overlay).toContain("visible: dashboardSettings.ready && dashboardSettings.dashboardVisible\n          onNavigated: root.close()");
     expect(overlay).not.toContain("Util.alpha(infoModel.themeBackground, 0.88)");
+  });
+});
+
+describe("a video wallpaper plays instead of showing nothing", () => {
+  // An Image cannot decode a video: it logs "Unsupported image format" and
+  // leaves the desk on the flat theme colour, which is what selecting an
+  // Omarchy video background used to do.
+  const wallpaper = readFileSync(join(import.meta.dir, "Infomarchy.qml"), "utf8");
+  const overlay = readFileSync(join(import.meta.dir, "Overlay.qml"), "utf8");
+  const player = readFileSync(join(import.meta.dir, "BackgroundWallpaper.qml"), "utf8");
+
+  test("each surface is handed only its own kind of file", () => {
+    for (const source of [wallpaper, overlay]) {
+      expect(source).toContain("videoBackground: /\\.(mp4|m4v|mov|webm|mkv|avi)$/i.test(root.background)");
+      // Both the still and the player test the path itself. Deriving one from
+      // the other lets a URL evaluate against the stale flag and hand the
+      // wrong file over for a pass.
+      expect(source).toContain("when: videoWallpaper.item !== null && root.videoBackground");
+    }
+    expect(wallpaper).toContain('source: root.videoBackground ? "" : root.imageUrl(root.background)');
+    expect(overlay).toContain('source: root.videoBackground ? "" : Util.fileUrl(root.background)');
+  });
+
+  test("the player is reached by URL so an Omarchy without video support still loads", () => {
+    // Naming BackgroundMedia in Infomarchy.qml would fail the whole plugin to
+    // compile where the type does not exist; an unloaded file resolves nothing.
+    expect(player).toContain("BackgroundMedia {");
+    expect(player).toContain("audioEnabled: false");
+    for (const source of [wallpaper, overlay]) {
+      expect(source).toContain('source: "BackgroundWallpaper.qml"');
+      expect(source).not.toContain("BackgroundMedia {");
+    }
+  });
+
+  test("nothing decodes while nothing can see it", () => {
+    // Qt's FFmpeg engine drives its own clock, so a covered wallpaper keeps
+    // decoding until it is told to stop.
+    expect(wallpaper).toContain("readonly property bool fullscreenHere: visibleWorkspace ? visibleWorkspace.hasFullscreen : false");
+    expect(wallpaper).toContain("value: !panel.fullscreenHere");
+    expect(overlay).toContain("active: root.videoBackground && root.opened");
   });
 });
 

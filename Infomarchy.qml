@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
@@ -53,6 +54,9 @@ Scope {
   InfoSettings { id: dashboardSettings }
 
   function imageUrl(path) { return Util.fileUrl(path) }
+  // Tested here rather than through Util so the plugin still loads on an
+  // Omarchy whose Util predates video wallpapers.
+  readonly property bool videoBackground: /\.(mp4|m4v|mov|webm|mkv|avi)$/i.test(root.background)
   function refreshBackground() { if (!readlinkProc.running) readlinkProc.running = true }
   function setBackground(path) { root.background = String(path || "").trim() }
 
@@ -181,21 +185,67 @@ Scope {
       // A parked background layer has been seen to drop its buffer; keep rendering.
       updatesEnabled: true
 
+      // Each output answers for itself: a fullscreen window on one monitor
+      // must not freeze the wallpaper still on show next to it.
+      readonly property var hyprlandMonitor: Hyprland.monitorFor(modelData)
+      readonly property var visibleWorkspace: hyprlandMonitor ? hyprlandMonitor.activeWorkspace : null
+      readonly property bool fullscreenHere: visibleWorkspace ? visibleWorkspace.hasFullscreen : false
+
       ScreenMoveRemap {
         id: remapGuard
         window: panel
       }
 
-      Image {
+      // Dimming belongs to the dashboard. When SUPER+I hides it, restore the
+      // wallpaper to full brightness instead of leaving an invisible shade.
+      // It is carried by the wrapper so a still and a video dim alike.
+      Item {
         anchors.fill: parent
-        source: root.imageUrl(root.background)
-        fillMode: Image.PreserveAspectCrop
-        asynchronous: true
-        cache: true
-        // Dimming belongs to the dashboard. When SUPER+I hides it, restore the
-        // wallpaper to full brightness instead of leaving an invisible shade.
         opacity: dashboardSettings.ready && dashboardSettings.dashboardVisible ? root.wallpaperOpacity : 1.0
         Behavior on opacity { NumberAnimation { duration: 300 } }
+
+        // An Image cannot decode a video, and handing it one only logs
+        // "Unsupported image format" and leaves the desk on the theme colour.
+        // Each surface is given a source only for its own kind of file.
+        Image {
+          anchors.fill: parent
+          visible: !root.videoBackground
+          source: root.videoBackground ? "" : root.imageUrl(root.background)
+          fillMode: Image.PreserveAspectCrop
+          asynchronous: true
+          cache: true
+        }
+
+        Loader {
+          id: videoWallpaper
+          anchors.fill: parent
+          active: root.videoBackground
+          source: "BackgroundWallpaper.qml"
+          onStatusChanged: {
+            if (status === Loader.Error)
+              console.warn("Infomarchy: this Omarchy has no video wallpaper support; " + root.background + " cannot be shown")
+          }
+        }
+
+        // The path is only ever pushed while it is a video: the two properties
+        // update in no fixed order, so a bound value can be evaluated against
+        // the stale flag and hand the player a still for one pass.
+        Binding {
+          target: videoWallpaper.item
+          property: "path"
+          value: root.background
+          when: videoWallpaper.item !== null && root.videoBackground
+          restoreMode: Binding.RestoreNone
+        }
+
+        // Qt's FFmpeg engine drives its own clock, so a wallpaper nothing can
+        // see keeps decoding until it is told not to.
+        Binding {
+          target: videoWallpaper.item
+          property: "playbackEnabled"
+          value: !panel.fullscreenHere
+          when: videoWallpaper.item !== null
+        }
       }
 
       // Empty-desk gestures: left double-click = wallpaper switcher (stock

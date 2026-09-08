@@ -34,6 +34,7 @@ Scope {
   // changed the desk underneath without changing what was on screen.
   property string background: ""
   readonly property real wallpaperOpacity: 0.32
+  readonly property bool videoBackground: /\.(mp4|m4v|mov|webm|mkv|avi)$/i.test(root.background)
   Process {
     id: backgroundLink
     command: ["readlink", "-f", Quickshell.env("HOME") + "/.local/state/omarchy/current/background"]
@@ -74,14 +75,39 @@ Scope {
         id: keyCatcher
         anchors.fill: parent
         color: infoModel.themeBackground
-        Image {
+        // The wallpaper may be a video, which an Image cannot decode; each
+        // surface is given a source only for its own kind of file. See
+        // BackgroundWallpaper.qml for why the player is loaded by URL.
+        Item {
           anchors.fill: parent
-          source: Util.fileUrl(root.background)
-          fillMode: Image.PreserveAspectCrop
-          asynchronous: true
-          cache: true
           opacity: dashboardSettings.ready && dashboardSettings.dashboardVisible ? root.wallpaperOpacity : 1.0
           Behavior on opacity { NumberAnimation { duration: 300 } }
+
+          Image {
+            anchors.fill: parent
+            visible: !root.videoBackground
+            source: root.videoBackground ? "" : Util.fileUrl(root.background)
+            fillMode: Image.PreserveAspectCrop
+            asynchronous: true
+            cache: true
+          }
+
+          Loader {
+            id: videoWallpaper
+            anchors.fill: parent
+            // The overlay covers the desk's own player, so this one decodes
+            // only while it is on screen.
+            active: root.videoBackground && root.opened
+            source: "BackgroundWallpaper.qml"
+          }
+
+          Binding {
+            target: videoWallpaper.item
+            property: "path"
+            value: root.background
+            when: videoWallpaper.item !== null && root.videoBackground
+            restoreMode: Binding.RestoreNone
+          }
         }
         focus: root.opened
         // Esc closes ABOUT first, then the overlay — one panel deep, so a

@@ -4,6 +4,11 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 
 ## [Unreleased]
 
+## [1.1.1] — 2026-09-07
+
+### Fixed
+- **Video wallpapers show.** Infomarchy hosts the background layer in place of `omarchy.background`, and drew the wallpaper with a plain `Image`. Omarchy's video wallpapers (quattro) therefore arrived as `Error decoding: ... Unsupported image format` and left the desk on the flat theme colour — selecting one looked like the picker had done nothing. Stills and videos are now handed to separate surfaces, and a video goes to Omarchy's own `BackgroundMedia`, reached through a Loader by URL so an Omarchy without video support never resolves the type and keeps the still path exactly as it was. Playback stops while a fullscreen window covers that output, since Qt's FFmpeg engine drives its own clock and an unseen wallpaper otherwise decodes on. The SUPER+D overlay had the same blank and is fixed with it, and decodes only while it is open.
+
 ## [1.1.0] — 2026-09-07
 
 ### Added
