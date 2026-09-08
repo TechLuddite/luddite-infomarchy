@@ -25,6 +25,11 @@ Item {
   property string previewPath: Qt.resolvedUrl("window-preview.ts").toString().replace(/^file:\/\//, "")
   property string herdrFocusPath: Qt.resolvedUrl("herdr-focus.ts").toString().replace(/^file:\/\//, "")
   property string stopPath: Qt.resolvedUrl("stop-session.ts").toString().replace(/^file:\/\//, "")
+  // Read from manifest.json so the About panel can never drift from the
+  // version the plugin actually ships as.
+  property string version: ""
+  readonly property string repoUrl: "https://github.com/TechLuddite/luddite-infomarchy"
+  readonly property string authorUrl: "https://nixfred.com"
   property bool ollamaBusy: false
   property string ollamaStatus: ""
   property string ollamaError: ""
@@ -90,6 +95,22 @@ Item {
   }
 
   FileView {
+    id: manifestFile
+    path: Qt.resolvedUrl("manifest.json").toString().replace(/^file:\/\//, "")
+    // `omarchy plugin update` rewrites manifest.json under a running shell.
+    // Read once and the desk keeps reporting the version it started with,
+    // which is the one number that must never be stale.
+    watchChanges: true
+    onFileChanged: reload()
+    printErrors: false
+    onLoaded: {
+      try {
+        var parsed = JSON.parse(text())
+        root.version = String(parsed && parsed.version ? parsed.version : "")
+      } catch (e) { root.version = "" }
+    }
+  }
+  FileView {
     id: colorsFile
     path: Color.currentThemePath + "/colors.toml"
     watchChanges: true
@@ -121,6 +142,14 @@ Item {
       case "copilot": return root.magenta
       default: return Color.accent
     }
+  }
+  // Only the two addresses this plugin ships. Nothing user- or snapshot-derived
+  // ever reaches a browser, so there is no URL to sanitize at the call site.
+  function openUrl(url) {
+    var target = String(url || "")
+    if (target !== root.repoUrl && target !== root.authorUrl) return false
+    Quickshell.execDetached(["xdg-open", target])
+    return true
   }
   function plainText(value, limit) {
     return String(value || "").slice(0, limit).replace(/[<>&]/g, function(character) {

@@ -33,6 +33,13 @@ Scope {
   // SUPER+I, so the key is handled here as well as by the Hyprland bind.
   property string background: ""
   readonly property real wallpaperOpacity: 0.32
+  // Same rule as the wallpaper layer: Omarchy decides what a video is, and the
+  // literal list is only the fallback for an Omarchy whose Util predates them.
+  readonly property bool videoBackground: root.isVideo(root.background)
+  function isVideo(path) {
+    if (typeof Util.isVideoPath === "function") return Util.isVideoPath(path)
+    return /\.(mp4|m4v|mov|webm|mkv|avi)$/i.test(String(path || ""))
+  }
   Process {
     id: backgroundLink
     command: ["readlink", "-f", Quickshell.env("HOME") + "/.local/state/omarchy/current/background"]
@@ -74,17 +81,44 @@ Scope {
         id: keyCatcher
         anchors.fill: parent
         color: infoModel.themeBackground
-        Image {
+        // The wallpaper may be a video, which an Image cannot decode; each
+        // surface is given a source only for its own kind of file. See
+        // BackgroundWallpaper.qml for why the player is loaded by URL.
+        Item {
           anchors.fill: parent
-          source: Util.fileUrl(root.background)
-          fillMode: Image.PreserveAspectCrop
-          asynchronous: true
-          cache: true
           opacity: dashboardSettings.ready && dashboardSettings.dashboardVisible ? root.wallpaperOpacity : 1.0
           Behavior on opacity { NumberAnimation { duration: 300 } }
+
+          Image {
+            anchors.fill: parent
+            visible: !root.videoBackground
+            source: root.videoBackground ? "" : Util.fileUrl(root.background)
+            fillMode: Image.PreserveAspectCrop
+            asynchronous: true
+            cache: true
+          }
+
+          Loader {
+            id: videoWallpaper
+            anchors.fill: parent
+            // The overlay covers the desk's own player, so this one decodes
+            // only while it is on screen.
+            active: root.videoBackground && root.opened
+            source: "BackgroundWallpaper.qml"
+          }
+
+          Binding {
+            target: videoWallpaper.item
+            property: "path"
+            value: root.background
+            when: videoWallpaper.item !== null && root.videoBackground
+            restoreMode: Binding.RestoreNone
+          }
         }
         focus: root.opened
-        Keys.onEscapePressed: root.close()
+        // Esc closes ABOUT first, then the overlay — one panel deep, so a
+        // reader who opened it does not lose the whole desk on the way out.
+        Keys.onEscapePressed: { if (infoView.aboutOpen) infoView.aboutOpen = false; else root.close() }
         Keys.onPressed: function(event) {
           if ((event.modifiers & Qt.MetaModifier) && event.key === Qt.Key_I) {
             if (event.modifiers & Qt.ShiftModifier) {

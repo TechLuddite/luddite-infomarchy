@@ -13,6 +13,7 @@ Item {
   required property InfoModel desk
   required property InfoSettings settings
   property bool interactive: true
+  property bool aboutOpen: false
   // The background layer is created with WlrKeyboardFocus.None, so a text
   // field there can never receive keystrokes. The host sets this false and
   // the search box becomes a pointer to the overlay instead of a dead input.
@@ -816,6 +817,35 @@ Item {
         color: tog.busy ? view.textFaint : (tog.lit ? view.desk.green : view.textDim)
         Behavior on x { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
       }
+    }
+  }
+
+  // A labelled row in ABOUT that opens one of the plugin's own two addresses.
+  component AboutLink: Rectangle {
+    id: aboutLink
+    property string label: ""
+    property string url: ""
+    property string caption: ""
+    Layout.fillWidth: true
+    implicitHeight: linkRow.implicitHeight + Style.spacing.sm * 2
+    radius: view.radius
+    color: linkHover.containsMouse ? Util.alpha(view.desk.themeForeground, 0.10) : "transparent"
+    border.color: Util.alpha(view.desk.themeForeground, linkHover.containsMouse ? 0.5 : 0.25)
+    border.width: 1
+    RowLayout {
+      id: linkRow
+      anchors { fill: parent; leftMargin: Style.spacing.md; rightMargin: Style.spacing.md; topMargin: Style.spacing.sm; bottomMargin: Style.spacing.sm }
+      spacing: Style.spacing.md
+      PlainText { text: aboutLink.label; color: view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption; font.bold: true; Layout.preferredWidth: Math.round(90 * Style.fontScale) }
+      PlainText { Layout.fillWidth: true; text: aboutLink.caption; color: view.desk.blue; font.family: view.mono; font.pixelSize: Style.font.caption; elide: Text.ElideRight }
+      PlainText { text: "↗"; color: view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption }
+    }
+    MouseArea {
+      id: linkHover
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onClicked: view.desk.openUrl(aboutLink.url)
     }
   }
 
@@ -1970,7 +2000,6 @@ Item {
             }
           }
         }
-
         Card {
           id: containersCard
           Layout.row: view.settings.rightIndex("containers")
@@ -2161,18 +2190,92 @@ Item {
             }
           }
         }
-        // Legend — readable, one line, under the last card. Wording follows the surface.
-        PlainText {
+        // Legend — readable, one line, under the last card. Wording follows the
+        // surface. The version sits at the far end: present on every screen,
+        // never in the way of the data, and the way into ABOUT.
+        RowLayout {
           Layout.row: 98; Layout.column: 0
           Layout.fillWidth: true
-          elide: Text.ElideRight
-          text: (view.keyboardAvailable ? "SUPER+I hide desk  ·  SUPER+D / ESC close" : "SUPER+I hide desk  ·  SUPER+D show desktop") + "  ·  SUPER+SHIFT+I privacy ×3 off  ·  right-click a card to inspect"
-          color: view.textDim; font.family: view.mono; font.pixelSize: Style.font.caption
+          spacing: Style.spacing.md
+          PlainText {
+            Layout.fillWidth: true
+            elide: Text.ElideRight
+            text: (view.keyboardAvailable ? "SUPER+I hide desk  ·  SUPER+D / ESC close" : "SUPER+I hide desk  ·  SUPER+D show desktop") + "  ·  SUPER+SHIFT+I privacy ×3 off  ·  right-click a card to inspect"
+            color: view.textDim; font.family: view.mono; font.pixelSize: Style.font.caption
+          }
+          PlainText {
+            id: versionLabel
+            visible: !!view.desk.version
+            text: "Infomarchy v" + view.desk.version + (view.interactive ? "  ·  ABOUT" : "")
+            color: aboutHover.containsMouse ? view.desk.themeForeground : view.textFaint
+            font.family: view.mono; font.pixelSize: Style.font.caption
+            MouseArea {
+              id: aboutHover
+              anchors.fill: parent
+              enabled: view.interactive
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: view.aboutOpen = true
+            }
+          }
         }
         Item { Layout.row: 99; Layout.column: 0; Layout.fillHeight: true }
         }
       }
     }
+  }
+
+  // ---- About: version, where the code lives, who made it ----
+  Rectangle {
+    id: aboutPanel
+    z: 101
+    anchors.centerIn: parent
+    visible: view.aboutOpen && view.interactive
+    width: Math.min(parent.width - view.gap * 4, Math.round(420 * Style.fontScale))
+    implicitHeight: aboutColumn.implicitHeight + view.pad * 2
+    radius: view.radius
+    color: Util.alpha(view.desk.themeBackground, 0.97)
+    border.color: Util.alpha(view.desk.themeForeground, 0.8)
+    border.width: 1
+
+    MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons; onClicked: function(mouse) { mouse.accepted = true } }
+    ColumnLayout {
+      id: aboutColumn
+      anchors { fill: parent; margins: view.pad }
+      spacing: Style.spacing.md
+      RowLayout {
+        Layout.fillWidth: true
+        PlainText { text: "INFOMARCHY"; color: view.desk.themeForeground; font.family: view.mono; font.pixelSize: Style.font.subtitle; font.bold: true }
+        Item { Layout.fillWidth: true }
+        PlainText { text: "v" + view.desk.version; color: view.desk.green; font.family: view.mono; font.pixelSize: Style.font.subtitle; font.bold: true }
+      }
+      PlainText {
+        Layout.fillWidth: true
+        text: "Your wallpaper, promoted to information desk."
+        color: view.textDim; font.family: view.mono; font.pixelSize: Style.font.caption
+        wrapMode: Text.Wrap
+      }
+      AboutLink { label: "REPOSITORY"; url: view.desk.repoUrl; caption: "github.com/TechLuddite/luddite-infomarchy" }
+      AboutLink { label: "AUTHOR"; url: view.desk.authorUrl; caption: "nixfred.com" }
+      RowLayout {
+        Layout.fillWidth: true
+        PlainText { text: "MIT licensed"; color: view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption }
+        Item { Layout.fillWidth: true }
+        Tag {
+          text: "CLOSE"
+          tone: view.desk.themeForeground
+          MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: view.aboutOpen = false }
+        }
+      }
+    }
+  }
+  // Click anywhere outside the panel, or press Esc, to dismiss it.
+  MouseArea {
+    z: 100
+    anchors.fill: parent
+    visible: view.aboutOpen && view.interactive
+    acceptedButtons: Qt.AllButtons
+    onClicked: view.aboutOpen = false
   }
 
   Rectangle {
