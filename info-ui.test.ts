@@ -218,6 +218,17 @@ describe("zombie cleanup is explicit and two-click", () => {
 });
 
 describe("right column fits a 1080p desk", () => {
+  test("a provider with no token data says so instead of reporting zero", () => {
+    // Grok publishes prompts and sessions but no token totals or rate-limit
+    // windows. "0 tok" would read as a measurement it never made.
+    expect(view).toContain("up.u.hasTokenData ?");
+    expect(view).toContain('(up.u.todaySessions ? " · " + up.u.todaySessions + " sess" : "")');
+    // usageStatusText reached the QML for months and was never drawn; it is
+    // the only place a provider can explain why it has no limit bars.
+    expect(view).toContain("visible: !!up.u.usageStatusText && !(up.u.limits || []).length");
+    expect(view).toContain('text: up.u.usageStatusText || ""');
+  });
+
   test("ABOUT carries the version, the repo and the author, and the version is read from the manifest", () => {
     // A hardcoded version string drifts from the one the plugin ships as.
     expect(model).toContain('id: manifestFile');

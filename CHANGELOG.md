@@ -4,6 +4,15 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-09-08
+
+### Added
+- **Grok in USAGE & LIMITS.** Omarchy ships no usage collector for Grok, and Grok itself bills credits rather than rate-limit windows — `/usage` opens billing in a browser and nothing about it is cached on disk. What *is* on disk is one directory per session, so the card now reports what is genuinely measurable: prompts today and lifetime, sessions today and lifetime, and the model in use. It draws **no limit bars**, because there are none to draw.
+
+### Changed
+- **A provider with no token data no longer reports `0 tok`.** That read as "used no tokens today" when the truth is "publishes no token counts". Providers that do publish are unchanged; `hasTokenData` distinguishes the two.
+- **`usageStatusText` is finally rendered.** It had been collected and normalized for months and shown nowhere. It appears under a provider that has no limit bars, so the card can say why — Grok explains its credits, and Fireworks now shows "Fireworks unavailable" instead of a bare zero.
+
 ## [1.1.3] — 2026-09-07
 
 ### Fixed

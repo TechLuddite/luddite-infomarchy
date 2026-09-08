@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, sy
 import { Database } from "bun:sqlite";
 import { tmpdir } from "os";
 import { join, relative } from "path";
-import { providerOf, titleLooksBusy, cmdIsTurnInhibitor, sessionIdFrom, sessionHostsFromEnvironment, tmuxSocketFromEnvironment, parseTmuxPanes, parseTmuxClients, tmuxPaneForAncestors, linkRecentToLive, inferSessionIdsFromRecent, attachSessionTopics, localSessionSummary, cleanGeneratedSummary, activityCellIndex, parseExternalIpTrace, externalIpCacheFresh, frameSnapshot, parseJsonBounded, readRegularFileLimited, safePrompt, sessionPresentation, writePrivateStateFile, decodeProjectDir, dropPartialFirstLine, readHistoryTail, readRegularFileHead, rolloutSessionId, rolloutCwd, topicCacheHit, topicRetryBlocked, pruneTopicCache, reapStateTempFiles, parseGpuLine, parseDfRows, plausibleTimestamp, normalizeUsage, normalizeUsageLimit, ollamaHostIsLocal, topicRefinementAllowed, terminate, rateForModel, estimateValue, valueSummary, alignDailyTokens, localDayKey, loadPricing, todayValueEstimate, herdrSocketFromEnvironment, herdrClientPids, herdrWindowFor, boomuxClientShellId, boomuxWindowFor, backgroundDaemonKind, parseClaudeAgents, sessionStaleness, STALE_AFTER_MS, decodeBase32, grokBotLine, grokBotRow, grokBotAttention, attachGrokBotRoster } from "./collector.ts";
+import { providerOf, titleLooksBusy, cmdIsTurnInhibitor, sessionIdFrom, sessionHostsFromEnvironment, tmuxSocketFromEnvironment, parseTmuxPanes, parseTmuxClients, tmuxPaneForAncestors, linkRecentToLive, inferSessionIdsFromRecent, attachSessionTopics, localSessionSummary, cleanGeneratedSummary, activityCellIndex, parseExternalIpTrace, externalIpCacheFresh, frameSnapshot, parseJsonBounded, readRegularFileLimited, safePrompt, sessionPresentation, writePrivateStateFile, decodeProjectDir, dropPartialFirstLine, readHistoryTail, readRegularFileHead, rolloutSessionId, rolloutCwd, topicCacheHit, topicRetryBlocked, pruneTopicCache, reapStateTempFiles, parseGpuLine, parseDfRows, plausibleTimestamp, normalizeUsage, normalizeUsageLimit, ollamaHostIsLocal, topicRefinementAllowed, terminate, rateForModel, estimateValue, valueSummary, alignDailyTokens, localDayKey, loadPricing, todayValueEstimate, herdrSocketFromEnvironment, herdrClientPids, herdrWindowFor, boomuxClientShellId, boomuxWindowFor, backgroundDaemonKind, parseClaudeAgents, sessionStaleness, STALE_AFTER_MS, decodeBase32, grokBotLine, grokBotRow, grokBotAttention, attachGrokBotRoster, grokSessionUsage } from "./collector.ts";
 import { sessionEventId } from "./notification-events.ts";
 
 const testRoot = mkdtempSync(join(tmpdir(), "infomarchy-test-"));
@@ -907,6 +907,54 @@ describe("Claude's own session registry", () => {
     expect(map.get(305287)?.status).toBe("busy");
     expect(map.get(7)?.sessionId).toBe("");
     expect(parseClaudeAgents("not json").size).toBe(0);
+  });
+});
+
+describe("Grok reaches USAGE & LIMITS without inventing limits", () => {
+  const root = join(testRoot, "grok-usage");
+
+  test("sessions and models come from the session directories", () => {
+    const group = join(root, "sessions", "%2Fhome%2Fpi");
+    const today = new Date().toISOString();
+    const old = new Date(Date.now() - 40 * 86400_000).toISOString();
+    for (const [id, active, model] of [
+      ["0199aaaa-bbbb-7ccc-8ddd-eeeeffff0001", today, "grok-4.6"],
+      ["0199aaaa-bbbb-7ccc-8ddd-eeeeffff0002", today, "grok-4.6"],
+      ["0199aaaa-bbbb-7ccc-8ddd-eeeeffff0003", old, "grok-4-fast"],
+    ] as const) {
+      mkdirSync(join(group, id), { recursive: true });
+      writeFileSync(join(group, id, "summary.json"), JSON.stringify({ info: { id }, last_active_at: active, current_model_id: model }));
+    }
+    // Not a session directory, and must not be counted as one.
+    writeFileSync(join(root, "sessions", "session_search.sqlite"), "x");
+
+    const usage = grokSessionUsage(root);
+    expect(usage.sessions).toBe(3);
+    expect(usage.todaySessions).toBe(2);
+    expect(usage.models.sort()).toEqual(["grok-4-fast", "grok-4.6"]);
+  });
+
+  test("absent token data is not reported as zero tokens", () => {
+    // Grok publishes no token totals, so "0 tok" would be a measurement it
+    // never made. Claude and Codex, which do publish, must be unaffected.
+    expect(normalizeUsage({ name: "Grok", todayPrompts: 18, limits: [] }).hasTokenData).toBe(false);
+    expect(normalizeUsage({ name: "Codex", todayTotalTokens: 3284541 }).hasTokenData).toBe(true);
+    expect(normalizeUsage({ name: "Claude", modelUsage: { "claude-opus-5": { inputTokens: 10 } } }).hasTokenData).toBe(true);
+    expect(normalizeUsage({ name: "X", recentDays: [{ totalTokens: 5 }] }).hasTokenData).toBe(true);
+  });
+
+  test("no limit windows are fabricated, and the reason is carried to the card", () => {
+    const usage = normalizeUsage({
+      name: "Grok", ready: true, todayPrompts: 18, totalPrompts: 56, todaySessions: 5, totalSessions: 18,
+      limits: [], usageStatusText: "credits, not rate-limit windows",
+    });
+    expect(usage.limits).toEqual([]);
+    expect(usage.usageStatusText).toBe("credits, not rate-limit windows");
+    expect(usage.todayPrompts).toBe(18);
+    expect(usage.totalSessions).toBe(18);
+    // Nothing priced, so no money is guessed at either.
+    expect(usage.value.lifetime).toBeNull();
+    expect(usage.value.today).toBeNull();
   });
 });
 

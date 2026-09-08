@@ -1943,6 +1943,9 @@ export function normalizeUsage(j: any, stamp = now): any {
   const dayKeys = heatDays.map(localDayKey);
   return {
     name: uiString(j.name, 64), ready: j.ready !== false, tierLabel: uiString(j.tierLabel, 32),
+    // A provider that publishes no token counts must not read as one that used
+    // no tokens. "0 tok" is a measurement; absent data is not.
+    hasTokenData: count(j.todayTotalTokens) > 0 || Object.keys(modelUsage).length > 0 || recentDays.length > 0,
     // Ship the projection from the tested implementation instead of letting
     // the QML re-derive it (the copy there had drifted out of test coverage).
     limits: (Array.isArray(j.limits) ? j.limits : []).slice(0, 16).map((limit: any) => normalizeUsageLimit(limit, stamp)).filter(Boolean),
@@ -1960,6 +1963,51 @@ export function normalizeUsage(j: any, stamp = now): any {
     },
   };
 }
+// Grok publishes no usage cache the way Claude and Codex do: Omarchy ships no
+// collector for it, it bills credits rather than rate-limit windows, and
+// `/usage` opens billing in a browser. What it does keep on disk is one
+// directory per session with a signals.json, so the desk reports the part that
+// is real — prompts, sessions and the models used — and says plainly that the
+// rest is not published locally rather than drawing an empty limit bar.
+export function grokSessionUsage(base: string): { sessions: number; todaySessions: number; models: string[] } {
+  const models = new Set<string>();
+  let sessions = 0, todaySessions = 0, scanned = 0;
+  for (const dir of ls(join(base, "sessions"))) {
+    const group = join(base, "sessions", dir);
+    try { const state = lstatSync(group); if (state.isSymbolicLink() || !state.isDirectory()) continue; } catch { continue; }
+    for (const entry of ls(group)) {
+      if (!cleanSessionId(entry) || scanned >= MAX_COLLECTION_ITEMS) continue;
+      const sessionDir = join(group, entry);
+      try { const state = lstatSync(sessionDir); if (state.isSymbolicLink() || !state.isDirectory()) continue; } catch { continue; }
+      scanned++; sessions++;
+      const summary = readJson(join(sessionDir, "summary.json"));
+      const active = Date.parse(uiString(summary?.last_active_at || summary?.updated_at, 64));
+      if (Number.isFinite(active) && active >= todayStart) todaySessions++;
+      const model = uiString(summary?.current_model_id, 64);
+      if (model && models.size < 8) models.add(model);
+    }
+  }
+  return { sessions, todaySessions, models: [...models] };
+}
+function grokUsage() {
+  const base = process.env.GROK_HOME || join(HOME, ".grok");
+  if (!existsSync(base)) return null;
+  const { sessions, todaySessions, models } = grokSessionUsage(base);
+  const prompts = counts.grok || { today: 0, week: 0, total: 0 };
+  return normalizeUsage({
+    name: "Grok",
+    ready: true,
+    tierLabel: models.join(" "),
+    todayPrompts: prompts.today,
+    totalPrompts: prompts.total,
+    todaySessions,
+    totalSessions: sessions,
+    // No token totals and no rate-limit windows exist on disk. Reporting zeros
+    // as if they were measurements is the thing to avoid here.
+    limits: [],
+    usageStatusText: "credits, not rate-limit windows \u2014 run /usage in Grok for the balance",
+  });
+}
 function agentsUsage() {
   // Omarchy's own agents plugin caches rate limits + token usage here; reuse it when present.
   // Every field is normalized to what the cards display: two individually valid
@@ -1974,6 +2022,9 @@ function agentsUsage() {
     const key = uiString(f.replace(/\.json$/, ""), 32);
     if (key) out[key] = normalizeUsage(j);
   }
+  // Only when Omarchy has not grown a collector of its own; a real cache is
+  // always better than what can be inferred from the session directories.
+  if (!out.grok) { const grok = grokUsage(); if (grok) out.grok = grok; }
   return out;
 }
 

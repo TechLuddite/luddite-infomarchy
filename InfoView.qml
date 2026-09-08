@@ -1543,7 +1543,7 @@ Item {
                   PlainText { text: up.u.name || up.modelData; color: up.tone; font.family: view.mono; font.bold: true; font.pixelSize: Style.font.body }
                   PlainText { text: up.u.tierLabel || ""; color: view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption }
                   Item { Layout.fillWidth: true }
-                  PlainText { text: "today " + (up.u.todayPrompts || 0) + "p · " + view.desk.tokens(up.u.todayTotalTokens) + " tok" + (up.u.value && up.u.value.today !== null && up.u.value.today !== undefined ? " · ≈" + view.usageMoney(up.u.value.today) : ""); color: view.textDim; font.family: view.mono; font.pixelSize: Style.font.caption }
+                  PlainText { text: "today " + (up.u.todayPrompts || 0) + "p" + (up.u.todaySessions ? " · " + up.u.todaySessions + " sess" : "") + (up.u.hasTokenData ? " · " + view.desk.tokens(up.u.todayTotalTokens) + " tok" + (up.u.value && up.u.value.today !== null && up.u.value.today !== undefined ? " · ≈" + view.usageMoney(up.u.value.today) : "") : ""); color: view.textDim; font.family: view.mono; font.pixelSize: Style.font.caption }
                 }
                 PlainText {
                   Layout.fillWidth: true
@@ -1561,6 +1561,15 @@ Item {
                     return parts.join(" · ")
                   }
                   color: view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption
+                }
+                // Why a provider has no limit bars. Absent everywhere else, so it
+                // costs a row only for the provider that needs to explain itself.
+                PlainText {
+                  Layout.fillWidth: true
+                  visible: !!up.u.usageStatusText && !(up.u.limits || []).length
+                  text: up.u.usageStatusText || ""
+                  color: view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption
+                  elide: Text.ElideRight
                 }
                 Repeater {
                   model: up.u.limits || []
