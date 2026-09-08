@@ -1932,6 +1932,41 @@ export function normalizeUsageLimit(limit: any, stamp = now): any | null {
     forecast: limitForecast(limit, stamp),
   };
 }
+// Per-model breakdown. Anthropic publishes a real rate-limit window per model
+// family (that is where "Fable Weekly" comes from); OpenAI and xAI do not, so
+// for those the honest equivalent is each model's share of the work. Built by
+// union of whatever the provider reports, so a model that ships tomorrow shows
+// up on its own — nothing here knows the name of a single model.
+export function usageModelBreakdown(j: any): any[] {
+  const count = (value: unknown) => { const n = Number(value); return Number.isFinite(n) && n >= 0 ? n : 0; };
+  const asMap = (value: unknown) => (value && typeof value === "object" && !Array.isArray(value)) ? value as Record<string, any> : {};
+  const today = asMap(j.todayTokensByModel), lifetime = asMap(j.modelUsage), sessions = asMap(j.modelSessions);
+  const ids: string[] = [];
+  for (const source of [today, lifetime, sessions])
+    for (const key of Object.keys(source).slice(0, 32)) {
+      const id = uiString(key, 64);
+      if (id && !ids.includes(id)) ids.push(id);
+    }
+  const tokensOf = (value: unknown) => {
+    if (typeof value === "number") return count(value);
+    const entry = asMap(value);
+    return count(entry.inputTokens) + count(entry.outputTokens) + count(entry.cacheReadInputTokens) + count(entry.cacheCreationInputTokens);
+  };
+  const models = ids.map(id => ({
+    id,
+    todayTokens: tokensOf(today[id]),
+    lifetimeTokens: tokensOf(lifetime[id]),
+    sessions: count(sessions[id]),
+  }));
+  const todayTotal = models.reduce((sum, m) => sum + m.todayTokens, 0);
+  const lifetimeTotal = models.reduce((sum, m) => sum + m.lifetimeTokens, 0);
+  // Share of today when there was any work today, otherwise of lifetime, so a
+  // quiet morning still shows the mix rather than a row of empty bars.
+  return models
+    .map(m => ({ ...m, share: todayTotal ? m.todayTokens / todayTotal : lifetimeTotal ? m.lifetimeTokens / lifetimeTotal : 0 }))
+    .sort((a, b) => (b.todayTokens - a.todayTokens) || (b.lifetimeTokens - a.lifetimeTokens) || (b.sessions - a.sessions) || a.id.localeCompare(b.id))
+    .slice(0, 8);
+}
 export function normalizeUsage(j: any, stamp = now): any {
   const count = (value: unknown) => { const n = Number(value); return Number.isFinite(n) && n >= 0 ? n : 0; };
   const modelUsage: Record<string, any> = {};
@@ -1953,6 +1988,7 @@ export function normalizeUsage(j: any, stamp = now): any {
     // A provider that publishes no token counts must not read as one that used
     // no tokens. "0 tok" is a measurement; absent data is not.
     hasTokenData: count(j.todayTotalTokens) > 0 || Object.keys(modelUsage).length > 0 || recentDays.length > 0,
+    models: usageModelBreakdown(j),
     // Ship the projection from the tested implementation instead of letting
     // the QML re-derive it (the copy there had drifted out of test coverage).
     limits: (Array.isArray(j.limits) ? j.limits : []).slice(0, 16).map((limit: any) => normalizeUsageLimit(limit, stamp)).filter(Boolean),
@@ -1976,8 +2012,9 @@ export function normalizeUsage(j: any, stamp = now): any {
 // directory per session with a signals.json, so the desk reports the part that
 // is real — prompts, sessions and the models used — and says plainly that the
 // rest is not published locally rather than drawing an empty limit bar.
-export function grokSessionUsage(base: string): { sessions: number; todaySessions: number; models: string[] } {
+export function grokSessionUsage(base: string): { sessions: number; todaySessions: number; models: string[]; modelSessions: Record<string, number> } {
   const models = new Set<string>();
+  const modelSessions: Record<string, number> = {};
   let sessions = 0, todaySessions = 0, scanned = 0;
   for (const dir of ls(join(base, "sessions"))) {
     const group = join(base, "sessions", dir);
@@ -1991,20 +2028,23 @@ export function grokSessionUsage(base: string): { sessions: number; todaySession
       const active = Date.parse(uiString(summary?.last_active_at || summary?.updated_at, 64));
       if (Number.isFinite(active) && active >= todayStart) todaySessions++;
       const model = uiString(summary?.current_model_id, 64);
-      if (model && models.size < 8) models.add(model);
+      if (model && (models.has(model) || models.size < 8)) {
+        models.add(model);
+        modelSessions[model] = (modelSessions[model] || 0) + 1;
+      }
     }
   }
-  return { sessions, todaySessions, models: [...models] };
+  return { sessions, todaySessions, models: [...models], modelSessions };
 }
 function grokUsage() {
   const base = process.env.GROK_HOME || join(HOME, ".grok");
   if (!existsSync(base)) return null;
-  const { sessions, todaySessions, models } = grokSessionUsage(base);
+  const { sessions, todaySessions, models, modelSessions } = grokSessionUsage(base);
   const prompts = counts.grok || { today: 0, week: 0, total: 0 };
   return normalizeUsage({
     name: "Grok",
     ready: true,
-    tierLabel: models.join(" "),
+    tierLabel: "",
     todayPrompts: prompts.today,
     totalPrompts: prompts.total,
     todaySessions,
@@ -2012,6 +2052,8 @@ function grokUsage() {
     // No token totals and no rate-limit windows exist on disk. Reporting zeros
     // as if they were measurements is the thing to avoid here.
     limits: [],
+    // No tokens to weigh models by, so the breakdown counts sessions instead.
+    modelSessions,
     usageStatusText: "credits, not rate-limit windows \u2014 run /usage in Grok for the balance",
   });
 }

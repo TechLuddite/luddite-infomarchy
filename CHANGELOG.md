@@ -4,6 +4,12 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-09-08
+
+### Added
+- **Per-model breakdown for every provider.** Anthropic publishes a real rate-limit window per model family, which is where **Fable Weekly** comes from; OpenAI and xAI publish no such window, so the honest equivalent is each model's share of the work. Codex now breaks out `gpt-6-astra` and `codex-auto-review`, Claude shows its models beside their windows, and Grok — which reports no tokens at all — is broken down by sessions per model instead.
+- **New models need no code change.** The breakdown is the union of whatever the provider reports in `todayTokensByModel`, `modelUsage` and `modelSessions`, weighted by today's tokens, falling back to lifetime share so a quiet morning still shows the mix, then to sessions where there are no tokens. Not one model name appears in the collector or the view; a test asserts that, ignoring comments.
+
 ## [1.2.1] — 2026-09-08
 
 ### Fixed

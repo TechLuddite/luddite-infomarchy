@@ -218,6 +218,19 @@ describe("zombie cleanup is explicit and two-click", () => {
 });
 
 describe("right column fits a 1080p desk", () => {
+  test("the per-model rows name no model, so a new one needs no edit here", () => {
+    const block = view.match(/Repeater \{\s*\n\s*model: \(up\.u\.models[\s\S]*?\n                \}/)?.[0];
+    expect(block).toBeTruthy();
+    // Driven entirely by what the provider reported.
+    expect(block).toContain("label: modelData.id");
+    expect(block).toContain("fraction: up.u.hasTokenData ? (modelData.share || 0) : 0");
+    // No model name may be hardcoded in the CODE. Prose may name one to
+    // explain where the behaviour came from; a branch on one is the bug.
+    const code = view.split("\n").filter(line => !line.trim().startsWith("//")).join("\n").toLowerCase();
+    for (const name of ["fable", "opus", "astra", "gpt-", "grok-4", "sonnet", "haiku"])
+      expect(code, name).not.toContain(name);
+  });
+
   test("a Herdr card jumps to its own pane, not just the Herdr window", () => {
     // Herdr draws every workspace inside ONE window, so an agent's ancestry
     // resolves that window directly and the collector's client-window lookup

@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, sy
 import { Database } from "bun:sqlite";
 import { tmpdir } from "os";
 import { join, relative } from "path";
-import { providerOf, titleLooksBusy, cmdIsTurnInhibitor, sessionIdFrom, sessionHostsFromEnvironment, tmuxSocketFromEnvironment, parseTmuxPanes, parseTmuxClients, tmuxPaneForAncestors, linkRecentToLive, inferSessionIdsFromRecent, attachSessionTopics, localSessionSummary, cleanGeneratedSummary, activityCellIndex, parseExternalIpTrace, externalIpCacheFresh, frameSnapshot, parseJsonBounded, readRegularFileLimited, safePrompt, sessionPresentation, writePrivateStateFile, decodeProjectDir, dropPartialFirstLine, readHistoryTail, readRegularFileHead, rolloutSessionId, rolloutCwd, topicCacheHit, topicRetryBlocked, pruneTopicCache, reapStateTempFiles, parseGpuLine, parseDfRows, plausibleTimestamp, normalizeUsage, normalizeUsageLimit, ollamaHostIsLocal, topicRefinementAllowed, terminate, rateForModel, estimateValue, valueSummary, alignDailyTokens, localDayKey, loadPricing, todayValueEstimate, herdrSocketFromEnvironment, herdrClientPids, herdrWindowFor, boomuxClientShellId, boomuxWindowFor, backgroundDaemonKind, parseClaudeAgents, sessionStaleness, STALE_AFTER_MS, decodeBase32, grokBotLine, grokBotRow, grokBotAttention, attachGrokBotRoster, grokSessionUsage } from "./collector.ts";
+import { providerOf, titleLooksBusy, cmdIsTurnInhibitor, sessionIdFrom, sessionHostsFromEnvironment, tmuxSocketFromEnvironment, parseTmuxPanes, parseTmuxClients, tmuxPaneForAncestors, linkRecentToLive, inferSessionIdsFromRecent, attachSessionTopics, localSessionSummary, cleanGeneratedSummary, activityCellIndex, parseExternalIpTrace, externalIpCacheFresh, frameSnapshot, parseJsonBounded, readRegularFileLimited, safePrompt, sessionPresentation, writePrivateStateFile, decodeProjectDir, dropPartialFirstLine, readHistoryTail, readRegularFileHead, rolloutSessionId, rolloutCwd, topicCacheHit, topicRetryBlocked, pruneTopicCache, reapStateTempFiles, parseGpuLine, parseDfRows, plausibleTimestamp, normalizeUsage, normalizeUsageLimit, ollamaHostIsLocal, topicRefinementAllowed, terminate, rateForModel, estimateValue, valueSummary, alignDailyTokens, localDayKey, loadPricing, todayValueEstimate, herdrSocketFromEnvironment, herdrClientPids, herdrWindowFor, boomuxClientShellId, boomuxWindowFor, backgroundDaemonKind, parseClaudeAgents, sessionStaleness, STALE_AFTER_MS, decodeBase32, grokBotLine, grokBotRow, grokBotAttention, attachGrokBotRoster, grokSessionUsage, usageModelBreakdown } from "./collector.ts";
 import { sessionEventId } from "./notification-events.ts";
 
 const testRoot = mkdtempSync(join(tmpdir(), "infomarchy-test-"));
@@ -921,6 +921,46 @@ describe("Claude's own session registry", () => {
     expect(map.get(305287)?.status).toBe("busy");
     expect(map.get(7)?.sessionId).toBe("");
     expect(parseClaudeAgents("not json").size).toBe(0);
+  });
+});
+
+describe("the per-model breakdown learns new models on its own", () => {
+  test("a model nobody has heard of yet needs no code change", () => {
+    // The whole point: this must not know the name of any model.
+    const models = usageModelBreakdown({
+      todayTokensByModel: { "some-model-9": 300, "gpt-7-unreleased": 700 },
+      modelUsage: { "some-model-9": { inputTokens: 1000 }, "gpt-7-unreleased": { outputTokens: 3000 } },
+    });
+    expect(models.map(m => m.id)).toEqual(["gpt-7-unreleased", "some-model-9"]);
+    expect(models[0].share).toBeCloseTo(0.7, 5);
+    expect(models[1].share).toBeCloseTo(0.3, 5);
+  });
+
+  test("share falls back to lifetime so a quiet morning still shows the mix", () => {
+    const models = usageModelBreakdown({ modelUsage: { a: { inputTokens: 750 }, b: { inputTokens: 250 } } });
+    expect(models.map(m => [m.id, Math.round(m.share * 100)])).toEqual([["a", 75], ["b", 25]]);
+  });
+
+  test("every token field counts toward a model's weight", () => {
+    const [only] = usageModelBreakdown({ modelUsage: { m: { inputTokens: 1, outputTokens: 2, cacheReadInputTokens: 4, cacheCreationInputTokens: 8 } } });
+    expect(only.lifetimeTokens).toBe(15);
+  });
+
+  test("a provider with sessions but no tokens is still broken down", () => {
+    // Grok: no token counts anywhere, so sessions are the only weight there is.
+    const models = usageModelBreakdown({ modelSessions: { "grok-4.6": 18, "grok-4-fast": 2 } });
+    expect(models.map(m => [m.id, m.sessions])).toEqual([["grok-4.6", 18], ["grok-4-fast", 2]]);
+    expect(models.every(m => m.todayTokens === 0 && m.share === 0)).toBe(true);
+  });
+
+  test("junk in the usage cache cannot produce a row or a runaway list", () => {
+    expect(usageModelBreakdown({})).toEqual([]);
+    expect(usageModelBreakdown({ modelUsage: "nope", todayTokensByModel: [1, 2] })).toEqual([]);
+    const many: Record<string, number> = {};
+    for (let i = 0; i < 200; i++) many["m" + i] = i;
+    expect(usageModelBreakdown({ todayTokensByModel: many }).length).toBe(8);
+    const [negative] = usageModelBreakdown({ modelUsage: { m: { inputTokens: -5, outputTokens: 10 } } });
+    expect(negative.lifetimeTokens).toBe(10);
   });
 });
 
