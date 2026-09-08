@@ -17,6 +17,7 @@ describe("interactive information modules", () => {
     expect(adjacentEnabledIndex(["changes", "needs", "projects"], 2, -1, { needs: false })).toBe(0);
     expect(adjacentEnabledIndex(["usage", "localAi", "machine"], 0, -1, {})).toBe(0);
     expect(adjacentEnabledIndex(["usage", "localAi", "machine", "containers"], 2, 1, {})).toBe(3);
+    expect(adjacentEnabledIndex(["usage", "localAi", "machine", "containers", "media"], 3, 1, {})).toBe(4);
     expect(settings).toContain("adjacentEnabledIndex(next, from, direction, sections)");
   });
 
@@ -194,18 +195,39 @@ describe("right column fits a 1080p desk", () => {
 describe("containers card", () => {
   test("registers a reorderable lower-right module with per-row on/off toggles", () => {
     expect(settings).toContain('{ id: "containers", label: "CONTAINERS" }');
-    expect(settings).toContain('property var rightOrder: ["usage", "localAi", "machine", "containers"]');
-    expect(settings).toContain('var allowed = ["usage", "localAi", "machine", "containers"]');
+    expect(settings).toContain('property var rightOrder: ["usage", "localAi", "machine", "containers", "media"]');
+    expect(settings).toContain('var allowed = ["usage", "localAi", "machine", "containers", "media"]');
     expect(view).toContain('title: "CONTAINERS"');
     expect(view).toContain('moveId: "containers"');
     expect(view).toContain("component PowerToggle: Item");
     expect(view).toContain('view.desk.controlContainer(item.running ? "stop" : "start", item.name)');
     expect(view).toContain("readonly property int visibleLimit: 8");
-    expect(view).toContain('visible: view.sectionEnabled("usage") || view.sectionEnabled("localAi") || view.sectionEnabled("machine") || view.sectionEnabled("containers")');
+    expect(view).toContain('visible: view.sectionEnabled("usage") || view.sectionEnabled("localAi") || view.sectionEnabled("machine") || view.sectionEnabled("containers") || view.sectionEnabled("media")');
     expect(model).toContain('containerControlPath: Qt.resolvedUrl("container-control.ts")');
     expect(model).toContain("containerProcess.pendingFrame");
     expect(model).toContain('["start", "stop"].indexOf(operation)');
     expect(view).toContain("lit: !!modelData.running");
+  });
+});
+
+describe("media controls card", () => {
+  test("registers a reorderable lower-right MPRIS card with prev/play/next and a title line", () => {
+    expect(settings).toContain('{ id: "media", label: "MEDIA" }');
+    expect(settings).toContain('property var rightOrder: ["usage", "localAi", "machine", "containers", "media"]');
+    expect(view).toContain('title: "MEDIA CONTROLS"');
+    expect(view).toContain('moveId: "media"');
+    expect(view).toContain("import Quickshell.Services.Mpris");
+    expect(view).toContain('text: "PREV"');
+    expect(view).toContain('text: mediaCard.playing ? "PAUSE" : "PLAY"');
+    expect(view).toContain('text: "NEXT"');
+    expect(view).toContain('onClicked: mediaCard.run("previous")');
+    expect(view).toContain('onClicked: mediaCard.run("playPause")');
+    expect(view).toContain('onClicked: mediaCard.run("next")');
+    expect(view).toContain("mediaCard.displayTitle");
+    expect(view).toContain('readonly property string displayTitle: view.privacyMode ? "—" : (rawTitle || (player || demo ? "no title" : "no media player"))');
+    expect(view).not.toContain("trackArtUrl");
+    const mediaBlock = view.slice(view.indexOf('id: mediaCard'), view.indexOf("Legend"));
+    expect(mediaBlock).not.toContain("Image {");
   });
 });
 
@@ -305,6 +327,7 @@ describe("stream privacy mode", () => {
     expect(view).toContain('return privacyMode ? "—" : (view.machine.externalIp || "—")');
     expect(view).toContain('return privacyMode ? "WIFI" : ("WIFI " + (n.ssid || ""))');
     expect(view).toContain('if (privacyMode) return "privacy · " + up');
+    expect(view).toContain('readonly property string displayTitle: view.privacyMode ? "—" : (rawTitle || (player || demo ? "no title" : "no media player"))');
     expect(view).toContain("p.replace(/^\\/home\\/[^/]+/, \"~\")");
     expect(view).toContain("visible: !view.privacyMode && !!mc.net.addr");
     expect(view).toContain("privacyMode || !github.login");
@@ -369,13 +392,14 @@ describe("github activity heatmap", () => {
   test("registers GITHUB as a removable module beside ACTIVITY and reaches it from the keyboard", () => {
     const ids = [...settings.matchAll(/\{ id: "([a-zA-Z]+)", label: "[^"]+" \}/g)].map(match => match[1]);
     expect(ids.indexOf("github")).toBe(ids.indexOf("activity") + 1);
-    expect(ids).toHaveLength(11);
+    expect(ids).toHaveLength(12);
     expect(overlay).toContain("event.key >= Qt.Key_0 && event.key <= Qt.Key_9");
     expect(overlay).toContain("event.key === Qt.Key_0 ? 9 : event.key - Qt.Key_1");
     // Key n toggles definitions[n-1]; 0 is the tenth. Documented as 4 = GITHUB, 0 = PROJECTS.
     expect(ids[3]).toBe("github");
     expect(ids[9]).toBe("projects");
     expect(ids[10]).toBe("containers");
+    expect(ids[11]).toBe("media");
   });
 
   test("splits the activity row into two half-width heatmap cards sharing one HeatPanel", () => {

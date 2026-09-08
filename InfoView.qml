@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
+import Quickshell.Services.Mpris
 import qs.Commons
 
 // The dashboard itself. Hosted by Infomarchy.qml (background layer) and Overlay.qml
@@ -97,6 +98,29 @@ Item {
   readonly property bool privacyMode: !!(settings && settings.privacyMode)
   readonly property var machine: snap.machine || ({})
   readonly property var containers: snap.containers || ({})
+  readonly property var mprisPlayers: Mpris.players && Mpris.players.values ? Mpris.players.values : []
+  function mediaIsProxy(player) {
+    var dbus = String(player && player.dbusName || "").toLowerCase()
+    var desktop = String(player && player.desktopEntry || "").toLowerCase()
+    return dbus.indexOf("playerctld") !== -1 || desktop === "playerctld"
+  }
+  function mediaIdentity(player) {
+    if (!player) return ""
+    var dbus = String(player.dbusName || "").replace(/^org\.mpris\.MediaPlayer2\./, "").replace(/\.instance[0-9]+$/i, "")
+    return view.desk.plainText(player.identity || player.desktopEntry || dbus, 64)
+  }
+  readonly property var mediaPlayer: {
+    var list = view.mprisPlayers
+    var playing = null, any = null, proxy = null
+    for (var i = 0; i < list.length; i++) {
+      var p = list[i]
+      if (!p) continue
+      if (view.mediaIsProxy(p)) { if (!proxy) proxy = p; continue }
+      if (!any) any = p
+      if (p.isPlaying && !playing) playing = p
+    }
+    return playing || any || proxy
+  }
   readonly property var ai: snap.ai || ({})
   readonly property var allSessions: ai.sessions || []
   readonly property var projects: ai.projects || []
@@ -1493,10 +1517,10 @@ Item {
         }
       }
 
-      // RIGHT COLUMN: usage + local AI + machine + containers
+      // RIGHT COLUMN: usage + local AI + machine + containers + media
       GridLayout {
         id: rightColumn
-        visible: view.sectionEnabled("usage") || view.sectionEnabled("localAi") || view.sectionEnabled("machine") || view.sectionEnabled("containers")
+        visible: view.sectionEnabled("usage") || view.sectionEnabled("localAi") || view.sectionEnabled("machine") || view.sectionEnabled("containers") || view.sectionEnabled("media")
         Layout.fillHeight: true
         // A fixed column: content-driven widths let the column drift narrower
         // whenever card text became shrinkable, and rows then overran the border.
@@ -2038,6 +2062,103 @@ Item {
             }
             PlainText { Layout.fillWidth: true; visible: !!view.desk.containerStatus; text: view.desk.containerStatus; color: view.desk.green; font.family: view.mono; font.pixelSize: Style.font.caption; wrapMode: Text.Wrap }
             PlainText { Layout.fillWidth: true; visible: !!view.desk.containerError; text: view.desk.containerError; color: view.desk.red; font.family: view.mono; font.pixelSize: Style.font.caption; wrapMode: Text.Wrap }
+          }
+        }
+
+        Card {
+          id: mediaCard
+          Layout.row: view.settings.rightIndex("media")
+          Layout.column: 0
+          Layout.fillWidth: true
+          visible: view.sectionEnabled("media")
+          moveId: "media"
+          draggable: true
+          title: "MEDIA CONTROLS"
+          readonly property bool demo: !!view.desk.demoMode
+          readonly property var player: demo ? null : view.mediaPlayer
+          readonly property bool playing: demo ? true : !!(player && player.isPlaying)
+          readonly property bool canPrev: demo ? true : !!(player && player.canGoPrevious)
+          readonly property bool canNext: demo ? true : !!(player && player.canGoNext)
+          readonly property bool canToggle: demo ? true : !!(player && (player.canTogglePlaying || player.canPlay || player.canPause))
+          readonly property string identity: demo ? "demo" : view.mediaIdentity(player)
+          readonly property string rawTitle: demo ? "Hardening atomic state persistence" : view.desk.plainText(player && player.trackTitle ? player.trackTitle : "", 160)
+          readonly property string rawArtist: demo ? "Infomarchy" : view.desk.plainText(player && player.trackArtist ? player.trackArtist : "", 120)
+          readonly property string rawAlbum: demo ? "" : view.desk.plainText(player && player.trackAlbum ? player.trackAlbum : "", 120)
+          readonly property string displayTitle: view.privacyMode ? "—" : (rawTitle || (player || demo ? "no title" : "no media player"))
+          readonly property string displayByline: view.privacyMode ? "" : [rawArtist, rawAlbum].filter(function(part) { return !!part }).join(" · ")
+          hint: !player && !demo ? "no player" : (view.privacyMode ? "privacy" : ((playing ? "playing" : "paused") + (identity ? " · " + identity : "")))
+          function run(action) {
+            if (demo || !view.interactive) return
+            var p = player
+            if (!p) return
+            if (action === "previous" && p.canGoPrevious) p.previous()
+            else if (action === "next" && p.canGoNext) p.next()
+            else if (action === "playPause") {
+              if (p.isPlaying && p.canPause) p.pause()
+              else if (!p.isPlaying && p.canPlay) p.play()
+              else if (p.canTogglePlaying) p.togglePlaying()
+            }
+          }
+          ColumnLayout {
+            width: parent.width
+            spacing: Style.spacing.xs
+            PlainText {
+              Layout.fillWidth: true
+              Layout.minimumWidth: 0
+              text: mediaCard.displayTitle
+              color: view.desk.themeForeground
+              font.family: view.mono
+              font.pixelSize: Style.font.bodySmall
+              elide: Text.ElideRight
+            }
+            PlainText {
+              Layout.fillWidth: true
+              Layout.minimumWidth: 0
+              visible: mediaCard.displayByline !== ""
+              text: mediaCard.displayByline
+              color: view.textDim
+              font.family: view.mono
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideRight
+            }
+            RowLayout {
+              Layout.fillWidth: true
+              spacing: Style.spacing.xs
+              Tag {
+                text: "PREV"
+                tone: mediaCard.canPrev ? view.desk.cyan : view.textFaint
+                opacity: mediaCard.canPrev ? 1 : 0.4
+                MouseArea {
+                  anchors.fill: parent
+                  enabled: view.interactive && mediaCard.canPrev
+                  cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                  onClicked: mediaCard.run("previous")
+                }
+              }
+              Tag {
+                text: mediaCard.playing ? "PAUSE" : "PLAY"
+                tone: mediaCard.canToggle ? (mediaCard.playing ? view.desk.yellow : view.desk.green) : view.textFaint
+                opacity: mediaCard.canToggle ? 1 : 0.4
+                Layout.fillWidth: true
+                MouseArea {
+                  anchors.fill: parent
+                  enabled: view.interactive && mediaCard.canToggle
+                  cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                  onClicked: mediaCard.run("playPause")
+                }
+              }
+              Tag {
+                text: "NEXT"
+                tone: mediaCard.canNext ? view.desk.cyan : view.textFaint
+                opacity: mediaCard.canNext ? 1 : 0.4
+                MouseArea {
+                  anchors.fill: parent
+                  enabled: view.interactive && mediaCard.canNext
+                  cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                  onClicked: mediaCard.run("next")
+                }
+              }
+            }
           }
         }
         // Legend — readable, one line, under the last card. Wording follows the surface.

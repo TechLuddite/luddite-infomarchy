@@ -32,10 +32,14 @@ Start here. Details and dead ends: `~/Work/luddite-infomarchy/`.
 
 ## CONTAINERS
 
-- Right-column card, last by default (`rightOrder` ends with `containers`). Per-row toggle starts/stops via `container-control.ts`. Inventory from `/usr/bin/docker ps -a`, else podman. Names as argv after a live inventory match.
+- Right-column card, second-last by default (`rightOrder` ends with `containers`, then `media`). Per-row toggle starts/stops via `container-control.ts`. Inventory from `/usr/bin/docker ps -a`, else podman. Names as argv after a live inventory match.
 - Snapshot fields: id, name, label, service, project, image, state, running, health. Compose working_dir, env files, commands, mounts, and ports are dropped. Tests assert `/home/` and `.env` do not survive parse.
 - `INFOMARCHY_SKIP_CONTAINERS=1` skips collection. Demo data uses `lab-*` names, not this host's stack.
 - Not on the phone HTML. The phone `web-snapshot.json` still carries the object if PHONE is on.
+
+## MEDIA CONTROLS
+
+- Last right-column card (`rightOrder` ends with `media`). Live MPRIS in QML, not the collector. Title, artist, album, identity. PREV / PLAY or PAUSE / NEXT. Prefers a playing player. Skips `playerctld` when another player exists. No `trackArtUrl`. Privacy hides title and artist. Not on the phone HTML. Demo mode shows a fake track and ignores clicks.
 
 ## LOCAL AI
 
