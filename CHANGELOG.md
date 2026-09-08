@@ -4,6 +4,11 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 
 ## [Unreleased]
 
+## [1.1.2] — 2026-09-07
+
+### Changed
+- **A video wallpaper is whatever Omarchy says it is.** Both surfaces asked a literal extension list of their own, so a format added to Omarchy's `Util.isVideoPath` would have left the desk blank here until Infomarchy was changed to match. They now defer to `Util.isVideoPath` when the running Omarchy has it, and fall back to the list only where it does not — calling a function that is not there would take the plugin down on exactly the older desktops the fallback exists for.
+
 ## [1.1.1] — 2026-09-07
 
 ### Fixed

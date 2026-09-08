@@ -34,7 +34,13 @@ Scope {
   // changed the desk underneath without changing what was on screen.
   property string background: ""
   readonly property real wallpaperOpacity: 0.32
-  readonly property bool videoBackground: /\.(mp4|m4v|mov|webm|mkv|avi)$/i.test(root.background)
+  // Same rule as the wallpaper layer: Omarchy decides what a video is, and the
+  // literal list is only the fallback for an Omarchy whose Util predates them.
+  readonly property bool videoBackground: root.isVideo(root.background)
+  function isVideo(path) {
+    if (typeof Util.isVideoPath === "function") return Util.isVideoPath(path)
+    return /\.(mp4|m4v|mov|webm|mkv|avi)$/i.test(String(path || ""))
+  }
   Process {
     id: backgroundLink
     command: ["readlink", "-f", Quickshell.env("HOME") + "/.local/state/omarchy/current/background"]

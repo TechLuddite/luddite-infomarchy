@@ -54,9 +54,16 @@ Scope {
   InfoSettings { id: dashboardSettings }
 
   function imageUrl(path) { return Util.fileUrl(path) }
-  // Tested here rather than through Util so the plugin still loads on an
-  // Omarchy whose Util predates video wallpapers.
-  readonly property bool videoBackground: /\.(mp4|m4v|mov|webm|mkv|avi)$/i.test(root.background)
+  // Omarchy decides what counts as a video wallpaper; ask it when it can
+  // answer, so a format added there is understood here without a change.
+  // Fall back to its current list on an Omarchy whose Util predates video
+  // wallpapers — calling a function that is not there would take the plugin
+  // down on the very desktops the fallback exists for.
+  readonly property bool videoBackground: root.isVideo(root.background)
+  function isVideo(path) {
+    if (typeof Util.isVideoPath === "function") return Util.isVideoPath(path)
+    return /\.(mp4|m4v|mov|webm|mkv|avi)$/i.test(String(path || ""))
+  }
   function refreshBackground() { if (!readlinkProc.running) readlinkProc.running = true }
   function setBackground(path) { root.background = String(path || "").trim() }
 

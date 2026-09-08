@@ -139,7 +139,7 @@ describe("a video wallpaper plays instead of showing nothing", () => {
 
   test("each surface is handed only its own kind of file", () => {
     for (const source of [wallpaper, overlay]) {
-      expect(source).toContain("videoBackground: /\\.(mp4|m4v|mov|webm|mkv|avi)$/i.test(root.background)");
+      expect(source).toContain("readonly property bool videoBackground: root.isVideo(root.background)");
       // Both the still and the player test the path itself. Deriving one from
       // the other lets a URL evaluate against the stale flag and hand the
       // wrong file over for a pass.
@@ -147,6 +147,32 @@ describe("a video wallpaper plays instead of showing nothing", () => {
     }
     expect(wallpaper).toContain('source: root.videoBackground ? "" : root.imageUrl(root.background)');
     expect(overlay).toContain('source: root.videoBackground ? "" : Util.fileUrl(root.background)');
+  });
+
+  test("Omarchy decides what a video is, and an older one still gets an answer", () => {
+    // Both surfaces paint the wallpaper, so both must agree on what a video is
+    // — and agree with the Omarchy they are running on.
+    for (const [name, source] of [["Infomarchy.qml", wallpaper], ["Overlay.qml", overlay]] as const) {
+      const fn = source.match(/function isVideo\(path\) \{[\s\S]*?\n  \}/)?.[0];
+      expect(fn, name).toBeTruthy();
+
+      // A format added to Omarchy is understood here without a change.
+      const withUtil = Function("Util", `return (${fn})`)({ isVideoPath: (p: string) => /\.(mp4|gif)$/i.test(String(p || "")) });
+      expect(withUtil("/bg/matrix-vortex.mp4"), name).toBe(true);
+      expect(withUtil("/bg/added-later.gif"), name).toBe(true);
+      expect(withUtil("/bg/still.png"), name).toBe(false);
+
+      // An Omarchy whose Util predates video wallpapers has no such function.
+      // Calling it anyway would take the plugin down on exactly the desktops
+      // the fallback exists for.
+      const noUtil = Function("Util", `return (${fn})`)({});
+      expect(() => noUtil("/bg/still.png"), name).not.toThrow();
+      expect(noUtil("/bg/matrix-vortex.mp4"), name).toBe(true);
+      expect(noUtil("/bg/clip.WEBM"), name).toBe(true);
+      expect(noUtil("/bg/still.png"), name).toBe(false);
+      expect(noUtil(""), name).toBe(false);
+      expect(noUtil(null), name).toBe(false);
+    }
   });
 
   test("the player is reached by URL so an Omarchy without video support still loads", () => {
