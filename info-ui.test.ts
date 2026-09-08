@@ -332,10 +332,11 @@ describe("media controls card", () => {
     expect(view).toContain('onClicked: mediaCard.run("playPause")');
     expect(view).toContain('onClicked: mediaCard.run("next")');
     expect(view).toContain("mediaCard.displayTitle");
-    expect(view).toContain('readonly property string displayTitle: view.privacyMode ? "—" : (rawTitle || (player || demo ? "no title" : "no media player"))');
+    expect(view).toContain("readonly property string displayTitle: rawTitle || (player || demo ? \"no title\" : \"no media player\")");
     expect(view).not.toContain("trackArtUrl");
     const mediaBlock = view.slice(view.indexOf('id: mediaCard'), view.indexOf("Legend"));
     expect(mediaBlock).not.toContain("Image {");
+    expect(mediaBlock).not.toContain("privacyMode");
   });
 });
 
@@ -435,7 +436,7 @@ describe("stream privacy mode", () => {
     expect(view).toContain('return privacyMode ? "—" : (view.machine.externalIp || "—")');
     expect(view).toContain('return privacyMode ? "WIFI" : ("WIFI " + (n.ssid || ""))');
     expect(view).toContain('if (privacyMode) return "privacy · " + up');
-    expect(view).toContain('readonly property string displayTitle: view.privacyMode ? "—" : (rawTitle || (player || demo ? "no title" : "no media player"))');
+    expect(view).toContain("readonly property string displayTitle: rawTitle || (player || demo ? \"no title\" : \"no media player\")");
     expect(view).toContain("p.replace(/^\\/home\\/[^/]+/, \"~\")");
     expect(view).toContain("visible: !view.privacyMode && !!mc.net.addr");
     expect(view).toContain("privacyMode || !github.login");

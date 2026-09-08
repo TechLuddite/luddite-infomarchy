@@ -2113,9 +2113,9 @@ Item {
           readonly property string rawTitle: demo ? "Hardening atomic state persistence" : view.desk.plainText(player && player.trackTitle ? player.trackTitle : "", 160)
           readonly property string rawArtist: demo ? "Infomarchy" : view.desk.plainText(player && player.trackArtist ? player.trackArtist : "", 120)
           readonly property string rawAlbum: demo ? "" : view.desk.plainText(player && player.trackAlbum ? player.trackAlbum : "", 120)
-          readonly property string displayTitle: view.privacyMode ? "—" : (rawTitle || (player || demo ? "no title" : "no media player"))
-          readonly property string displayByline: view.privacyMode ? "" : [rawArtist, rawAlbum].filter(function(part) { return !!part }).join(" · ")
-          hint: !player && !demo ? "no player" : (view.privacyMode ? "privacy" : ((playing ? "playing" : "paused") + (identity ? " · " + identity : "")))
+          readonly property string displayTitle: rawTitle || (player || demo ? "no title" : "no media player")
+          readonly property string displayByline: [rawArtist, rawAlbum].filter(function(part) { return !!part }).join(" · ")
+          hint: !player && !demo ? "no player" : ((playing ? "playing" : "paused") + (identity ? " · " + identity : ""))
           function run(action) {
             if (demo || !view.interactive) return
             var p = player
