@@ -223,6 +223,9 @@ describe("right column fits a 1080p desk", () => {
     expect(model).toContain('id: manifestFile');
     expect(model).toContain('Qt.resolvedUrl("manifest.json")');
     expect(model).toContain("root.version = String(parsed && parsed.version");
+    // An in-place plugin update rewrites manifest.json under a running shell.
+    expect(model).toContain("watchChanges: true");
+    expect(model).toContain("onFileChanged: reload()");
     expect(model).toContain('readonly property string repoUrl: "https://github.com/nixfred/infomarchy"');
     expect(model).toContain('readonly property string authorUrl: "https://nixfred.com"');
 

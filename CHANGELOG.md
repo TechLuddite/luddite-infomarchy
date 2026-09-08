@@ -4,6 +4,11 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 
 ## [Unreleased]
 
+## [1.1.3] — 2026-09-07
+
+### Fixed
+- **The version on the desk tracks the manifest.** `omarchy plugin update` rewrites `manifest.json` under a running shell, and the About panel read it once at load — so after an in-place update the desk went on reporting the version it started with, which is the one number that must never be stale. The manifest is watched now.
+
 ## [1.1.2] — 2026-09-07
 
 ### Changed

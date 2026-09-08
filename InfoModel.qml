@@ -85,6 +85,11 @@ Item {
   FileView {
     id: manifestFile
     path: Qt.resolvedUrl("manifest.json").toString().replace(/^file:\/\//, "")
+    // `omarchy plugin update` rewrites manifest.json under a running shell.
+    // Read once and the desk keeps reporting the version it started with,
+    // which is the one number that must never be stale.
+    watchChanges: true
+    onFileChanged: reload()
     printErrors: false
     onLoaded: {
       try {
