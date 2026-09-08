@@ -218,6 +218,26 @@ describe("zombie cleanup is explicit and two-click", () => {
 });
 
 describe("right column fits a 1080p desk", () => {
+  test("a Herdr card jumps to its own pane, not just the Herdr window", () => {
+    // Herdr draws every workspace inside ONE window, so an agent's ancestry
+    // resolves that window directly and the collector's client-window lookup
+    // never runs. Gating the pane focus on `attached` meant every ordinary
+    // Herdr card focused Herdr and left it on whatever was already showing.
+    const branch = model.match(/else if \(host\.kind === "herdr".*?\) focusHerdrPane\(host\)/)?.[0];
+    expect(branch).toBeTruthy();
+    expect(branch).not.toContain("attached");
+    expect(branch).toBe('else if (host.kind === "herdr") focusHerdrPane(host)');
+
+    // The card promises this in its own label whenever there is a window, so
+    // the promise and the behaviour have to agree.
+    expect(view).toContain('" · click jumps to the pane"');
+
+    // focusHerdrPane is the guard now: no valid ids, no request.
+    const source = model.match(/function focusHerdrPane\(host\) \{[\s\S]*?\n  \}/)?.[0];
+    expect(source).toBeTruthy();
+    expect(source).toContain('if (!workspace && !tab && !pane) return false');
+  });
+
   test("a provider with no token data says so instead of reporting zero", () => {
     // Grok publishes prompts and sessions but no token totals or rate-limit
     // windows. "0 tok" would read as a measurement it never made.

@@ -820,6 +820,20 @@ describe("today's value at the blended lifetime rate", () => {
 });
 
 describe("Herdr-hosted agents get their client's window", () => {
+  test("a Herdr host with a window is attached, however that window was found", () => {
+    // Live data, 2026-09-08: all 19 Herdr sessions on this box shared one
+    // window (Herdr draws every workspace inside it), so every agent resolved
+    // it through its own ancestry, the client-window lookup never ran, and
+    // every host reported attached=undefined while its pane was reachable.
+    // The card then refused to jump and left Herdr on whatever was showing.
+    const source = readFileSync(join(import.meta.dir, "collector.ts"), "utf8");
+    const block = source.match(/const herdrHost = hosts\.find[\s\S]*?\n    \}/)?.[0];
+    expect(block).toBeTruthy();
+    expect(block).toContain("herdrHost.attached = !!w;");
+    // The old form set it only inside the no-window branch.
+    expect(block).not.toContain("{ w = clientWindow; herdrHost.attached = true; }");
+  });
+
   test("only the herdr CLIENT process counts, never the server or utility invocations", () => {
     const commands = new Map<number, string[]>([
       [10, ["/usr/bin/herdr", "server"]],

@@ -1306,9 +1306,16 @@ async function liveSessions(pids: number[]) {
       }
     }
     const herdrHost = hosts.find(host => host.kind === "herdr");
-    if (herdrHost && !w) {
-      const clientWindow = herdrWindowFor(herdrHost, herdrClients);
-      if (clientWindow) { w = clientWindow; herdrHost.attached = true; }
+    if (herdrHost) {
+      if (!w) {
+        const clientWindow = herdrWindowFor(herdrHost, herdrClients);
+        if (clientWindow) w = clientWindow;
+      }
+      // Herdr renders every workspace inside a single window, so most agents
+      // reach it through their own ancestry and the lookup above never runs.
+      // Setting attached only on that branch left every ordinary Herdr session
+      // reporting "not attached" while its pane was perfectly reachable.
+      herdrHost.attached = !!w;
     }
     const sessionIds = processSessionIds(p.pid, prov, p.cmd);
     // Claude's own registry wins over heuristics: exact id, display name, and

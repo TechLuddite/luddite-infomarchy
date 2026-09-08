@@ -4,6 +4,11 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 
 ## [Unreleased]
 
+## [1.2.1] — 2026-09-08
+
+### Fixed
+- **Clicking a Herdr card now jumps to that agent's pane.** It focused the Herdr window and left it on whatever workspace was already showing. Herdr draws every workspace inside a *single* window, so an agent's own process ancestry resolves that window directly and the collector's client-window lookup — the only place that set `attached` — never ran. The pane focus was gated on `attached`, so on this box all 19 Herdr sessions reported "not attached" while their panes were perfectly reachable, and the jump never fired. The gate is gone (`focusHerdrPane` already refuses ids it cannot validate), and `attached` now means what it says: the host has a window, however that window was found. The card's own label promised "click jumps to the pane" the whole time.
+
 ## [1.2.0] — 2026-09-08
 
 ### Added

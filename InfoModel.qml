@@ -381,7 +381,12 @@ Item {
     for (var i = 0; i < hosts.length; i++) {
       var host = hosts[i] || {}
       if (host.kind === "tmux" && host.paneId && host.attached && !host.activePane) focusTmuxPane(host.server, host.paneId)
-      else if (host.kind === "herdr" && host.attached) focusHerdrPane(host)
+      // Not gated on `attached`: Herdr draws every workspace inside ONE window,
+      // so an agent's own ancestry resolves that window directly and the
+      // collector's client-window lookup never runs. Gating here meant the
+      // click focused Herdr and then left it on whatever workspace was already
+      // showing. focusHerdrPane re-validates the ids and does nothing without.
+      else if (host.kind === "herdr") focusHerdrPane(host)
       else if (host.kind === "boomux" && host.shellId) focusBoomuxShell(host)
     }
     return true
