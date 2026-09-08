@@ -152,6 +152,45 @@ describe("zombie cleanup is explicit and two-click", () => {
 });
 
 describe("right column fits a 1080p desk", () => {
+  test("ABOUT carries the version, the repo and the author, and the version is read from the manifest", () => {
+    // A hardcoded version string drifts from the one the plugin ships as.
+    expect(model).toContain('id: manifestFile');
+    expect(model).toContain('Qt.resolvedUrl("manifest.json")');
+    expect(model).toContain("root.version = String(parsed && parsed.version");
+    expect(model).toContain('readonly property string repoUrl: "https://github.com/nixfred/infomarchy"');
+    expect(model).toContain('readonly property string authorUrl: "https://nixfred.com"');
+
+    // The version is on the desk itself, at the quiet end of the legend line.
+    expect(view).toContain('text: "Infomarchy v" + view.desk.version');
+    expect(view).toContain("onClicked: view.aboutOpen = true");
+
+    // All three required entries appear in the panel.
+    expect(view).toContain('AboutLink { label: "REPOSITORY"; url: view.desk.repoUrl');
+    expect(view).toContain('AboutLink { label: "AUTHOR"; url: view.desk.authorUrl');
+    expect(view).toContain('text: "v" + view.desk.version');
+
+    // Esc closes the panel before it closes the whole desk.
+    expect(overlay).toContain("if (infoView.aboutOpen) infoView.aboutOpen = false; else root.close()");
+  });
+
+  test("openUrl refuses any address the plugin does not itself ship", () => {
+    const source = model.match(/function openUrl\(url\) \{[\s\S]*?\n  \}/)?.[0];
+    expect(source).toBeTruthy();
+    const calls: string[][] = [];
+    const root = { repoUrl: "https://github.com/nixfred/infomarchy", authorUrl: "https://nixfred.com" };
+    const Quickshell = { execDetached: (argv: string[]) => { calls.push(argv); } };
+    const openUrl = Function("root", "Quickshell", `return (${source})`)(root, Quickshell);
+
+    expect(openUrl(root.repoUrl)).toBe(true);
+    expect(openUrl(root.authorUrl)).toBe(true);
+    expect(calls).toEqual([["xdg-open", root.repoUrl], ["xdg-open", root.authorUrl]]);
+
+    // Anything else — including a lookalike host — never reaches xdg-open.
+    for (const hostile of ["https://nixfred.com.evil.test", "file:///etc/passwd", "https://github.com/attacker/x", "", null, undefined])
+      expect(openUrl(hostile as any)).toBe(false);
+    expect(calls).toHaveLength(2);
+  });
+
   test("MACHINE is a two-column grid with a one-line footer, and the SUPER legend sits under it", () => {
     const view = readFileSync(join(import.meta.dir, "InfoView.qml"), "utf8");
     expect(view).toContain("// Cockpit density: two meters per row");

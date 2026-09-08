@@ -84,7 +84,9 @@ Scope {
           Behavior on opacity { NumberAnimation { duration: 300 } }
         }
         focus: root.opened
-        Keys.onEscapePressed: root.close()
+        // Esc closes ABOUT first, then the overlay — one panel deep, so a
+        // reader who opened it does not lose the whole desk on the way out.
+        Keys.onEscapePressed: { if (infoView.aboutOpen) infoView.aboutOpen = false; else root.close() }
         Keys.onPressed: function(event) {
           if (event.key >= Qt.Key_0 && event.key <= Qt.Key_9) { var i = event.key === Qt.Key_0 ? 9 : event.key - Qt.Key_1; var def = dashboardSettings.definitions[i]; if (def) dashboardSettings.toggleSection(def.id); event.accepted = true; return }
           if (event.key === Qt.Key_J || event.key === Qt.Key_Down) { infoView.keyboardStep(1); event.accepted = true; return }
