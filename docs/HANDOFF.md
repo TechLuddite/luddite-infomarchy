@@ -39,7 +39,7 @@ Start here. Details and dead ends: `~/Work/luddite-infomarchy/`.
 
 ## MEDIA CONTROLS
 
-- Last right-column card (`rightOrder` ends with `media`). Live MPRIS in QML, not the collector. Title, artist, album, identity. PREV / PLAY or PAUSE / NEXT. Prefers a playing player. Skips `playerctld` when another player exists. No `trackArtUrl`. Privacy hides title and artist. Not on the phone HTML. Demo mode shows a fake track and ignores clicks.
+- Last right-column card (`rightOrder` ends with `media`). Live MPRIS in QML, not the collector. Title, artist, album, identity. PREV / PLAY or PAUSE / NEXT. Prefers a playing player. Skips `playerctld` when another player exists. No `trackArtUrl`. Stream privacy leaves those fields in the clear. Not on the phone HTML. Demo mode shows a fake track and ignores clicks.
 
 ## LOCAL AI
 

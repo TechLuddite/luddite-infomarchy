@@ -16,4 +16,4 @@ Stream privacy (SUPER+SHIFT+I) one press on, three presses within 2s off (chip s
 
 CONTAINERS is the second-last right-column card by default. Docker (`/usr/bin/docker`), else Podman. Start/stop goes through `container-control.ts`: live `ps -a` inventory, then the name as its own argv element. Snapshot rows are id, name, label, service, project, image, state, running, health. Compose working_dir, env files, commands, mounts, and ports are dropped. `INFOMARCHY_SKIP_CONTAINERS=1` skips collection.
 
-MEDIA CONTROLS is the last right-column card. Live MPRIS in QML, not the collector. No album-art URL. Stream privacy hides title and artist. Not on the phone HTML.
+MEDIA CONTROLS is the last right-column card. Live MPRIS in QML, not the collector. No album-art URL. Stream privacy leaves title and artist in the clear. Not on the phone HTML.
