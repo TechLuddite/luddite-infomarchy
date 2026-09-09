@@ -1644,6 +1644,68 @@ function grokHistory() {
   return { present: true, sessions: sessionIds.size, active: activeSessions };
 }
 
+function hermesTimestampMs(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return n < 1e12 ? Math.floor(n * 1000) : Math.floor(n);
+}
+
+// Hermes stores sessions in SQLite (~/.hermes/state.db), not a prompt jsonl.
+// Recent Tasks only ingested Claude/Grok/Codex/OpenCode files, so Hermes work
+// never appeared. Paths come from HERMES_HOME or $HOME/.hermes.
+function hermesHistory() {
+  const home = process.env.HERMES_HOME || join(HOME, ".hermes");
+  const path = join(home, "state.db");
+  try {
+    const stat = lstatSync(path);
+    if (!stat.isFile()) return { present: false };
+  } catch { return { present: false }; }
+  let db: Database | null = null;
+  try {
+    db = new Database(path, { readonly: true });
+    const countRows = db.query(`
+      SELECT m.timestamp AS timestamp FROM messages m
+        JOIN sessions s ON s.id = m.session_id
+       WHERE m.role = 'user' AND ifnull(m.active, 1) = 1 AND m.timestamp IS NOT NULL
+         AND ifnull(s.archived, 0) = 0 AND ifnull(s.hidden, 0) = 0
+         AND ifnull(s.source, '') NOT IN ('cron')
+       ORDER BY m.id DESC LIMIT 4000
+    `).all() as any[];
+    for (const row of countRows) {
+      const ts = hermesTimestampMs(row.timestamp);
+      if (ts) { bump(ts, "hermes"); cnt("hermes", ts); }
+    }
+    // One Recent row per user prompt, like Claude jsonl — not one stale session title.
+    const rows = db.query(`
+      SELECT m.timestamp AS ts, substr(m.content, 1, 280) AS text,
+             s.id AS session, s.cwd AS project
+        FROM messages m
+        JOIN sessions s ON s.id = m.session_id
+       WHERE m.role = 'user' AND ifnull(m.active, 1) = 1
+         AND ifnull(s.archived, 0) = 0 AND ifnull(s.hidden, 0) = 0
+         AND ifnull(s.source, '') NOT IN ('cron')
+       ORDER BY m.id DESC
+       LIMIT 2000
+    `).all() as any[];
+    let prompts = 0;
+    const sessionIds = new Set<string>();
+    for (const row of rows) {
+      const ts = hermesTimestampMs(row.ts);
+      const session = cleanSessionId(row.session);
+      const text = safePrompt(row.text || "");
+      if (!ts || !text) continue;
+      prompts++;
+      if (session) sessionIds.add(session);
+      if (plausibleTimestamp(ts)) recent.push({ provider: "hermes", ts, project: shortPath(String(row.project || "")), text, session });
+    }
+    return { present: true, prompts, sessions: sessionIds.size };
+  } catch (error) {
+    return { present: true, prompts: 0, sessions: 0, error: String(error) };
+  } finally {
+    try { db?.close(); } catch {}
+  }
+}
+
 // ------------------------------------------------------------------ Grok Bot
 // The xAI desktop app keeps its client state as one file per "slice" under
 // sand-client-persistence, each named by the RFC 4648 base32 of the slice key.
@@ -2277,7 +2339,7 @@ async function runCollector() {
   const [cpuS, memS, diskS, netS, pingS, gpuS, sessions, ollama, externalIpS, github] = await Promise.all([
     Promise.resolve(cpu()), Promise.resolve(mem()), disk(), net(), ping(), gpu(), liveSessions(pids), ollamaState(), externalIp(), githubActivity(),
   ]);
-  const claude = claudeHistory(), codex = codexHistory(), grok = grokHistory(), grokBot = grokBotHistory(), opencode = opencodeHistory();
+  const claude = claudeHistory(), codex = codexHistory(), grok = grokHistory(), grokBot = grokBotHistory(), opencode = opencodeHistory(), hermes = hermesHistory();
   recent.sort((a, b) => b.ts - a.ts);
   for (const entry of recent) entry.activityCell = activityCellIndex(entry.ts, heatDays);
   inferSessionIdsFromRecent(sessions, recent);
@@ -2310,7 +2372,7 @@ async function runCollector() {
       attention: sessions.filter((s: any) => s.attention),
       events: notificationState.events,
       collisions: repoCollisions(sessions),
-      counts, providers: { claude, codex, grok, grokBot, opencode, ollama }, usage: agentsUsage(),
+      counts, providers: { claude, codex, grok, grokBot, opencode, hermes, ollama }, usage: agentsUsage(),
       usageDays: heatDays.map(localDayKey),
       heatmap: { start: start7, days: heatDays, cells: heat.map(c => [c.n, c.p]) },
       github,
