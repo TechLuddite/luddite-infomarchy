@@ -2350,26 +2350,55 @@ async function fetchGrokBilling(): Promise<any | null> {
   } catch { return null; }
 }
 export function grokBillingRefreshDue(existing: any, stamp: number, force = false): boolean {
-  if (force) return true;
   if (process.env.INFOMARCHY_SKIP_GROK_BILLING === "1") return false;
+  if (force) return true;
   const attemptedAt = Number(existing && existing.attemptedAt || existing && existing.fetchedAt || 0);
-  if (attemptedAt && stamp - attemptedAt < GROK_BILLING_REFRESH_MS && Array.isArray(existing?.limits) && existing.limits.length) return false;
+  if (attemptedAt && stamp - attemptedAt < GROK_BILLING_REFRESH_MS) return false;
   return true;
 }
-async function refreshGrokBilling() {
+// flock operates on the inherited stdin descriptor's open-file description.
+// Keeping our descriptor open holds the lock after flock exits; closing it
+// (including process death) releases it. Never unlink/replace the lock inode.
+async function withGrokBillingLock(directory: string, action: () => Promise<void>): Promise<void> {
+  if (!ensurePrivateStateDir(directory)) return;
+  let fd = -1;
   try {
-  if (process.env.INFOMARCHY_SKIP_GROK_BILLING === "1") return;
-  const path = join(STATE_DIR, GROK_BILLING_FILE);
-  const existing = parseJsonBounded(readRegularFileLimited(path, 4096) || "", 4096, 8);
-  if (!grokBillingRefreshDue(existing, now, FORCE_REFRESH)) return;
-  const live = parseGrokCreditsConfig(await fetchGrokBilling());
-  const fromLog = live ? null : grokBillingFromUnifiedLog(readHistoryTail(join(process.env.GROK_HOME || join(HOME, ".grok"), "logs", "unified.jsonl"), 64 * 1024) || "");
-  const parsed = live || fromLog;
-  const next = parsed
-    ? { fetchedAt: now, attemptedAt: now, source: live ? "live" : "log", percent: parsed.percent, resetsAt: parsed.resetsAt, products: parsed.products, limits: grokBillingMeters(parsed) }
-    : { ...(existing && typeof existing === "object" ? existing : {}), attemptedAt: now };
-  writePrivateStateFile(STATE_DIR, GROK_BILLING_FILE, JSON.stringify(next) + "\n");
+    fd = openSync(join(directory, "grok-billing.lock"), constants.O_RDWR | constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK, 0o600);
+    const state = fstatSync(fd);
+    if (!state.isFile() || state.nlink !== 1 || state.uid !== process.getuid!() || (state.mode & 0o077) || state.size !== 0) return;
+    const proc = Bun.spawn(["/usr/bin/flock", "--nonblock", "0"], { stdin: fd, stdout: "ignore", stderr: "ignore" });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const code = await Promise.race([proc.exited, new Promise<number>(resolve => { timer = setTimeout(() => resolve(-1), 1000); })]);
+    clearTimeout(timer);
+    if (code === -1) { await terminate(proc); return; }
+    if (code !== 0) return;
+    await action();
   } catch {}
+  finally { if (fd >= 0) try { closeSync(fd); } catch {} }
+}
+export async function refreshGrokBilling(options: {
+  directory?: string; stamp?: number; force?: boolean;
+  fetchBilling?: () => Promise<any>; readLog?: () => string;
+} = {}) {
+  if (process.env.INFOMARCHY_SKIP_GROK_BILLING === "1") return;
+  const directory = options.directory ?? STATE_DIR;
+  const cached = parseJsonBounded(readRegularFileLimited(join(directory, GROK_BILLING_FILE), 4096) || "", 4096, 8);
+  if (!grokBillingRefreshDue(cached, options.stamp ?? Date.now(), options.force ?? FORCE_REFRESH)) return;
+  await withGrokBillingLock(directory, async () => {
+    const stamp = options.stamp ?? Date.now();
+    const existing = parseJsonBounded(readRegularFileLimited(join(directory, GROK_BILLING_FILE), 4096) || "", 4096, 8);
+    if (!grokBillingRefreshDue(existing, stamp, options.force ?? FORCE_REFRESH)) return;
+    // Persist the attempt before I/O, so failures and interrupted collectors
+    // receive the same backoff as successful requests.
+    const attempted = { ...(existing && typeof existing === "object" ? existing : {}), attemptedAt: stamp };
+    if (!writePrivateStateFile(directory, GROK_BILLING_FILE, JSON.stringify(attempted) + "\n")) return;
+    const live = parseGrokCreditsConfig(await (options.fetchBilling ?? fetchGrokBilling)());
+    const fromLog = live ? null : grokBillingFromUnifiedLog(options.readLog ? options.readLog() : (readHistoryTail(join(process.env.GROK_HOME || join(HOME, ".grok"), "logs", "unified.jsonl"), 64 * 1024) || ""));
+    const parsed = live || fromLog;
+    if (!parsed) return;
+    const next = { fetchedAt: stamp, attemptedAt: stamp, source: live ? "live" : "log", percent: parsed.percent, resetsAt: parsed.resetsAt, products: parsed.products, limits: grokBillingMeters(parsed) };
+    writePrivateStateFile(directory, GROK_BILLING_FILE, JSON.stringify(next) + "\n");
+  });
 }
 function normalizeLimitRows(rows: unknown, fallbackReset = ""): any[] {
   const out: any[] = [];

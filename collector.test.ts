@@ -4,7 +4,7 @@ import { Database } from "bun:sqlite";
 import { tmpdir } from "os";
 import { join, relative } from "path";
 import { providerOf, titleLooksBusy, cmdIsTurnInhibitor, sessionIdFrom, sessionHostsFromEnvironment, tmuxSocketFromEnvironment, parseTmuxPanes, parseTmuxClients, tmuxPaneForAncestors, linkRecentToLive, inferSessionIdsFromRecent, attachSessionTopics, localSessionSummary, cleanGeneratedSummary, activityCellIndex, parseExternalIpTrace, externalIpCacheFresh, frameSnapshot, parseJsonBounded, readRegularFileLimited, safePrompt, sessionPresentation, writePrivateStateFile, decodeProjectDir, dropPartialFirstLine, readHistoryTail, readRegularFileHead, rolloutSessionId, rolloutCwd, topicCacheHit, topicRetryBlocked, pruneTopicCache, reapStateTempFiles, parseGpuLine, parseDfRows, plausibleTimestamp, normalizeUsage, normalizeUsageLimit, ollamaHostIsLocal, topicRefinementAllowed, terminate, rateForModel, estimateValue, valueSummary, alignDailyTokens, localDayKey, loadPricing, todayValueEstimate, herdrSocketFromEnvironment, herdrClientPids, herdrWindowFor, boomuxClientShellId, boomuxWindowFor, backgroundDaemonKind, parseClaudeAgents, sessionStaleness, STALE_AFTER_MS, decodeBase32, grokBotLine, grokBotRow, grokBotAttention, attachGrokBotRoster, validNetDevice, observationalGitCommand, observationalGitEnv, grokUsageFromUpdate, grokUsageFromUpdatesText, foldGrokSessionSnaps, piUserText, piSessionIdFromName, grokObservedLimits, parseGrokCreditsConfig, grokBillingFromUnifiedLog, grokBillingRefreshDue, GROK_BILLING_REFRESH_MS, forceRefreshRequested, claudeOauthExpiredAt, grokSessionUsage, usageModelBreakdown, windowMatchesProvider, hermesSessionByPid } from "./collector.ts";
-import { sqliteUsageIdentity, withGrokObservedLimits } from "./collector.ts";
+import { sqliteUsageIdentity, withGrokObservedLimits, refreshGrokBilling } from "./collector.ts";
 import { sessionEventId } from "./notification-events.ts";
 
 const testRoot = mkdtempSync(join(tmpdir(), "infomarchy-test-"));
@@ -692,13 +692,16 @@ describe("history collection", () => {
     expect(grokBillingRefreshDue(fresh, stamp)).toBe(false);
     expect(grokBillingRefreshDue(fresh, stamp, true)).toBe(true);
     expect(grokBillingRefreshDue({ attemptedAt: stamp - GROK_BILLING_REFRESH_MS, limits: [{ label: "WEEKLY", percent: 0.02 }] }, stamp)).toBe(true);
-    expect(grokBillingRefreshDue({ attemptedAt: stamp, limits: [] }, stamp)).toBe(true);
+    expect(grokBillingRefreshDue({ attemptedAt: stamp, limits: [] }, stamp)).toBe(false);
     expect(grokBillingRefreshDue({}, stamp)).toBe(true);
     expect(forceRefreshRequested(["bun", "collector.ts"])).toBe(false);
     expect(forceRefreshRequested(["bun", "collector.ts", "--force-refresh"])).toBe(true);
     const previous = process.env.INFOMARCHY_SKIP_GROK_BILLING;
     process.env.INFOMARCHY_SKIP_GROK_BILLING = "1";
-    try { expect(grokBillingRefreshDue(fresh, stamp)).toBe(false); }
+    try {
+      expect(grokBillingRefreshDue(fresh, stamp)).toBe(false);
+      expect(grokBillingRefreshDue(fresh, stamp, true)).toBe(false);
+    }
     finally {
       if (previous === undefined) delete process.env.INFOMARCHY_SKIP_GROK_BILLING;
       else process.env.INFOMARCHY_SKIP_GROK_BILLING = previous;
@@ -1515,5 +1518,79 @@ describe("Grok billing without token snapshots", () => {
     expect(withGrokObservedLimits(sessions, dir).limits[0].percent).toBe(0.28);
     const tokens = normalizeUsage({ name: "Grok", todayTotalTokens: 100, limits: [] });
     expect(withGrokObservedLimits(tokens, dir).usageStatusText).toContain("token totals");
+  });
+});
+
+
+describe("Grok billing backoff and mutual exclusion", () => {
+  test("failed first fetch backs off, expires after 60 seconds, and allows hard refresh", async () => {
+    const directory = join(testRoot, "billing-failure");
+    let calls = 0;
+    const options = { directory, readLog: () => "", fetchBilling: async () => { calls++; return null; } };
+    await refreshGrokBilling({ ...options, stamp: 1_000_000 });
+    await refreshGrokBilling({ ...options, stamp: 1_000_001 });
+    expect(calls).toBe(1);
+    await refreshGrokBilling({ ...options, stamp: 1_060_000 });
+    expect(calls).toBe(2);
+    await refreshGrokBilling({ ...options, stamp: 1_060_001, force: true });
+    expect(calls).toBe(3);
+  });
+
+  test("overlapping collectors share a lock, including hard refresh, and release after errors", async () => {
+    const directory = join(testRoot, "billing-overlap");
+    let entered!: () => void, release!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    let calls = 0;
+    const options = { directory, stamp: 2_000_000, readLog: () => "" };
+    const first = refreshGrokBilling({ ...options, fetchBilling: async () => {
+      calls++;
+      entered();
+      await blocked;
+      throw new Error("simulated interrupted fetch");
+    } });
+    try {
+      await started;
+      expect(JSON.parse(readFileSync(join(directory, "grok-billing.json"), "utf8")).attemptedAt).toBe(options.stamp);
+      await refreshGrokBilling({ ...options, force: true, fetchBilling: async () => { calls++; return null; } });
+      expect(calls).toBe(1);
+    } finally { release(); await first; }
+    await refreshGrokBilling({ ...options, force: true, fetchBilling: async () => { calls++; return { creditUsagePercent: 25 }; } });
+    expect(calls).toBe(2);
+    expect(grokObservedLimits(directory)[0].percent).toBe(0.25);
+    // A later outage preserves the successful result while recording backoff.
+    await refreshGrokBilling({ ...options, stamp: 2_060_000, fetchBilling: async () => null });
+    expect(grokObservedLimits(directory)[0].percent).toBe(0.25);
+  });
+
+  test("a killed collector releases its lock for the next hard refresh", async () => {
+    const directory = join(testRoot, "billing-killed");
+    const script = `import { refreshGrokBilling } from ${JSON.stringify(join(import.meta.dir, "collector.ts"))};
+      await refreshGrokBilling({ directory: process.argv[1], force: true, readLog: () => "",
+        fetchBilling: async () => { console.log("locked"); await Bun.sleep(60000); return null; } });`;
+    const child = Bun.spawn([process.execPath, "-e", script, directory], { stdout: "pipe", stderr: "ignore" });
+    try {
+      const reader = child.stdout.getReader();
+      const chunk = await reader.read();
+      expect(new TextDecoder().decode(chunk.value).trim()).toBe("locked");
+      reader.releaseLock();
+      child.kill("SIGKILL");
+      await child.exited;
+      let called = false;
+      await refreshGrokBilling({ directory, force: true, readLog: () => "", fetchBilling: async () => { called = true; return null; } });
+      expect(called).toBe(true);
+    } finally { await terminate(child); }
+  });
+
+  test("a planted lock symlink is refused without touching its target", async () => {
+    const directory = join(testRoot, "billing-lock-symlink");
+    mkdirSync(directory, { recursive: true });
+    const target = join(testRoot, "lock-victim");
+    writeFileSync(target, "must survive");
+    symlinkSync(target, join(directory, "grok-billing.lock"));
+    let called = false;
+    await refreshGrokBilling({ directory, force: true, fetchBilling: async () => { called = true; return null; }, readLog: () => "" });
+    expect(called).toBe(false);
+    expect(readFileSync(target, "utf8")).toBe("must survive");
   });
 });
