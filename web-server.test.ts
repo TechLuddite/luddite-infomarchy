@@ -6,7 +6,7 @@ import {
   DEFAULT_CIDRS, displayMount, escapeHtml, fmtBytes, fmtRate, handleRequest, hostAllowed, ipAllowed, maskSnapshot,
   originAllowed, parseCidr, parseCidrList, parseAsciiQr, parsePrefsPatch, tokensEqual, newToken, ipv4ToInt, wifiLabel,
 } from "./web-server";
-import { obfuscatePrompt, parseDashPrefs, parseThemeColors, renderPage, renderUsageSection, webSectionEnabled } from "./web-page";
+import { obfuscatePrompt, parseDashPrefs, parseThemeColors, providerColorHex, renderPage, renderUsageSection, webSectionEnabled } from "./web-page";
 
 const root = mkdtempSync(join(tmpdir(), "infomarchy-web-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -155,6 +155,41 @@ describe("web mode rendering", () => {
     expect(fmtRate(2_420_000)).toBe("19.4Mb/s");
     expect(displayMount("/home/larry/Projects")).toBe("~/Projects");
     expect(wifiLabel({ wireless: true, ssid: "secret", dev: "wlan0" })).toBe("WIFI");
+    expect(body).toContain("querySelector(\"style\")");
+  });
+
+  test("element colors come from the live Omarchy theme, including named green/yellow keys", () => {
+    const toml = [
+      'background = "#101315"',
+      'foreground = "#cacccc"',
+      'accent = "#798186"',
+      'green = "#9fa5a9"',
+      'yellow = "#d9dbdc"',
+      'red = "#565d60"',
+      'cyan = "#707070"',
+      'blue = "#798186"',
+      'magenta = "#aeaeae"',
+    ].join("\n");
+    const theme = parseThemeColors(toml);
+    expect(theme.green).toBe("#9fa5a9");
+    expect(theme.yellow).toBe("#d9dbdc");
+    expect(providerColorHex("claude", theme)).toBe("#d9dbdc");
+    expect(providerColorHex("codex", theme)).toBe("#707070");
+    expect(providerColorHex("grok", theme)).toBe("#aeaeae");
+    expect(providerColorHex("pi", theme)).toBe("#9fa5a9");
+    const fromAnsi = parseThemeColors('color2 = "#00aa00"\ncolor3 = "#bbbb00"\n');
+    expect(fromAnsi.green).toBe("#00aa00");
+    expect(fromAnsi.yellow).toBe("#bbbb00");
+    const namedWins = parseThemeColors('green = "#111111"\ncolor2 = "#00aa00"\n');
+    expect(namedWins.green).toBe("#111111");
+    const html = renderPage(base.snapshot, "/t/" + token + "/", "", parseDashPrefs({}), theme, false);
+    expect(html).toContain("#9fa5a9");
+    expect(html).toContain("#d9dbdc");
+    expect(html).toContain("#aeaeae");
+    expect(html).toContain("--green:#9fa5a9");
+    expect(html).not.toContain("#61afef");
+    expect(html).not.toContain("#98c379");
+    expect(html).not.toContain("#e5c07b");
   });
 
   test("usage matches the desk: sessions, hasTokenData, per-model meters, status when no bars", () => {
