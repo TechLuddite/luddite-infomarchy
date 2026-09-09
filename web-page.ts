@@ -138,31 +138,30 @@ export function renderTrendSvg(series: { provider: string; points: number[] }[],
   if (n < 1) return "";
   let max = 1;
   for (const row of series) for (const p of row.points) max = Math.max(max, p);
-  const w = 320, h = 88, left = 44, top = 10, bottom = 72, plot = w - left - 6;
-  const xAt = (i: number) => left + (n === 1 ? plot / 2 : i * plot / (n - 1));
-  const yAt = (v: number) => bottom - (v / max) * (bottom - top);
+  const w = 276, h = 72, pad = 1;
+  const xAt = (i: number) => pad + (n === 1 ? (w - pad * 2) / 2 : i * (w - pad * 2) / (n - 1));
+  const yAt = (v: number) => (h - pad) - (v / max) * (h - pad * 2);
   const grid: string[] = [];
   for (let t = 0; t < 3; t++) {
-    const y = top + (bottom - top) * t / 2;
-    grid.push(`<line x1="${left}" y1="${y.toFixed(1)}" x2="${w}" y2="${y.toFixed(1)}" stroke="#444" stroke-width="1"/>`);
-    grid.push(`<text x="2" y="${(y + 3).toFixed(1)}" fill="#888" font-size="9" font-family="ui-monospace,monospace">${escapeHtml(fmt(max * (1 - t / 2)), 12)}</text>`);
+    const y = pad + (h - pad * 2) * t / 2;
+    grid.push(`<line x1="0" y1="${y.toFixed(1)}" x2="${w}" y2="${y.toFixed(1)}" stroke="#444" stroke-width="1"/>`);
   }
   const lines: string[] = [];
   for (const row of series) {
     const color = providerColorHex(row.provider);
     const pts = row.points.map((v, i) => `${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`).join(" ");
-    const area = `${xAt(0).toFixed(1)},${bottom} ${pts} ${xAt(n - 1).toFixed(1)},${bottom}`;
+    const area = `${xAt(0).toFixed(1)},${h - pad} ${pts} ${xAt(n - 1).toFixed(1)},${h - pad}`;
     lines.push(`<polygon points="${area}" fill="${color}" fill-opacity="0.08"/>`);
     lines.push(`<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2"/>`);
   }
-  const labels: string[] = [];
+  const ticks = [max, max / 2, 0].map(v => `<span>${escapeHtml(fmt(v), 12)}</span>`).join("");
+  let xLabels = "";
   if (n > 1) {
     const first = String(days[0] || "").slice(5);
     const last = String(days[n - 1] || "").slice(5);
-    labels.push(`<text x="${left}" y="84" fill="#888" font-size="9" font-family="ui-monospace,monospace">${escapeHtml(first, 8)}</text>`);
-    labels.push(`<text x="${w - 2}" y="84" fill="#888" font-size="9" font-family="ui-monospace,monospace" text-anchor="end">${escapeHtml(last, 8)}</text>`);
+    xLabels = `<div class="chart-x"><span>${escapeHtml(first, 8)}</span><span>${escapeHtml(last, 8)}</span></div>`;
   }
-  return `<svg viewBox="0 0 ${w} ${h}" width="100%" preserveAspectRatio="xMinYMid meet" aria-hidden="true">${grid.join("")}${lines.join("")}${labels.join("")}</svg>`;
+  return `<div class="chart-body"><div class="chart-y">${ticks}</div><svg viewBox="0 0 ${w} ${h}" width="100%" preserveAspectRatio="none" aria-hidden="true">${grid.join("")}${lines.join("")}</svg>${xLabels}</div>`;
 }
 
 export const DEFAULT_RIGHT_ORDER = ["usage", "localAi", "machine", "containers", "media"];
@@ -702,8 +701,11 @@ html, body { margin:0; min-height:100%; background:var(--bg); color:var(--fg); f
 .heat-day { font-size:9px; color:var(--faint); }
 .heat-cell { display:block; border-radius:2px; }
 .chart { padding:4px 0 8px; }
-.chart svg { display:block; width:100%; height:auto; }
-.chart-label { font:11px ui-monospace, monospace; color:var(--dim); letter-spacing:0.06em; margin-bottom:4px; }
+.chart-body { display:grid; grid-template-columns:auto minmax(0,1fr); grid-template-rows:72px auto; column-gap:8px; row-gap:4px; align-items:stretch; }
+.chart-y { display:flex; flex-direction:column; justify-content:space-between; align-items:flex-end; font-size:12px; line-height:1; color:var(--faint); }
+.chart-x { grid-column:2; display:flex; justify-content:space-between; font-size:12px; line-height:1; color:var(--faint); }
+.chart svg { display:block; width:100%; height:72px; }
+.chart-label { font-size:12px; color:var(--dim); letter-spacing:0.06em; margin-bottom:4px; }
 a.refresh, button.privacy-btn { color:${BLUE}; font-size:11px; font-weight:700; letter-spacing:0.06em; text-decoration:none; background:none; border:0; padding:2px 7px; font-family:inherit; cursor:pointer; }
 button.privacy-btn.on { color:${YELLOW}; }
 body.privacy .open { display:none; }

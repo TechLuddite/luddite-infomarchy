@@ -115,9 +115,14 @@ describe("web mode rendering", () => {
     expect(body).not.toContain("$ VALUE · 7 days");
     expect(body).toContain("polyline");
     expect(body).toContain('width="100%"');
-    expect(body).toContain("preserveAspectRatio=\"xMinYMid meet\"");
-    expect(body).toContain(".chart svg { display:block; width:100%; height:auto; }");
+    expect(body).toContain('preserveAspectRatio="none"');
+    expect(body).toContain('class="chart-y"');
+    expect(body).toContain('class="chart-x"');
+    expect(body).not.toContain('font-size="9"');
+    expect(body).toContain(".chart-y { display:flex;");
+    expect(body).toContain(".chart svg { display:block; width:100%; height:72px; }");
     expect(body).not.toContain('height="88"');
+    expect(body).not.toContain("height:auto");
     expect(body).toContain("WEEKLY");
     expect(body).toContain("3%");
     expect(body).toContain("today 4p · 2 sess · 4K tok");
