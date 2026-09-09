@@ -21,6 +21,15 @@ describe("provider-specific session resume", () => {
       "uwsm-app", "--", "xdg-terminal-exec", "--dir=/home/tester/Work folder", "opencode", "--session", "ses_12345678",
     ]);
   });
+
+  test("drops a relative or newline-bearing cwd instead of passing it through", () => {
+    expect(terminalResumeCommand("opencode", "ses_12345678", "relative/path", "/home/tester")).toEqual([
+      "uwsm-app", "--", "xdg-terminal-exec", "opencode", "--session", "ses_12345678",
+    ]);
+    expect(terminalResumeCommand("opencode", "ses_12345678", "/tmp/project\n--bad", "/home/tester")).toEqual([
+      "uwsm-app", "--", "xdg-terminal-exec", "opencode", "--session", "ses_12345678",
+    ]);
+  });
 });
 
 

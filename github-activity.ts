@@ -82,6 +82,10 @@ export function emptyGithubStore(): GithubStore {
   };
 }
 
+export function githubFetchEnabled(env: NodeJS.Dict<string> | NodeJS.ProcessEnv = process.env): boolean {
+  return env.INFOMARCHY_SKIP_GITHUB !== "1";
+}
+
 export function validGithubLogin(value: unknown): string {
   if (typeof value !== "string") return "";
   const login = value.trim();
@@ -94,6 +98,28 @@ function validRepo(value: unknown): string {
   const repo = value.trim();
   const match = /^([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))\/([A-Za-z0-9_.-]{1,100})$/.exec(repo);
   return match && match[2] !== "." && match[2] !== ".." && repo.length <= MAX_REPO_NAME ? repo : "";
+}
+// CI polling must not inherit an agent's cwd. Parse origin to owner/name and
+// only accept github.com. Token-bearing remotes keep the token out of argv:
+// only the owner/name is returned.
+export function githubRepoFromRemote(value: unknown): string {
+  const raw = String(value || "").trim();
+  if (!raw || raw.length > 512 || /[\0\r\n]/.test(raw)) return "";
+  let path = "";
+  if (/^git@github\.com:/i.test(raw)) {
+    path = raw.slice(raw.indexOf(":") + 1);
+  } else {
+    try {
+      const url = new URL(raw);
+      if (url.hostname.toLowerCase() !== "github.com") return "";
+      if (url.protocol !== "https:" && url.protocol !== "http:" && url.protocol !== "ssh:") return "";
+      if (url.port && url.port !== "443" && url.port !== "22") return "";
+      path = url.pathname;
+    } catch { return ""; }
+  }
+  const parts = path.replace(/\.git$/i, "").replace(/^\/+/, "").replace(/\/+$/, "").split("/");
+  if (parts.length !== 2) return "";
+  return validRepo(parts[0] + "/" + parts[1]);
 }
 function validEventId(value: unknown): string {
   const id = typeof value === "string" ? value : typeof value === "number" && Number.isFinite(value) ? String(value) : "";
