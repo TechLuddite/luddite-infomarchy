@@ -81,6 +81,7 @@ and screen placement are described in the work log/conversation.
 - [ ] Many live sessions on a small monitor can push lower cards off screen; panels are deliberately non-scrolling, so cap visible session cards and show "+N more". (Astra finding, 2026-09-05.)
 - [x] Web Mode: desk-matching HTML, SETTINGS/bar widget, multi-token, QR, extra CIDRs, independent web section visibility. Turning WEB off keeps tokens.
 - [x] Web Mode zoom, in-page section chips, narrow UP/DOWN order, recent-task privacy mask.
+- [x] Web Mode Overlay stack (opaque fill, wallpaper img at 0.32, cards at 0.62, no blur), theme-swap wallpaper bust, live theme colors, USAGE meters, recent-task age/folder columns.
 - [ ] Web Mode HTML still embeds WAN/LAN/SSID/`user@host` in `.open` spans while PRIVACY is on (CSS hide only). Keep `maskSnapshot` on the HTML and fetch identity only after PRIVACY is off.
 - [ ] Drop `100.64.0.0/10` from phone default CIDRs unless this host actually uses Tailscale. VPN VLAN CIDR is still unset.
 - [ ] Live plugin clone under `~/.config/omarchy/plugins/techluddite.luddite-infomarchy` drifts from this git checkout. Copy or reinstall after landing on `master`.

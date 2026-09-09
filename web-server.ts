@@ -8,7 +8,7 @@ import { networkInterfaces } from "os";
 import { randomBytes, timingSafeEqual } from "crypto";
 import { isIP } from "net";
 import { dirname, join } from "path";
-import { closeSync, constants, existsSync, fstatSync, openSync, readlinkSync, readSync, unlinkSync } from "fs";
+import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readlinkSync, readSync, unlinkSync } from "fs";
 import { parseJsonBounded, readRegularFileLimited, writePrivateStateFile } from "./collector";
 import {
   DEFAULT_NARROW_ORDER, FALLBACK_THEME, WEB_SECTION_IDS, normalizeOrder, parseDashPrefs, parseThemeColors, renderPage,
@@ -358,6 +358,26 @@ export function resolveBackgroundPath(): string {
   }
 }
 
+export function backgroundRevision(): string {
+  try {
+    const link = lstatSync(BACKGROUND_LINK);
+    const m = Math.round(Number(link.mtimeMs) || 0);
+    if (!Number.isFinite(m) || m < 0 || m > 1e16) return "";
+    let size = 0;
+    try {
+      const target = resolveBackgroundPath();
+      if (target) {
+        const st = lstatSync(target);
+        if (st.isFile()) size = st.size;
+      }
+    } catch {}
+    if (!Number.isFinite(size) || size < 0 || size > 1e16) size = 0;
+    return m + "-" + Math.floor(size);
+  } catch {
+    return "";
+  }
+}
+
 export function readBackgroundImage(): { type: string; bytes: Buffer } | null {
   const path = resolveBackgroundPath();
   if (!path || path.length > 512 || path.includes("\0")) return null;
@@ -553,7 +573,8 @@ export function handleRequest(input: {
   const prefs = input.prefs || loadDashPrefs();
   const theme = input.theme || loadTheme();
   const hasBackground = input.background === undefined ? !!resolveBackgroundPath() : !!input.background;
-  const html = renderPage(input.snapshot, pagePath, nonce, prefs, theme, hasBackground);
+  const bgRev = input.background === undefined ? backgroundRevision() : (hasBackground ? "1-1" : "");
+  const html = renderPage(input.snapshot, pagePath, nonce, prefs, theme, hasBackground, bgRev);
   const result = reply(200, html, "text/html; charset=utf-8", nonce);
   if (method === "HEAD") result.body = "";
   return result;

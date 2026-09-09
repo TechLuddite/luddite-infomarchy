@@ -1,12 +1,12 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
   DEFAULT_CIDRS, displayMount, escapeHtml, fmtBytes, fmtRate, handleRequest, hostAllowed, ipAllowed, maskSnapshot,
   originAllowed, parseCidr, parseCidrList, parseAsciiQr, parsePrefsPatch, tokensEqual, newToken, ipv4ToInt, wifiLabel,
 } from "./web-server";
-import { obfuscatePrompt, parseDashPrefs, parseThemeColors, renderPage, webSectionEnabled } from "./web-page";
+import { LIVE_SCRIPT, obfuscatePrompt, parseDashPrefs, parseThemeColors, providerColorHex, renderPage, renderUsageSection, webSectionEnabled } from "./web-page";
 
 const root = mkdtempSync(join(tmpdir(), "infomarchy-web-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -28,7 +28,7 @@ const base = {
   prefs: parseDashPrefs({}),
   theme: parseThemeColors('background = "#1f1f28"\nforeground = "#dcd7ba"\n'),
   background: null,
-  snapshot: { ts: 1, user: "larry", host: "box", machine: { externalIp: "203.0.113.9", net: { ssid: "secret", addr: "172.20.20.142", wireless: true, signal: -47, dev: "wlan0", rxRate: 2_420_000, txRate: 386_000 }, cpu: { pct: 27.4, load: [1.18, 0.92] }, mem: { pct: 44.4, used: 15_246_073_856, total: 34_359_738_368 }, disks: [{ mount: "/home/larry", size: 1_999_844_147_200, used: 816_043_786_240, pct: 40.8 }], ping: { ok: true, ms: 18.6 }, battery: { pct: 81, status: "Charging" }, temp: 52, uptime: 186_300 }, containers: { present: true, engine: "docker", up: 1, total: 1, items: [{ id: "abc", name: "lab-search-1", label: "search", running: true, state: "running", health: "healthy" }] }, ai: { sessions: [{ provider: "pi", project: "Halo", topic: "<img src=x onerror=alert(1)>" }], attention: [], recent: [{ provider: "opencode", project: "~/Work", text: "<script>alert(1)</script>" }], heatmap: { start: 1, days: [1,2,3,4,5,6,7], cells: Array.from({ length: 168 }, () => [0, {}]) }, usageDays: ["2026-09-01","2026-09-02","2026-09-03","2026-09-04","2026-09-05","2026-09-06","2026-09-07"], usage: { grok: { name: "Grok", ready: true, tierLabel: "weekly", todayPrompts: 4, todayTotalTokens: 4000, dailyTokens: [0,0,0,0,0,100,50], limits: [{ label: "WEEKLY", percent: 0.03, resetsAt: "2026-09-14T00:26:00-07:00" }], value: { lifetime: 1.2, today: 0.1, totals: { inputTokens: 100, outputTokens: 50, cacheReadInputTokens: 10, cacheCreationInputTokens: 0 } } }, claude: { name: "Claude Code", ready: true, tierLabel: "Max 5x", todayPrompts: 0, todayTotalTokens: 0, authHelpText: "Claude Code's saved sign-in expired", limits: [{ label: "Session (5-hour)", percent: 0.16, resetsAt: "2026-09-07T13:10:00Z" }] } }, github: { login: "TechLuddite", cells: Array.from({ length: 168 }, () => [0, {}, {}]), days: [1,2,3,4,5,6,7] }, providers: { ollama: { present: true, up: true, loaded: [{ name: "qwen3:8b" }], models: [{ name: "qwen3:8b", size: 1 }] } } } },
+  snapshot: { ts: 1, user: "larry", host: "box", machine: { externalIp: "203.0.113.9", net: { ssid: "secret", addr: "172.20.20.142", wireless: true, signal: -47, dev: "wlan0", rxRate: 2_420_000, txRate: 386_000 }, cpu: { pct: 27.4, load: [1.18, 0.92] }, mem: { pct: 44.4, used: 15_246_073_856, total: 34_359_738_368 }, disks: [{ mount: "/home/larry", size: 1_999_844_147_200, used: 816_043_786_240, pct: 40.8 }], ping: { ok: true, ms: 18.6 }, battery: { pct: 81, status: "Charging" }, temp: 52, uptime: 186_300 }, containers: { present: true, engine: "docker", up: 1, total: 1, items: [{ id: "abc", name: "lab-search-1", label: "search", running: true, state: "running", health: "healthy" }] }, ai: { sessions: [{ provider: "pi", project: "Halo", topic: "<img src=x onerror=alert(1)>" }], attention: [], recent: [{ provider: "opencode", project: "~/Work", text: "<script>alert(1)</script>", ts: Date.now() - 2 * 3600_000 }], heatmap: { start: 1, days: [1,2,3,4,5,6,7], cells: Array.from({ length: 168 }, () => [0, {}]) }, usageDays: ["2026-09-01","2026-09-02","2026-09-03","2026-09-04","2026-09-05","2026-09-06","2026-09-07"], usage: { grok: { name: "Grok", ready: true, tierLabel: "weekly", todayPrompts: 4, todaySessions: 2, todayTotalTokens: 4000, hasTokenData: true, dailyTokens: [0,0,0,0,0,100,50], models: [{ id: "grok-4.6", share: 0.75, todayTokens: 3000, sessions: 2 }], limits: [{ label: "WEEKLY", percent: 0.03, resetsAt: "2026-09-14T00:26:00-07:00" }], value: { lifetime: 1.2, today: 0.1, totals: { inputTokens: 100, outputTokens: 50, cacheReadInputTokens: 10, cacheCreationInputTokens: 0 } } }, claude: { name: "Claude Code", ready: true, tierLabel: "Max 5x", todayPrompts: 0, todayTotalTokens: 0, hasTokenData: false, authHelpText: "Claude Code's saved sign-in expired", limits: [{ label: "Session (5-hour)", percent: 0.16, resetsAt: "2026-09-07T13:10:00Z" }] } }, github: { login: "TechLuddite", cells: Array.from({ length: 168 }, () => [0, {}, {}]), days: [1,2,3,4,5,6,7] }, providers: { ollama: { present: true, up: true, loaded: [{ name: "qwen3:8b" }], models: [{ name: "qwen3:8b", size: 1 }] } } } },
 };
 
 describe("web mode access control", () => {
@@ -100,13 +100,26 @@ describe("web mode rendering", () => {
     expect(body).toContain("DISK /home/larry");
     expect(body).toContain("LIVE AI SESSIONS");
     expect(body).toContain("RECENT TASKS");
+    expect(body).toContain('class="recent-ago"');
+    expect(body).toContain(">2h<");
+    expect(body).toContain('class="recent-project"');
+    expect(body).toContain(">Work<");
+    expect(body).toContain("grid-template-columns:subgrid");
+    expect(body).toContain("grid-column:1 / -1");
+    expect(body).not.toContain("minmax(4em,7em)");
+    expect(body).not.toContain(".recent-project { color:var(--dim); font-size:12px; overflow:hidden; text-overflow:ellipsis");
+    expect(body).not.toContain(".recent-row .meta { display:none; }");
     expect(body).toContain("LOCAL AI");
     expect(body).toContain("CONTAINERS");
     expect(body).toContain("search");
     expect(body).not.toContain("MEDIA CONTROLS");
     expect(body).toContain("grid-template-columns:minmax(0,1fr) minmax(300px,28%)");
-    expect(body).toContain("background-position:center");
-    expect(body).toContain("background-size:cover");
+    expect(body).not.toContain("backdrop-filter");
+    const deskFill = readFileSync(join(import.meta.dir, "InfoView.qml"), "utf8").match(/cardBg:\s*Util\.alpha\(view\.desk\.themeBackground,\s*([0-9.]+)\)/)?.[1];
+    expect(deskFill).toBeTruthy();
+    expect(body).toMatch(new RegExp(`--card:rgba\\(\\d+,\\d+,\\d+,${deskFill}\\)`));
+    expect(body).toContain("object-position:center");
+    expect(body).toContain("object-fit:cover");
     const usageAt = body.indexOf("USAGE");
     const sessionsAt = body.indexOf("LIVE AI SESSIONS");
     expect(usageAt).toBeGreaterThan(0);
@@ -115,13 +128,22 @@ describe("web mode rendering", () => {
     expect(body).not.toContain("$ VALUE · 7 days");
     expect(body).toContain("polyline");
     expect(body).toContain('width="100%"');
-    expect(body).toContain("preserveAspectRatio=\"xMinYMid meet\"");
-    expect(body).toContain(".chart svg { display:block; width:100%; height:auto; }");
+    expect(body).toContain('preserveAspectRatio="none"');
+    expect(body).toContain('class="chart-y"');
+    expect(body).toContain('class="chart-x"');
+    expect(body).not.toContain('font-size="9"');
+    expect(body).toContain(".chart-y { display:flex;");
+    expect(body).toContain(".chart svg { display:block; width:100%; height:72px; }");
     expect(body).not.toContain('height="88"');
+    expect(body).not.toContain("height:auto");
     expect(body).toContain("WEEKLY");
     expect(body).toContain("3%");
+    expect(body).toContain("today 4p · 2 sess · 4K tok");
+    expect(body).toContain("grok-4.6");
+    expect(body).toContain("3K tok  ·  75%");
     expect(body).toContain("Claude Code");
     expect(body).toContain("sign-in expired");
+    expect(body).not.toContain("today 0p · 0 tok");
     expect(body).not.toContain('http-equiv="refresh"');
     expect(body).toContain(">Refresh</a>");
     expect(body).toContain('id="view"');
@@ -146,6 +168,71 @@ describe("web mode rendering", () => {
     expect(fmtRate(2_420_000)).toBe("19.4Mb/s");
     expect(displayMount("/home/larry/Projects")).toBe("~/Projects");
     expect(wifiLabel({ wireless: true, ssid: "secret", dev: "wlan0" })).toBe("WIFI");
+    expect(body).toContain('querySelector("style")');
+    expect(() => new Function(LIVE_SCRIPT)).not.toThrow();
+  });
+
+  test("element colors come from the live Omarchy theme, including named green/yellow keys", () => {
+    const toml = [
+      'background = "#101315"',
+      'foreground = "#cacccc"',
+      'accent = "#798186"',
+      'green = "#9fa5a9"',
+      'yellow = "#d9dbdc"',
+      'red = "#565d60"',
+      'cyan = "#707070"',
+      'blue = "#798186"',
+      'magenta = "#aeaeae"',
+    ].join("\n");
+    const theme = parseThemeColors(toml);
+    expect(theme.green).toBe("#9fa5a9");
+    expect(theme.yellow).toBe("#d9dbdc");
+    expect(providerColorHex("claude", theme)).toBe("#d9dbdc");
+    expect(providerColorHex("codex", theme)).toBe("#707070");
+    expect(providerColorHex("grok", theme)).toBe("#aeaeae");
+    expect(providerColorHex("pi", theme)).toBe("#9fa5a9");
+    const fromAnsi = parseThemeColors('color2 = "#00aa00"\ncolor3 = "#bbbb00"\n');
+    expect(fromAnsi.green).toBe("#00aa00");
+    expect(fromAnsi.yellow).toBe("#bbbb00");
+    const namedWins = parseThemeColors('green = "#111111"\ncolor2 = "#00aa00"\n');
+    expect(namedWins.green).toBe("#111111");
+    const html = renderPage(base.snapshot, "/t/" + token + "/", "", parseDashPrefs({}), theme, false);
+    expect(html).toContain("#9fa5a9");
+    expect(html).toContain("#d9dbdc");
+    expect(html).toContain("#aeaeae");
+    expect(html).toContain("--green:#9fa5a9");
+    expect(html).not.toContain("#61afef");
+    expect(html).not.toContain("#98c379");
+    expect(html).not.toContain("#e5c07b");
+  });
+
+  test("usage matches the desk: sessions, hasTokenData, per-model meters, status when no bars", () => {
+    const html = renderUsageSection({
+      ai: {
+        usage: {
+          grok: {
+            name: "Grok", ready: true, todayPrompts: 18, todaySessions: 5, hasTokenData: false,
+            models: [{ id: "session-model", share: 0, sessions: 3, todayTokens: 0 }],
+            limits: [], usageStatusText: "credits, not rate-limit windows",
+          },
+          claude: {
+            name: "Claude", ready: true, todayPrompts: 4, todayTotalTokens: 12000, hasTokenData: true,
+            models: [{ id: "family-a", share: 0.7, todayTokens: 8400, sessions: 2 }],
+            limits: [{ label: "WEEKLY", percent: 0.4 }],
+          },
+        },
+      },
+    });
+    expect(html).toContain("today 18p · 5 sess");
+    expect(html).not.toContain("today 18p · 5 sess · 0 tok");
+    expect(html).toContain("credits, not rate-limit windows");
+    expect(html).toContain("session-model");
+    expect(html).toContain("3 sess");
+    expect(html).toContain("family-a");
+    expect(html).toContain("8K tok  ·  70%");
+    expect(html).toContain('class="meter"');
+    expect(html).toContain('class="fill"');
+    expect(html).not.toContain("$ VALUE · 7 days");
   });
 
   test("web section prefs hide a card and media never renders", () => {
@@ -167,13 +254,16 @@ describe("web mode rendering", () => {
       ...base.snapshot,
       ai: {
         ...base.snapshot.ai,
-        recent: [{ provider: "opencode", project: "~/Work", text: "please review the secret token dump now" }],
+        recent: [{ provider: "opencode", project: "~/Projects/luddite-infomarchy", text: "please review the secret token dump now", ts: Date.now() - 90_000 }],
       },
     };
     const html = renderPage(snap, "/t/" + token + "/", "", parseDashPrefs({}), parseThemeColors(""), false);
     expect(html).toContain("please review the secret ···");
     expect(html).toContain("please review the secret token dump now");
     expect(html).toContain('class="shut"');
+    expect(html).toContain(">1m<");
+    expect(html).toContain(">luddite-infomarchy<");
+    expect(html).not.toContain("~/Projects/luddite-infomarchy");
   });
 
   test("accepts a second token and serves wallpaper bytes", () => {
@@ -184,7 +274,22 @@ describe("web mode rendering", () => {
     const bg = handleRequest({ ...base, pathname: `/t/${token}/bg`, background: { type: "image/png", bytes: png } });
     expect(bg.status).toBe(200);
     expect(bg.headers["Content-Type"]).toBe("image/png");
+    expect(bg.headers["Cache-Control"]).toBe("no-store");
     expect(Buffer.from(bg.body as Uint8Array).equals(png)).toBe(true);
+    const page = handleRequest({ ...base, background: { type: "image/png", bytes: png } });
+    const html = String(page.body);
+    expect(html).toContain('<img class="wall" src="bg?v=1-1" alt="" aria-hidden="true">');
+    expect(html).toMatch(/id="view"[^>]*>[\s\S]*class="wall"/);
+    expect(html).toContain(".stage { position:relative; isolation:isolate;");
+    expect(html).toContain("background:var(--bg)");
+    expect(html).toContain(".wall { position:absolute;");
+    expect(html).toContain("opacity:0.32");
+    expect(html).not.toContain("background-image:");
+    const deskWall = readFileSync(join(import.meta.dir, "Infomarchy.qml"), "utf8").match(/wallpaperOpacity:\s*([0-9.]+)/)?.[1];
+    expect(deskWall).toBe("0.32");
+    const poisoned = renderPage(base.snapshot, "/t/" + token + "/", "", parseDashPrefs({}), parseThemeColors(""), true, '1-1" onerror="alert(1)');
+    expect(poisoned).toContain('<img class="wall" src="bg" alt="" aria-hidden="true">');
+    expect(poisoned).not.toMatch(/<img class="wall"[^>]*onerror/i);
   });
 
   test("parses qrencode ASCII into a square matrix", () => {
