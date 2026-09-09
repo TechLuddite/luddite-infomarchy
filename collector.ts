@@ -2398,6 +2398,16 @@ export function grokObservedLimits(directory = STATE_DIR): any[] {
   const parsed = parseJsonBounded(raw, 4096, 8);
   return normalizeLimitRows(parsed && typeof parsed === "object" ? parsed.limits : []);
 }
+export function withGrokObservedLimits(record: any, directory = STATE_DIR): any {
+  const limits = grokObservedLimits(directory);
+  if (!limits.length) return record;
+  return {
+    ...record,
+    limits,
+    tierLabel: "weekly",
+    usageStatusText: "weekly pool from Grok billing, plus local " + (record.hasTokenData ? "token totals" : "session counts"),
+  };
+}
 const MAX_GROK_USAGE_SESSIONS = 256;
 const MAX_GROK_UPDATE_TAIL = 512 * 1024;
 const MAX_OPENCODE_USAGE_ROWS = 20_000;
@@ -2523,14 +2533,8 @@ function grokLocalUsage(): any | null {
   const identity = files.map(path => {
     try { const state = lstatSync(path); return `${path}:${state.size}:${Math.round(state.mtimeMs)}`; } catch { return path; }
   }).join("|");
-  let limitsIdentity = "";
-  for (const name of ["grok-limits.json", GROK_BILLING_FILE]) {
-    try {
-      const limitsState = lstatSync(join(STATE_DIR, name));
-      if (limitsState.isFile()) limitsIdentity += `|${name}:${limitsState.size}:${Math.round(limitsState.mtimeMs)}`;
-    } catch {}
-  }
-  const hashed = String(Bun.hash(identity + "|" + limitsIdentity));
+  // Billing is attached after selecting the local record, including cache hits.
+  const hashed = String(Bun.hash(identity + "|" + localDayKey(now)));
   const cached = prev.grokLocalUsage && prev.grokLocalUsage.identity === hashed ? prev.grokLocalUsage : null;
   if (!FORCE_REFRESH && cached?.record) { currentGrokUsageCache = cached; return cached.record; }
   const modelUsage: Record<string, TokenUsage> = {};
@@ -2554,7 +2558,6 @@ function grokLocalUsage(): any | null {
   if (!sessions.size) return null;
   const dayKeys = heatDays.map(localDayKey);
   const todayTotalTokens = daily.get(today) || 0;
-  const observed = grokObservedLimits();
   const record = localUsageRecord({
     name: "Grok",
     todayPrompts: counts.grok?.today || 0, todaySessions: todaySessions.size, todayTotalTokens,
@@ -2562,11 +2565,6 @@ function grokLocalUsage(): any | null {
     modelUsage, todayTokensByModel,
     recentDays: dayKeys.map(date => ({ date, messageCount: daily.get(date) || 0 })),
   });
-  if (observed.length) {
-    record.limits = observed;
-    record.tierLabel = "weekly";
-    record.usageStatusText = "weekly pool from Grok billing, plus local token totals";
-  }
   currentGrokUsageCache = { identity: hashed, record };
   return record;
 }
@@ -2770,8 +2768,10 @@ function agentsUsage() {
   // Omarchy does not ship grok or opencode collectors. Fill those rows from
   // local session files. Never write into Omarchy's usage directory, and never
   // replace a record Omarchy already produced.
-  if (!out.grok) { const grok = grokLocalUsage(); if (grok) out.grok = grok; }
-  if (!out.grok) { const grok = grokUsage(); if (grok) out.grok = grok; }
+  if (!out.grok) {
+    const grok = grokLocalUsage() || grokUsage();
+    if (grok) out.grok = withGrokObservedLimits(grok);
+  }
   if (!out.opencode) { const oc = opencodeLocalUsage(); if (oc) out.opencode = oc; }
   return out;
 }

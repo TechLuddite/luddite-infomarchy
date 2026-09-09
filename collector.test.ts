@@ -4,7 +4,7 @@ import { Database } from "bun:sqlite";
 import { tmpdir } from "os";
 import { join, relative } from "path";
 import { providerOf, titleLooksBusy, cmdIsTurnInhibitor, sessionIdFrom, sessionHostsFromEnvironment, tmuxSocketFromEnvironment, parseTmuxPanes, parseTmuxClients, tmuxPaneForAncestors, linkRecentToLive, inferSessionIdsFromRecent, attachSessionTopics, localSessionSummary, cleanGeneratedSummary, activityCellIndex, parseExternalIpTrace, externalIpCacheFresh, frameSnapshot, parseJsonBounded, readRegularFileLimited, safePrompt, sessionPresentation, writePrivateStateFile, decodeProjectDir, dropPartialFirstLine, readHistoryTail, readRegularFileHead, rolloutSessionId, rolloutCwd, topicCacheHit, topicRetryBlocked, pruneTopicCache, reapStateTempFiles, parseGpuLine, parseDfRows, plausibleTimestamp, normalizeUsage, normalizeUsageLimit, ollamaHostIsLocal, topicRefinementAllowed, terminate, rateForModel, estimateValue, valueSummary, alignDailyTokens, localDayKey, loadPricing, todayValueEstimate, herdrSocketFromEnvironment, herdrClientPids, herdrWindowFor, boomuxClientShellId, boomuxWindowFor, backgroundDaemonKind, parseClaudeAgents, sessionStaleness, STALE_AFTER_MS, decodeBase32, grokBotLine, grokBotRow, grokBotAttention, attachGrokBotRoster, validNetDevice, observationalGitCommand, observationalGitEnv, grokUsageFromUpdate, grokUsageFromUpdatesText, foldGrokSessionSnaps, piUserText, piSessionIdFromName, grokObservedLimits, parseGrokCreditsConfig, grokBillingFromUnifiedLog, grokBillingRefreshDue, GROK_BILLING_REFRESH_MS, forceRefreshRequested, claudeOauthExpiredAt, grokSessionUsage, usageModelBreakdown, windowMatchesProvider, hermesSessionByPid } from "./collector.ts";
-import { sqliteUsageIdentity } from "./collector.ts";
+import { sqliteUsageIdentity, withGrokObservedLimits } from "./collector.ts";
 import { sessionEventId } from "./notification-events.ts";
 
 const testRoot = mkdtempSync(join(tmpdir(), "infomarchy-test-"));
@@ -1490,5 +1490,30 @@ describe("OpenCode usage cache invalidation", () => {
       expect(sqliteUsageIdentity(path, today)).not.toBe(committed);
     } finally { db.close(); }
     expect(sqliteUsageIdentity(join(testRoot, "missing.db"))).toBeNull();
+  });
+});
+
+
+describe("Grok billing without token snapshots", () => {
+  test("attaches observed limits to session-only usage without inventing tokens", () => {
+    const dir = join(testRoot, "grok-session-billing");
+    mkdirSync(dir, { recursive: true });
+    const sessions = normalizeUsage({ name: "Grok", totalSessions: 3, todaySessions: 1, modelSessions: { grok: 3 }, limits: [] });
+    expect(withGrokObservedLimits(sessions, dir).limits).toEqual([]);
+    writeFileSync(join(dir, "grok-billing.json"), JSON.stringify({ limits: [{ label: "WEEKLY", percent: 0.17 }] }));
+    const result = withGrokObservedLimits(sessions, dir);
+    expect(result.limits[0].percent).toBe(0.17);
+    expect(result.tierLabel).toBe("weekly");
+    expect(result.hasTokenData).toBe(false);
+    expect(result.todaySessions).toBe(1);
+    expect(result.totalSessions).toBe(3);
+    expect(result.models).toEqual(sessions.models);
+    expect(result.usageStatusText).toContain("session counts");
+    expect(sessions.limits).toEqual([]);
+    // A new billing result must be visible even when the local record is cached.
+    writeFileSync(join(dir, "grok-billing.json"), JSON.stringify({ limits: [{ label: "WEEKLY", percent: 0.28 }] }));
+    expect(withGrokObservedLimits(sessions, dir).limits[0].percent).toBe(0.28);
+    const tokens = normalizeUsage({ name: "Grok", todayTotalTokens: 100, limits: [] });
+    expect(withGrokObservedLimits(tokens, dir).usageStatusText).toContain("token totals");
   });
 });
