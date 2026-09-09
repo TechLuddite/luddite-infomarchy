@@ -335,10 +335,16 @@ function fmtAgo(ts: unknown, now = Date.now()): string {
   const t = Number(ts);
   if (!Number.isFinite(t) || t <= 0) return "";
   const s = Math.max(0, (now - t) / 1000);
-  if (s < 60) return "now";
+  if (s < 60) return Math.floor(s) + "s";
   if (s < 3600) return Math.floor(s / 60) + "m";
   if (s < 86400) return Math.floor(s / 3600) + "h";
   return Math.floor(s / 86400) + "d";
+}
+
+function folderName(path: unknown): string {
+  const raw = String(path || "").replace(/\/+$/, "");
+  const base = raw.replace(/^.*\//, "");
+  return base || raw;
 }
 
 function cellCount(cell: unknown): number {
@@ -619,7 +625,8 @@ function renderRecent(snap: any, prefs: DashPrefs = parseDashPrefs({}), theme: T
     const textHtml = shut === full
       ? escapeHtml(full, 200)
       : `<span class="shut">${escapeHtml(shut, 80)}</span><span class="open">${escapeHtml(full, 200)}</span>`;
-    return `<div class="recent-row"><span class="tag" style="color:${tone}">${escapeHtml(item.provider, 16)}</span><span class="recent-text">${textHtml}</span><span class="meta">${escapeHtml(item.project, 48)}</span></div>`;
+    const project = folderName(item.project);
+    return `<div class="recent-row"><span class="recent-ago">${escapeHtml(fmtAgo(item.ts), 8)}</span><span class="tag" style="color:${tone}">${escapeHtml(item.provider, 16)}</span><span class="recent-project">${escapeHtml(project, 32)}</span><span class="recent-text">${textHtml}</span></div>`;
   }).join("");
   return card("RECENT TASKS · WHAT GOT ASKED", `<div class="recent">${rows}</div>`, "", "recent", m.on, m.order);
 }
@@ -714,7 +721,9 @@ html, body { margin:0; min-height:100%; background:var(--bg); color:var(--fg); f
 .row { border:1px solid var(--border); border-radius:var(--radius); padding:6px 8px; margin:0 0 6px; }
 .row:last-child { margin-bottom:0; }
 .recent { max-height:42vh; overflow:auto; }
-.recent-row { display:grid; grid-template-columns:72px minmax(0,1fr) minmax(0,28%); gap:8px; align-items:baseline; padding:3px 0; border-bottom:1px solid var(--border); }
+.recent-row { display:grid; grid-template-columns:2.2em auto minmax(4em,7em) minmax(0,1fr); gap:8px; align-items:baseline; padding:3px 0; border-bottom:1px solid var(--border); }
+.recent-ago { color:var(--faint); font-size:12px; text-align:right; }
+.recent-project { color:var(--dim); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .recent-text { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .heat { display:flex; flex-direction:column; gap:2px; }
 .heat-row { display:grid; grid-template-columns:22px repeat(24,minmax(0,1fr)); gap:2px; height:14px; }
@@ -737,8 +746,7 @@ body:not(.privacy) .shut { display:none; }
   .block { order:var(--stack-order, 50); }
   .move { display:inline-flex; gap:4px; margin-left:8px; }
   .recent { max-height:none; }
-  .recent-row { grid-template-columns:64px 1fr; }
-  .recent-row .meta { display:none; }
+  .recent-row { grid-template-columns:2.2em auto minmax(3.5em,6em) minmax(0,1fr); }
 }
 @media (max-width:640px) {
   .grid { grid-template-columns:1fr; }

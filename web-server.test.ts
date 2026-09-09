@@ -28,7 +28,7 @@ const base = {
   prefs: parseDashPrefs({}),
   theme: parseThemeColors('background = "#1f1f28"\nforeground = "#dcd7ba"\n'),
   background: null,
-  snapshot: { ts: 1, user: "larry", host: "box", machine: { externalIp: "203.0.113.9", net: { ssid: "secret", addr: "172.20.20.142", wireless: true, signal: -47, dev: "wlan0", rxRate: 2_420_000, txRate: 386_000 }, cpu: { pct: 27.4, load: [1.18, 0.92] }, mem: { pct: 44.4, used: 15_246_073_856, total: 34_359_738_368 }, disks: [{ mount: "/home/larry", size: 1_999_844_147_200, used: 816_043_786_240, pct: 40.8 }], ping: { ok: true, ms: 18.6 }, battery: { pct: 81, status: "Charging" }, temp: 52, uptime: 186_300 }, containers: { present: true, engine: "docker", up: 1, total: 1, items: [{ id: "abc", name: "lab-search-1", label: "search", running: true, state: "running", health: "healthy" }] }, ai: { sessions: [{ provider: "pi", project: "Halo", topic: "<img src=x onerror=alert(1)>" }], attention: [], recent: [{ provider: "opencode", project: "~/Work", text: "<script>alert(1)</script>" }], heatmap: { start: 1, days: [1,2,3,4,5,6,7], cells: Array.from({ length: 168 }, () => [0, {}]) }, usageDays: ["2026-09-01","2026-09-02","2026-09-03","2026-09-04","2026-09-05","2026-09-06","2026-09-07"], usage: { grok: { name: "Grok", ready: true, tierLabel: "weekly", todayPrompts: 4, todaySessions: 2, todayTotalTokens: 4000, hasTokenData: true, dailyTokens: [0,0,0,0,0,100,50], models: [{ id: "grok-4.6", share: 0.75, todayTokens: 3000, sessions: 2 }], limits: [{ label: "WEEKLY", percent: 0.03, resetsAt: "2026-09-14T00:26:00-07:00" }], value: { lifetime: 1.2, today: 0.1, totals: { inputTokens: 100, outputTokens: 50, cacheReadInputTokens: 10, cacheCreationInputTokens: 0 } } }, claude: { name: "Claude Code", ready: true, tierLabel: "Max 5x", todayPrompts: 0, todayTotalTokens: 0, hasTokenData: false, authHelpText: "Claude Code's saved sign-in expired", limits: [{ label: "Session (5-hour)", percent: 0.16, resetsAt: "2026-09-07T13:10:00Z" }] } }, github: { login: "TechLuddite", cells: Array.from({ length: 168 }, () => [0, {}, {}]), days: [1,2,3,4,5,6,7] }, providers: { ollama: { present: true, up: true, loaded: [{ name: "qwen3:8b" }], models: [{ name: "qwen3:8b", size: 1 }] } } } },
+  snapshot: { ts: 1, user: "larry", host: "box", machine: { externalIp: "203.0.113.9", net: { ssid: "secret", addr: "172.20.20.142", wireless: true, signal: -47, dev: "wlan0", rxRate: 2_420_000, txRate: 386_000 }, cpu: { pct: 27.4, load: [1.18, 0.92] }, mem: { pct: 44.4, used: 15_246_073_856, total: 34_359_738_368 }, disks: [{ mount: "/home/larry", size: 1_999_844_147_200, used: 816_043_786_240, pct: 40.8 }], ping: { ok: true, ms: 18.6 }, battery: { pct: 81, status: "Charging" }, temp: 52, uptime: 186_300 }, containers: { present: true, engine: "docker", up: 1, total: 1, items: [{ id: "abc", name: "lab-search-1", label: "search", running: true, state: "running", health: "healthy" }] }, ai: { sessions: [{ provider: "pi", project: "Halo", topic: "<img src=x onerror=alert(1)>" }], attention: [], recent: [{ provider: "opencode", project: "~/Work", text: "<script>alert(1)</script>", ts: Date.now() - 2 * 3600_000 }], heatmap: { start: 1, days: [1,2,3,4,5,6,7], cells: Array.from({ length: 168 }, () => [0, {}]) }, usageDays: ["2026-09-01","2026-09-02","2026-09-03","2026-09-04","2026-09-05","2026-09-06","2026-09-07"], usage: { grok: { name: "Grok", ready: true, tierLabel: "weekly", todayPrompts: 4, todaySessions: 2, todayTotalTokens: 4000, hasTokenData: true, dailyTokens: [0,0,0,0,0,100,50], models: [{ id: "grok-4.6", share: 0.75, todayTokens: 3000, sessions: 2 }], limits: [{ label: "WEEKLY", percent: 0.03, resetsAt: "2026-09-14T00:26:00-07:00" }], value: { lifetime: 1.2, today: 0.1, totals: { inputTokens: 100, outputTokens: 50, cacheReadInputTokens: 10, cacheCreationInputTokens: 0 } } }, claude: { name: "Claude Code", ready: true, tierLabel: "Max 5x", todayPrompts: 0, todayTotalTokens: 0, hasTokenData: false, authHelpText: "Claude Code's saved sign-in expired", limits: [{ label: "Session (5-hour)", percent: 0.16, resetsAt: "2026-09-07T13:10:00Z" }] } }, github: { login: "TechLuddite", cells: Array.from({ length: 168 }, () => [0, {}, {}]), days: [1,2,3,4,5,6,7] }, providers: { ollama: { present: true, up: true, loaded: [{ name: "qwen3:8b" }], models: [{ name: "qwen3:8b", size: 1 }] } } } },
 };
 
 describe("web mode access control", () => {
@@ -100,6 +100,11 @@ describe("web mode rendering", () => {
     expect(body).toContain("DISK /home/larry");
     expect(body).toContain("LIVE AI SESSIONS");
     expect(body).toContain("RECENT TASKS");
+    expect(body).toContain('class="recent-ago"');
+    expect(body).toContain(">2h<");
+    expect(body).toContain('class="recent-project"');
+    expect(body).toContain(">Work<");
+    expect(body).not.toContain(".recent-row .meta { display:none; }");
     expect(body).toContain("LOCAL AI");
     expect(body).toContain("CONTAINERS");
     expect(body).toContain("search");
@@ -241,13 +246,16 @@ describe("web mode rendering", () => {
       ...base.snapshot,
       ai: {
         ...base.snapshot.ai,
-        recent: [{ provider: "opencode", project: "~/Work", text: "please review the secret token dump now" }],
+        recent: [{ provider: "opencode", project: "~/Projects/luddite-infomarchy", text: "please review the secret token dump now", ts: Date.now() - 90_000 }],
       },
     };
     const html = renderPage(snap, "/t/" + token + "/", "", parseDashPrefs({}), parseThemeColors(""), false);
     expect(html).toContain("please review the secret ···");
     expect(html).toContain("please review the secret token dump now");
     expect(html).toContain('class="shut"');
+    expect(html).toContain(">1m<");
+    expect(html).toContain(">luddite-infomarchy<");
+    expect(html).not.toContain("~/Projects/luddite-infomarchy");
   });
 
   test("accepts a second token and serves wallpaper bytes", () => {
