@@ -698,7 +698,7 @@ html, body { margin:0; min-height:100%; background:var(--bg); color:var(--fg); f
 .left, .right { display:flex; flex-direction:column; gap:var(--gap); min-width:0; }
 .ops { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:var(--gap); }
 .heats { display:grid; grid-template-columns:1fr 1fr; gap:var(--gap); }
-.card { background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:12px 14px; backdrop-filter:blur(8px); }
+.card { background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:12px 14px; }
 .card-head { display:flex; justify-content:space-between; gap:12px; margin-bottom:8px; }
 .card-title { font-size:11px; letter-spacing:0.12em; color:var(--dim); font-weight:700; }
 .card-hint { font-size:11px; color:var(--faint); text-align:right; }

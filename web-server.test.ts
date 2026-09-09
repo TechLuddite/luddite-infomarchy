@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
@@ -114,6 +114,10 @@ describe("web mode rendering", () => {
     expect(body).toContain("search");
     expect(body).not.toContain("MEDIA CONTROLS");
     expect(body).toContain("grid-template-columns:minmax(0,1fr) minmax(300px,28%)");
+    expect(body).not.toContain("backdrop-filter");
+    const deskFill = readFileSync(join(import.meta.dir, "InfoView.qml"), "utf8").match(/cardBg:\s*Util\.alpha\(view\.desk\.themeBackground,\s*([0-9.]+)\)/)?.[1];
+    expect(deskFill).toBeTruthy();
+    expect(body).toMatch(new RegExp(`--card:rgba\\(\\d+,\\d+,\\d+,${deskFill}\\)`));
     expect(body).toContain("background-position:center");
     expect(body).toContain("background-size:cover");
     const usageAt = body.indexOf("USAGE");
