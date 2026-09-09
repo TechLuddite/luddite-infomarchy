@@ -2570,15 +2570,29 @@ function grokLocalUsage(): any | null {
   currentGrokUsageCache = { identity: hashed, record };
   return record;
 }
+export function sqliteUsageIdentity(path: string, stamp = now): string | null {
+  try {
+    const stat = lstatSync(path, { bigint: true });
+    if (!stat.isFile()) return null;
+    const fileKey = (s: typeof stat) => `${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`;
+    let wal = "absent";
+    try {
+      const state = lstatSync(path + "-wal", { bigint: true });
+      if (!state.isFile()) return null;
+      wal = fileKey(state);
+    } catch (error: any) {
+      if (error?.code !== "ENOENT") return null;
+    }
+    // WAL commits need not touch the database file. Date-sensitive totals
+    // also expire at local midnight even when neither file has changed.
+    return `${localDayKey(stamp)}|${fileKey(stat)}|${wal}`;
+  } catch { return null; }
+}
 function opencodeLocalUsage(): any | null {
   const dataRoot = process.env.XDG_DATA_HOME || join(HOME, ".local/share");
   const path = join(dataRoot, "opencode/opencode.db");
-  let identity = "";
-  try {
-    const stat = lstatSync(path);
-    if (!stat.isFile()) return null;
-    identity = `${stat.size}:${Math.round(stat.mtimeMs)}`;
-  } catch { return null; }
+  const identity = sqliteUsageIdentity(path);
+  if (!identity) return null;
   const cached = prev.opencodeLocalUsage && prev.opencodeLocalUsage.identity === identity ? prev.opencodeLocalUsage : null;
   if (!FORCE_REFRESH && cached?.record) { currentOpencodeUsageCache = cached; return cached.record; }
   let db: Database | null = null;

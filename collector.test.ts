@@ -4,6 +4,7 @@ import { Database } from "bun:sqlite";
 import { tmpdir } from "os";
 import { join, relative } from "path";
 import { providerOf, titleLooksBusy, cmdIsTurnInhibitor, sessionIdFrom, sessionHostsFromEnvironment, tmuxSocketFromEnvironment, parseTmuxPanes, parseTmuxClients, tmuxPaneForAncestors, linkRecentToLive, inferSessionIdsFromRecent, attachSessionTopics, localSessionSummary, cleanGeneratedSummary, activityCellIndex, parseExternalIpTrace, externalIpCacheFresh, frameSnapshot, parseJsonBounded, readRegularFileLimited, safePrompt, sessionPresentation, writePrivateStateFile, decodeProjectDir, dropPartialFirstLine, readHistoryTail, readRegularFileHead, rolloutSessionId, rolloutCwd, topicCacheHit, topicRetryBlocked, pruneTopicCache, reapStateTempFiles, parseGpuLine, parseDfRows, plausibleTimestamp, normalizeUsage, normalizeUsageLimit, ollamaHostIsLocal, topicRefinementAllowed, terminate, rateForModel, estimateValue, valueSummary, alignDailyTokens, localDayKey, loadPricing, todayValueEstimate, herdrSocketFromEnvironment, herdrClientPids, herdrWindowFor, boomuxClientShellId, boomuxWindowFor, backgroundDaemonKind, parseClaudeAgents, sessionStaleness, STALE_AFTER_MS, decodeBase32, grokBotLine, grokBotRow, grokBotAttention, attachGrokBotRoster, validNetDevice, observationalGitCommand, observationalGitEnv, grokUsageFromUpdate, grokUsageFromUpdatesText, foldGrokSessionSnaps, piUserText, piSessionIdFromName, grokObservedLimits, parseGrokCreditsConfig, grokBillingFromUnifiedLog, grokBillingRefreshDue, GROK_BILLING_REFRESH_MS, forceRefreshRequested, claudeOauthExpiredAt, grokSessionUsage, usageModelBreakdown, windowMatchesProvider, hermesSessionByPid } from "./collector.ts";
+import { sqliteUsageIdentity } from "./collector.ts";
 import { sessionEventId } from "./notification-events.ts";
 
 const testRoot = mkdtempSync(join(tmpdir(), "infomarchy-test-"));
@@ -1464,5 +1465,30 @@ describe("container snapshot", () => {
     expect(snap.containers).toMatchObject({ present: true, engine: "docker", up: 3, total: 4 });
     expect(snap.containers.items.map((item: any) => item.label)).toEqual(["search", "proxy", "db", "worker"]);
     expect(JSON.stringify(snap.containers)).not.toContain("/home/");
+  });
+});
+
+
+describe("OpenCode usage cache invalidation", () => {
+  test("WAL commits and local midnight invalidate otherwise unchanged usage", () => {
+    const path = join(testRoot, "usage-wal.db");
+    const db = new Database(path);
+    try {
+      db.exec("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; CREATE TABLE message (tokens INTEGER); INSERT INTO message VALUES (100); PRAGMA wal_checkpoint(TRUNCATE)");
+      const today = new Date(2026, 8, 9, 12).getTime();
+      const before = sqliteUsageIdentity(path, today);
+      expect(before).not.toBeNull();
+      expect(sqliteUsageIdentity(path, today)).toBe(before);
+      const main = lstatSync(path, { bigint: true });
+      db.exec("INSERT INTO message VALUES (200)");
+      expect(lstatSync(path, { bigint: true }).mtimeNs).toBe(main.mtimeNs);
+      expect(lstatSync(path, { bigint: true }).size).toBe(main.size);
+      const committed = sqliteUsageIdentity(path, today);
+      expect(committed).not.toBe(before);
+      expect(sqliteUsageIdentity(path, new Date(2026, 8, 10, 0).getTime())).not.toBe(committed);
+      db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+      expect(sqliteUsageIdentity(path, today)).not.toBe(committed);
+    } finally { db.close(); }
+    expect(sqliteUsageIdentity(join(testRoot, "missing.db"))).toBeNull();
   });
 });
