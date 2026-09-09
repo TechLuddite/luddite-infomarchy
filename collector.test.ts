@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, sy
 import { Database } from "bun:sqlite";
 import { tmpdir } from "os";
 import { join, relative } from "path";
-import { providerOf, titleLooksBusy, cmdIsTurnInhibitor, sessionIdFrom, sessionHostsFromEnvironment, tmuxSocketFromEnvironment, parseTmuxPanes, parseTmuxClients, tmuxPaneForAncestors, linkRecentToLive, inferSessionIdsFromRecent, attachSessionTopics, localSessionSummary, cleanGeneratedSummary, activityCellIndex, parseExternalIpTrace, externalIpCacheFresh, frameSnapshot, parseJsonBounded, readRegularFileLimited, safePrompt, sessionPresentation, writePrivateStateFile, decodeProjectDir, dropPartialFirstLine, readHistoryTail, readRegularFileHead, rolloutSessionId, rolloutCwd, topicCacheHit, topicRetryBlocked, pruneTopicCache, reapStateTempFiles, parseGpuLine, parseDfRows, plausibleTimestamp, normalizeUsage, normalizeUsageLimit, ollamaHostIsLocal, topicRefinementAllowed, terminate, rateForModel, estimateValue, valueSummary, alignDailyTokens, localDayKey, loadPricing, todayValueEstimate, herdrSocketFromEnvironment, herdrClientPids, herdrWindowFor, boomuxClientShellId, boomuxWindowFor, backgroundDaemonKind, parseClaudeAgents, sessionStaleness, STALE_AFTER_MS, decodeBase32, grokBotLine, grokBotRow, grokBotAttention, attachGrokBotRoster, grokSessionUsage, usageModelBreakdown, windowMatchesProvider, hermesSessionByPid } from "./collector.ts";
+import { providerOf, titleLooksBusy, cmdIsTurnInhibitor, sessionIdFrom, sessionHostsFromEnvironment, tmuxSocketFromEnvironment, parseTmuxPanes, parseTmuxClients, tmuxPaneForAncestors, linkRecentToLive, inferSessionIdsFromRecent, attachSessionTopics, localSessionSummary, cleanGeneratedSummary, activityCellIndex, parseExternalIpTrace, externalIpCacheFresh, frameSnapshot, parseJsonBounded, readRegularFileLimited, safePrompt, sessionPresentation, writePrivateStateFile, decodeProjectDir, dropPartialFirstLine, readHistoryTail, readRegularFileHead, rolloutSessionId, rolloutCwd, topicCacheHit, topicRetryBlocked, pruneTopicCache, reapStateTempFiles, parseGpuLine, parseDfRows, plausibleTimestamp, normalizeUsage, normalizeUsageLimit, ollamaHostIsLocal, topicRefinementAllowed, terminate, rateForModel, estimateValue, valueSummary, alignDailyTokens, localDayKey, loadPricing, todayValueEstimate, herdrSocketFromEnvironment, herdrClientPids, herdrWindowFor, boomuxClientShellId, boomuxWindowFor, backgroundDaemonKind, parseClaudeAgents, sessionStaleness, STALE_AFTER_MS, decodeBase32, grokBotLine, grokBotRow, grokBotAttention, attachGrokBotRoster, grokSessionUsage, usageModelBreakdown, windowMatchesProvider, hermesSessionByPid, piUserText, piSessionIdFromName } from "./collector.ts";
 import { sessionEventId } from "./notification-events.ts";
 
 const testRoot = mkdtempSync(join(tmpdir(), "infomarchy-test-"));
@@ -75,6 +75,13 @@ describe("providerOf", () => {
 
   test("recognizes Hermes as an interactive agent provider", () => {
     expect(providerOf(["/home/user/.hermes/bin/hermes"])).toBe("hermes");
+  });
+
+  test("recognizes the Pi coding agent and ignores a path that merely contains pi", () => {
+    expect(providerOf(["pi"])).toBe("pi");
+    expect(providerOf(["/home/u/.local/share/mise/installs/pi/0.85.1/pi/pi"])).toBe("pi");
+    expect(providerOf(["cat", "/usr/bin/pi"])).toBeNull();
+    expect(providerOf(["vim", "notes/pi"])).toBeNull();
   });
 });
 
@@ -165,6 +172,7 @@ describe("recent prompt live-window linking", () => {
     expect(sessionIdFrom("claude", ["claude", "--resume", "e28daec7-27df-4c04-a1a4-9898b1a4d60b"], ""))
       .toBe("e28daec7-27df-4c04-a1a4-9898b1a4d60b");
     expect(sessionIdFrom("opencode", ["opencode", "-s", "ses_12345678"], "")).toBe("ses_12345678");
+    expect(sessionIdFrom("pi", ["pi", "--session", "01a079f4-d5cd-7401-b539-8d9e6d780c9f"], "")).toBe("01a079f4-d5cd-7401-b539-8d9e6d780c9f");
     expect(sessionIdFrom("codex", ["codex", "--session-id", "../bad"], "TOKEN=secret\0")).toBe("");
   });
 
@@ -542,6 +550,41 @@ describe("history collection", () => {
       provider: "opencode",
       session: "ses_test12345",
       project: "~/project",
+      text: "inspect with password: [redacted]",
+    });
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("parses Pi user prompts from session JSONL and redacts secrets", async () => {
+    expect(piSessionIdFromName("2026-09-07T03-41-23-789Z_01a079f4-d5cd-7401-b539-8d9e6d780c9f.jsonl"))
+      .toBe("01a079f4-d5cd-7401-b539-8d9e6d780c9f");
+    expect(piUserText({ role: "user", content: "plain" })).toBe("plain");
+    expect(piUserText({ role: "user", content: [{ type: "text", text: "hello" }, { type: "image", data: "x" }] })).toBe("hello");
+
+    const root = join(testRoot, "pi-home");
+    const dir = join(root, ".pi", "agent", "sessions", "--home-tester-Work--");
+    mkdirSync(dir, { recursive: true });
+    const id = "01a079f4-d5cd-7401-b539-8d9e6d780c9f";
+    const ts = Date.now();
+    writeFileSync(join(dir, `2026-09-07T03-41-23-789Z_${id}.jsonl`), [
+      JSON.stringify({ type: "session", version: 3, id, timestamp: new Date(ts).toISOString(), cwd: join(root, "Work") }),
+      JSON.stringify({ type: "message", id: "m1", timestamp: new Date(ts).toISOString(), message: { role: "user", content: [{ type: "text", text: "inspect with password: very-secret-value" }], timestamp: ts } }),
+      JSON.stringify({ type: "message", id: "m2", timestamp: new Date(ts + 1).toISOString(), message: { role: "assistant", content: [{ type: "text", text: "ok" }], timestamp: ts + 1 } }),
+    ].join("\n") + "\n");
+
+    const proc = Bun.spawn([process.execPath, join(import.meta.dir, "collector.ts")], {
+      env: { HOME: root, USER: "tester", XDG_STATE_HOME: join(root, "state"), PATH: "/usr/bin:/bin", INFOMARCHY_SKIP_EXTERNAL_IP: "1", INFOMARCHY_SKIP_CONTAINERS: "1", INFOMARCHY_SKIP_GITHUB: "1" },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const output = await new Response(proc.stdout).text();
+    expect(await proc.exited).toBe(0);
+    const snap = decodeFrames(output);
+    expect(snap.ai.providers.pi).toEqual({ present: true, prompts: 1, sessions: 1 });
+    expect(snap.ai.recent[0]).toMatchObject({
+      provider: "pi",
+      session: id,
+      project: "~/Work",
       text: "inspect with password: [redacted]",
     });
     rmSync(root, { recursive: true, force: true });

@@ -135,9 +135,52 @@ Item {
     var limit = query || activityFilterActive ? 200 : 80
     // Sort BEFORE slicing. Slicing first dropped every pinned prompt older than
     // the newest 80 rows — which defeats the only reason to pin one.
-    return chosen.slice().sort(function(a, b) {
+    var sorted = chosen.slice().sort(function(a, b) {
       return Number(settings.promptPinned(promptKey(b))) - Number(settings.promptPinned(promptKey(a))) || Number(b.ts || 0) - Number(a.ts || 0)
-    }).slice(0, limit)
+    })
+    return view.fairRecentWindow(sorted, limit, 6)
+  }
+  // Keep each provider's newest prompts in the default 80-row window so a
+  // busy Claude week cannot hide OpenCode or Pi entirely.
+  function fairRecentWindow(rows, limit, reserved) {
+    limit = Number(limit) || 80
+    reserved = Number(reserved) || 6
+    if (!Array.isArray(rows) || limit <= 0) return []
+    var out = [], included = {}
+    function key(item) {
+      return String(item.provider || "") + "\0" + String(item.ts || "") + "\0" + String(item.session || "") + "\0" + String(item.text || "").slice(0, 80)
+    }
+    var providers = []
+    for (var i = 0; i < rows.length; i++) {
+      var provider = String(rows[i].provider || "")
+      if (provider && providers.indexOf(provider) < 0) providers.push(provider)
+    }
+    var per = Math.max(1, Math.min(reserved, Math.floor(limit / Math.max(1, providers.length))))
+    for (var p = 0; p < providers.length; p++) {
+      var taken = 0
+      for (var i = 0; i < rows.length && taken < per && out.length < limit; i++) {
+        if (String(rows[i].provider || "") !== providers[p]) continue
+        var k = key(rows[i])
+        if (included[k]) continue
+        included[k] = true
+        out.push(rows[i])
+        taken++
+      }
+    }
+    for (var j = 0; j < rows.length && out.length < limit; j++) {
+      var rest = key(rows[j])
+      if (included[rest]) continue
+      included[rest] = true
+      out.push(rows[j])
+    }
+    // Reservations choose membership, not display order. Keep the caller's
+    // pinned-first / newest-first order and emit duplicate keys only once.
+    return rows.filter(function(item) {
+      var k = key(item)
+      if (!included[k]) return false
+      delete included[k]
+      return true
+    })
   }
   // Columns are fractions of the view, never constants: a fixed right column
   // wider than the space left of the screen edge ran clean off the desk.
@@ -1173,7 +1216,7 @@ Item {
               cells: (view.ai.heatmap || {}).cells || []
               startTs: (view.ai.heatmap || {}).start || 0
               days: (view.ai.heatmap || {}).days || []
-              kinds: ["claude", "codex", "grok", "hermes", "opencode", "gemini", "ollama"]
+              kinds: ["claude", "codex", "grok", "hermes", "opencode", "pi", "gemini", "ollama"]
               unit: "prompts"
               kindFiltersCells: true
               selectedCell: view.activityCellFilter
@@ -1785,6 +1828,7 @@ Item {
               Tag { visible: !!(provRow.ps.grok && provRow.ps.grok.present); text: "grok " + (provRow.ps.grok ? provRow.ps.grok.sessions : 0) + " sess"; tone: view.desk.providerColor("grok") }
               Tag { visible: !!(provRow.ps.grokBot && provRow.ps.grokBot.present); text: "grok bot " + (provRow.ps.grokBot ? provRow.ps.grokBot.sessions : 0) + " bots" + (provRow.ps.grokBot && provRow.ps.grokBot.unread ? " · " + provRow.ps.grokBot.unread + " unread" : ""); tone: view.desk.providerColor("grok-bot") }
               Tag { visible: !!(provRow.ps.opencode && provRow.ps.opencode.present); text: "opencode " + (provRow.ps.opencode ? provRow.ps.opencode.sessions : 0) + " sess"; tone: view.desk.providerColor("opencode") }
+              Tag { visible: !!(provRow.ps.pi && provRow.ps.pi.present); text: "pi " + (provRow.ps.pi ? provRow.ps.pi.sessions : 0) + " sess"; tone: view.desk.providerColor("pi") }
             }
           }
         }

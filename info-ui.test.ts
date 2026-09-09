@@ -343,6 +343,41 @@ describe("session card lines never spill into the neighbouring card", () => {
   });
 });
 
+describe("recent tasks keep quieter providers", () => {
+  test("the default 80-row window still includes OpenCode and Pi when Claude dominates", () => {
+    const source = view.match(/function fairRecentWindow\([\s\S]*?\n  \}/)?.[0];
+    expect(source).toBeTruthy();
+    const fairRecentWindow = Function(`return (${source})`)();
+    const rows = [];
+    for (let i = 0; i < 90; i++) rows.push({ provider: "claude", ts: 1000 - i, session: "c" + i, text: "c" + i });
+    rows.push({ provider: "opencode", ts: 10, session: "o1", text: "oc" });
+    rows.push({ provider: "pi", ts: 9, session: "p1", text: "pi" });
+    const mixed = fairRecentWindow(rows, 80, 6);
+    expect(mixed.some((row: any) => row.provider === "opencode")).toBe(true);
+    expect(mixed.some((row: any) => row.provider === "pi")).toBe(true);
+    expect(mixed).toHaveLength(80);
+    expect(mixed.map((row: any) => row.ts)).toEqual(mixed.map((row: any) => row.ts).sort((a: number, b: number) => b - a));
+  });
+
+  test("provider reservations preserve pinned-first ordering even below the row limit", () => {
+    const source = view.match(/function fairRecentWindow\([\s\S]*?\n  \}/)?.[0];
+    const fairRecentWindow = Function(`return (${source})`)();
+    const pinned = { provider: "pi", ts: 1, session: "pin", text: "pinned old prompt" };
+    const recent = Array.from({ length: 10 }, (_, i) => ({ provider: "claude", ts: 100 - i, session: "c" + i, text: "c" + i }));
+    const quiet = { provider: "opencode", ts: 2, session: "o", text: "older quiet prompt" };
+    const rows = [pinned, ...recent, quiet];
+    expect(fairRecentWindow(rows, 80, 6)).toEqual(rows);
+    // Selection may drop rows, but must preserve the input's relative order.
+    const limited = fairRecentWindow(rows, 8, 2);
+    expect(limited[0]).toBe(pinned);
+    expect(limited).toContain(quiet);
+    expect(limited).toHaveLength(8);
+    const positions = limited.map((row: any) => rows.indexOf(row));
+    expect(positions).toEqual(positions.slice().sort((a: number, b: number) => a - b));
+    expect(fairRecentWindow([...rows, quiet], 80, 6)).toEqual(rows);
+  });
+});
+
 describe("github activity heatmap", () => {
   test("registers GITHUB as a removable module beside ACTIVITY and reaches it from the keyboard", () => {
     const ids = [...settings.matchAll(/\{ id: "([a-zA-Z]+)", label: "[^"]+" \}/g)].map(match => match[1]);
@@ -366,6 +401,7 @@ describe("github activity heatmap", () => {
     expect(view).toContain("cells: view.github.cells || []");
     expect(view).toContain("kindFiltersCells: true");
     expect(view).toContain("showRepos: true");
+    expect(view).toContain('kinds: ["claude", "codex", "grok", "hermes", "opencode", "pi", "gemini", "ollama"]');
   });
 
   test("explains every GitHub feed state and keeps the AI activity filter wiring intact", () => {
