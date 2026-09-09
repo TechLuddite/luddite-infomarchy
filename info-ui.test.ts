@@ -404,7 +404,7 @@ describe("hard refresh", () => {
     expect(strip.indexOf("HARD REFRESH")).toBeGreaterThan(-1);
     expect(strip.indexOf("HARD REFRESH")).toBeLessThan(strip.indexOf("Repeater {"));
     expect(strip.indexOf("HARD REFRESH")).toBeLessThan(strip.indexOf("PRIVACY"));
-    expect(strip.indexOf("HARD REFRESH")).toBeLessThan(strip.indexOf("PHONE"));
+    expect(strip.indexOf("HARD REFRESH")).toBeLessThan(strip.indexOf("WEB"));
     expect(view).toContain("onClicked: view.desk.hardRefresh()");
     expect(model).toContain("function hardRefresh()");
     expect(model).toContain('cmd.push("--force-refresh")');
@@ -423,11 +423,13 @@ describe("stream privacy mode", () => {
     expect(overlay).toContain("if (!event.isAutoRepeat) dashboardSettings.togglePrivacyMode()");
     expect(service).toContain("function getPrivacy(): string");
     expect(service).toContain("function toggleWeb(): void { dashboardSettings.toggleWebEnabled() }");
-    expect(view).toContain('text: view.settings.webEnabled ? (view.settings.webUrl ? "PHONE ON" : "PHONE …") : "PHONE"');
-    expect(view).toContain('text: "COPY PHONE URL"');
+    expect(view).toContain('text: view.settings.webEnabled ? (view.settings.webUrl ? "WEB ON" : "WEB …") : "WEB"');
+    expect(view).toContain('text: "SETTINGS"');
+    expect(view).not.toContain("PHONE");
     expect(settings).toContain('command: ["bun", root.webServerPath, "url"]');
     expect(settings).toContain("function refreshWebUrl()");
-    expect(view).toContain("visible: view.settings.webEnabled && !!view.settings.webUrl");
+    expect(settings).toContain("function webSectionEnabled(id)");
+    expect(view).toContain("SettingsBody");
     expect(view).not.toContain("visible: view.keyboardAvailable && view.settings.webEnabled && !!view.settings.webUrl");
     expect(view).toContain("function wanText()");
     expect(view).toContain("function wifiLabel(net)");
@@ -535,5 +537,30 @@ describe("github activity heatmap", () => {
     // A pinned GitHub cell keeps its breakdown in the status line once the pointer leaves it.
     expect(view).toContain("pinnedBreakdown: true");
     expect(view).toContain('"pinned · " + panel.cellLabel(panel.selectedCell)');
+  });
+});
+
+describe("web mode settings", () => {
+  const body = readFileSync(join(import.meta.dir, "SettingsBody.qml"), "utf8");
+  const panel = readFileSync(join(import.meta.dir, "SettingsPanel.qml"), "utf8");
+  const manifest = readFileSync(join(import.meta.dir, "manifest.json"), "utf8");
+
+  test("bar widget and overlay drawer share SettingsBody", () => {
+    expect(manifest).toContain('"bar-widget"');
+    expect(manifest).toContain('"barWidget": "SettingsPanel.qml"');
+    expect(panel).toContain("SettingsBody");
+    expect(view).toContain("SettingsBody");
+    expect(view).toContain("property bool settingsOpen: false");
+    expect(overlay).toContain("if (infoView.settingsOpen) infoView.settingsOpen = false");
+    expect(settings).toContain("property var webSections");
+    expect(settings).toContain("function toggleWebSection(id)");
+    expect(settings).toContain("webNarrowOrder: normalizedWebNarrowOrder(webNarrowOrder)");
+    expect(body).toContain("textFormat: Text.PlainText");
+    expect(body).toContain("maximumLength: 32");
+    expect(body).toContain("maximumLength: 18");
+    expect(body).toContain('"token-add"');
+    expect(body).toContain('"cidr-add"');
+    expect(body).toContain('"qr"');
+    expect(panel).toContain('tooltipText: "Infomarchy settings"');
   });
 });

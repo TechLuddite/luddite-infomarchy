@@ -2755,7 +2755,12 @@ async function runCollector() {
     },
   };
 
-  if (readRegularFileLimited(join(STATE_DIR, "web.json"), 4096)) {
+  const webCfg = parseJsonBounded(readRegularFileLimited(join(STATE_DIR, "web.json"), 8192) || "", 8192, 12);
+  const webListening = !!(webCfg && typeof webCfg === "object" && (
+    webCfg.listening === true
+    || (webCfg.listening !== false && (typeof webCfg.token === "string" || (Array.isArray(webCfg.tokens) && webCfg.tokens.length)))
+  ));
+  if (webListening) {
     writePrivateStateFile(STATE_DIR, "web-snapshot.json", JSON.stringify(snapshot));
   }
   try {

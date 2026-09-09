@@ -79,6 +79,8 @@ and screen placement are described in the work log/conversation.
 - [ ] Stable keyed session model: the sessions Repeater is rebuilt on every snapshot (Qt clears delegates on model replacement), which restarts animations and drops per-card state; preview paths are cached at the view level as a stopgap. (Astra finding, 2026-09-05.)
 - [ ] Automatic topic refinement can race an explicit UNLOAD within the same tick and reload the model; refinement is loopback-only and capped at 6 requests, but a suppress-after-unload signal would close it fully. (Astra finding, 2026-09-05.)
 - [ ] Many live sessions on a small monitor can push lower cards off screen; panels are deliberately non-scrolling, so cap visible session cards and show "+N more". (Astra finding, 2026-09-05.)
-- [ ] Phone HTML still embeds WAN/LAN/SSID/`user@host` in `.open` spans while PRIVACY is on (CSS hide only). Keep `maskSnapshot` on the HTML and fetch identity only after PRIVACY is off.
+- [x] Web Mode: desk-matching HTML, SETTINGS/bar widget, multi-token, QR, extra CIDRs, independent web section visibility. Turning WEB off keeps tokens.
+- [x] Web Mode zoom, in-page section chips, narrow UP/DOWN order, recent-task privacy mask.
+- [ ] Web Mode HTML still embeds WAN/LAN/SSID/`user@host` in `.open` spans while PRIVACY is on (CSS hide only). Keep `maskSnapshot` on the HTML and fetch identity only after PRIVACY is off.
 - [ ] Drop `100.64.0.0/10` from phone default CIDRs unless this host actually uses Tailscale. VPN VLAN CIDR is still unset.
 - [ ] Live plugin clone under `~/.config/omarchy/plugins/techluddite.luddite-infomarchy` drifts from this git checkout. Copy or reinstall after landing on `master`.

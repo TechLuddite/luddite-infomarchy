@@ -1,14 +1,24 @@
 #!/usr/bin/env bun
-// LAN phone view: read-only HTML of the latest collector snapshot.
+// LAN Web Mode: HTML of the latest collector snapshot.
 // Off until toggled. Token in the path, source IP allowlist, Host check,
-// HTML-escaped fields, no mutating routes. Token never travels in argv.
+// HTML-escaped fields. GET/HEAD for the page. POST /prefs for web section
+// visibility and narrow-layout order. Token never travels in argv.
 
 import { networkInterfaces } from "os";
 import { randomBytes, timingSafeEqual } from "crypto";
 import { isIP } from "net";
-import { join } from "path";
-import { existsSync, unlinkSync } from "fs";
+import { dirname, join } from "path";
+import { closeSync, constants, existsSync, fstatSync, openSync, readlinkSync, readSync, unlinkSync } from "fs";
 import { parseJsonBounded, readRegularFileLimited, writePrivateStateFile } from "./collector";
+import {
+  DEFAULT_NARROW_ORDER, FALLBACK_THEME, WEB_SECTION_IDS, normalizeOrder, parseDashPrefs, parseThemeColors, renderPage,
+  type DashPrefs, type ThemeColors,
+} from "./web-page";
+
+export {
+  displayMount, escapeHtml, fmtBytes, fmtDur, fmtMoney, fmtPct, fmtRate, fmtTokens, fmtUntil,
+  providerColorHex, renderMachineSection, renderTrendSvg, renderUsageSection, usageSeriesOf, wifiLabel,
+} from "./web-page";
 
 const HOME = process.env.HOME || "/root";
 const XDG_STATE = process.env.XDG_STATE_HOME || join(HOME, ".local/state");
@@ -90,17 +100,6 @@ export function newToken(): string {
   return randomBytes(TOKEN_BYTES).toString("hex");
 }
 
-export function escapeHtml(value: unknown, max = 400): string {
-  return String(value ?? "")
-    .replace(/[\u0000-\u001f\u007f]/g, " ")
-    .slice(0, max)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
 export function localPrivateIPv4(): string[] {
   const found: string[] = [];
   const nets = networkInterfaces();
@@ -121,10 +120,22 @@ export function advertisedBind(preferred: string[]): string {
   return preferred[0] || "127.0.0.1";
 }
 
-export type WebConfig = {
+export const MAX_TOKENS = 8;
+export const MAX_EXTRA_CIDRS = 8;
+const CONFIG_MAX_BYTES = 8192;
+
+export type WebToken = {
+  id: string;
   token: string;
+  label: string;
+  createdAt: number;
+};
+
+export type WebConfig = {
+  tokens: WebToken[];
   port: number;
   extraCidrs: string[];
+  listening: boolean;
 };
 
 export function validToken(value: unknown): string {
@@ -132,47 +143,157 @@ export function validToken(value: unknown): string {
   return /^[0-9a-f]{48}$/.test(token) ? token : "";
 }
 
+export function validTokenId(value: unknown): string {
+  const id = String(value || "");
+  return /^[0-9a-f]{8}$/.test(id) ? id : "";
+}
+
+export function validTokenLabel(value: unknown): string {
+  const label = String(value || "").trim();
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/.test(label) ? label : "";
+}
+
 export function validPort(value: unknown): number {
   const port = Number(value);
   return Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : 0;
 }
 
+export function newTokenId(): string {
+  return randomBytes(4).toString("hex");
+}
+
+export function makeToken(label = "default"): WebToken {
+  return { id: newTokenId(), token: newToken(), label: validTokenLabel(label) || "default", createdAt: Date.now() };
+}
+
+export function parseTokens(parsed: Record<string, unknown>): WebToken[] {
+  const out: WebToken[] = [];
+  const seen = new Set<string>();
+  if (Array.isArray(parsed.tokens)) {
+    for (const item of parsed.tokens) {
+      if (!item || typeof item !== "object") continue;
+      const row = item as Record<string, unknown>;
+      const token = validToken(row.token);
+      const id = validTokenId(row.id) || newTokenId();
+      const label = validTokenLabel(row.label) || "token";
+      const createdAt = Number(row.createdAt);
+      if (!token || seen.has(token) || seen.has(id)) continue;
+      seen.add(token);
+      seen.add(id);
+      out.push({ id, token, label, createdAt: Number.isFinite(createdAt) && createdAt > 0 ? createdAt : Date.now() });
+      if (out.length >= MAX_TOKENS) break;
+    }
+  }
+  const legacy = validToken(parsed.token);
+  if (legacy && !seen.has(legacy) && out.length < MAX_TOKENS) {
+    out.unshift({ id: newTokenId(), token: legacy, label: "default", createdAt: Date.now() });
+  }
+  return out;
+}
+
+export function publicTokenList(config: WebConfig): { id: string; label: string; createdAt: number; suffix: string }[] {
+  return config.tokens.map(row => ({ id: row.id, label: row.label, createdAt: row.createdAt, suffix: row.token.slice(-4) }));
+}
+
+export function tokenAllowed(got: string, tokens: WebToken[]): boolean {
+  let ok = false;
+  for (const row of tokens) {
+    if (tokensEqual(got, row.token)) ok = true;
+  }
+  return ok;
+}
+
 export function loadConfig(): WebConfig | null {
-  const raw = readRegularFileLimited(join(STATE_DIR, CONFIG_NAME), 4096);
+  const raw = readRegularFileLimited(join(STATE_DIR, CONFIG_NAME), CONFIG_MAX_BYTES);
   if (!raw) return null;
-  const parsed = parseJsonBounded(raw, 4096, 8);
+  const parsed = parseJsonBounded(raw, CONFIG_MAX_BYTES, 12);
   if (!parsed || typeof parsed !== "object") return null;
-  const token = validToken(parsed.token);
+  const tokens = parseTokens(parsed as Record<string, unknown>);
   const port = validPort(parsed.port) || DEFAULT_PORT;
   const extraCidrs = Array.isArray(parsed.extraCidrs)
-    ? parsed.extraCidrs.map((item: unknown) => String(item)).filter((item: string) => !!parseCidr(item)).slice(0, 8)
+    ? parsed.extraCidrs.map((item: unknown) => String(item)).filter((item: string) => !!parseCidr(item)).slice(0, MAX_EXTRA_CIDRS)
     : [];
-  if (!token) return null;
-  return { token, port, extraCidrs };
+  if (!tokens.length) return null;
+  return { tokens, port, extraCidrs, listening: parsed.listening !== false };
 }
 
 export function saveConfig(config: WebConfig): boolean {
   return writePrivateStateFile(STATE_DIR, CONFIG_NAME, JSON.stringify({
-    token: config.token,
+    tokens: config.tokens,
     port: config.port,
     extraCidrs: config.extraCidrs,
+    listening: !!config.listening,
   }) + "\n");
 }
 
-export function ensureConfig(extraCidrs: string[] = []): WebConfig {
+export function ensureConfig(extraCidrs: string[] = [], listening?: boolean): WebConfig {
   const existing = loadConfig();
   if (existing) {
+    let changed = false;
     if (extraCidrs.length) {
       const merged = [...existing.extraCidrs];
       for (const item of extraCidrs) if (parseCidr(item) && !merged.includes(item)) merged.push(item);
-      existing.extraCidrs = merged.slice(0, 8);
-      saveConfig(existing);
+      existing.extraCidrs = merged.slice(0, MAX_EXTRA_CIDRS);
+      changed = true;
     }
+    if (listening !== undefined && existing.listening !== listening) {
+      existing.listening = listening;
+      changed = true;
+    }
+    if (changed) saveConfig(existing);
     return existing;
   }
-  const created: WebConfig = { token: newToken(), port: DEFAULT_PORT, extraCidrs: extraCidrs.filter(item => !!parseCidr(item)).slice(0, 8) };
+  const created: WebConfig = {
+    tokens: [makeToken("default")],
+    port: DEFAULT_PORT,
+    extraCidrs: extraCidrs.filter(item => !!parseCidr(item)).slice(0, MAX_EXTRA_CIDRS),
+    listening: listening !== false,
+  };
   saveConfig(created);
   return created;
+}
+
+export function addWebToken(label: string): WebToken | null {
+  const config = ensureConfig();
+  if (config.tokens.length >= MAX_TOKENS) return null;
+  const token = makeToken(label);
+  config.tokens.push(token);
+  saveConfig(config);
+  return token;
+}
+
+export function revokeWebToken(id: string): boolean {
+  const config = loadConfig();
+  if (!config) return false;
+  const next = config.tokens.filter(row => row.id !== id);
+  if (next.length === config.tokens.length) return false;
+  if (!next.length) return false;
+  config.tokens = next;
+  saveConfig(config);
+  return true;
+}
+
+export function addExtraCidr(text: string): boolean {
+  const cidr = parseCidr(text);
+  if (!cidr) return false;
+  const config = ensureConfig();
+  if (config.extraCidrs.includes(cidr.text)) return true;
+  if (config.extraCidrs.length >= MAX_EXTRA_CIDRS) return false;
+  config.extraCidrs.push(cidr.text);
+  saveConfig(config);
+  return true;
+}
+
+export function removeExtraCidr(text: string): boolean {
+  const cidr = parseCidr(text);
+  if (!cidr) return false;
+  const config = loadConfig();
+  if (!config) return false;
+  const next = config.extraCidrs.filter(item => item !== cidr.text);
+  if (next.length === config.extraCidrs.length) return false;
+  config.extraCidrs = next;
+  saveConfig(config);
+  return true;
 }
 
 export function maskSnapshot(snap: any): any {
@@ -193,96 +314,6 @@ function take(list: unknown, n: number): any[] {
   return Array.isArray(list) ? list.slice(0, n) : [];
 }
 
-const PROVIDER_COLORS: Record<string, string> = {
-  claude: "#e5c07b",
-  codex: "#56b6c2",
-  grok: "#c678dd",
-  "grok-bot": "#c678dd",
-  gemini: "#61afef",
-  hermes: "#98c379",
-  ollama: "#98c379",
-  opencode: "#61afef",
-  pi: "#98c379",
-  aider: "#e5c07b",
-  copilot: "#c678dd",
-};
-
-export function providerColorHex(provider: string): string {
-  return PROVIDER_COLORS[String(provider || "").toLowerCase()] || "#abb2bf";
-}
-
-export function fmtTokens(n: unknown): string {
-  const v = Number(n || 0);
-  if (!Number.isFinite(v) || v < 0) return "0";
-  if (v >= 1e9) return (v / 1e9).toFixed(1) + "B";
-  if (v >= 1e6) return (v / 1e6).toFixed(1) + "M";
-  if (v >= 1e3) return (v / 1e3).toFixed(0) + "K";
-  return String(Math.round(v));
-}
-
-export function fmtMoney(n: unknown): string {
-  const v = Number(n || 0);
-  if (!Number.isFinite(v) || v < 0) return "$0.00";
-  if (v >= 1000) return "$" + (v / 1000).toFixed(1) + "k";
-  if (v >= 100) return "$" + v.toFixed(0);
-  return "$" + v.toFixed(2);
-}
-
-export function fmtUntil(iso: string, now = Date.now()): string {
-  const ts = Date.parse(iso);
-  if (!Number.isFinite(ts)) return "";
-  const s = Math.max(0, (ts - now) / 1000);
-  if (s < 60) return "now";
-  if (s < 3600) return Math.floor(s / 60) + "m";
-  if (s < 86400) return Math.floor(s / 3600) + "h " + Math.floor(s % 3600 / 60) + "m";
-  return Math.floor(s / 86400) + "d " + Math.floor(s % 86400 / 3600) + "h";
-}
-
-export function fmtBytes(n: unknown): string {
-  let v = Number(n || 0);
-  if (!Number.isFinite(v) || v < 0) return "0B";
-  const units = ["B", "K", "M", "G", "T"];
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
-  return (i === 0 ? v.toFixed(0) : v.toFixed(v >= 100 ? 0 : 1)) + units[i];
-}
-
-export function fmtRate(n: unknown): string {
-  if (n === null || n === undefined || n === "") return "—";
-  let v = Number(n) * 8;
-  if (!Number.isFinite(v) || v < 0) return "—";
-  const units = ["b", "Kb", "Mb", "Gb"];
-  let i = 0;
-  while (v >= 1000 && i < units.length - 1) { v /= 1000; i++; }
-  return (v >= 100 ? v.toFixed(0) : v.toFixed(1)) + units[i] + "/s";
-}
-
-export function fmtPct(v: unknown): string {
-  if (v === null || v === undefined || v === "") return "—";
-  const n = Number(v);
-  if (!Number.isFinite(n)) return "—";
-  return Math.round(n) + "%";
-}
-
-export function fmtDur(sec: unknown): string {
-  const s = Math.max(0, Math.floor(Number(sec || 0)));
-  if (!Number.isFinite(s)) return "";
-  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
-  if (d > 0) return d + "d " + h + "h";
-  if (h > 0) return h + "h " + m + "m";
-  return m + "m";
-}
-
-export function displayMount(path: unknown): string {
-  return String(path || "").replace(/^\/home\/[^/]+/, "~").slice(0, 24);
-}
-
-export function wifiLabel(net: any): string {
-  const n = net && typeof net === "object" ? net : {};
-  if (!n.wireless) return ("NET " + String(n.dev || "—")).slice(0, 20);
-  return "WIFI";
-}
-
 export function newNonce(): string {
   return randomBytes(16).toString("hex");
 }
@@ -290,242 +321,90 @@ export function newNonce(): string {
 export function contentSecurityPolicy(nonce = ""): string {
   const n = /^[0-9a-f]{32}$/.test(nonce) ? nonce : "";
   const extra = n ? ` script-src 'nonce-${n}'; connect-src 'self';` : "";
-  return `default-src 'none'; style-src 'unsafe-inline';${extra} img-src 'none'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'`;
+  return `default-src 'none'; style-src 'unsafe-inline';${extra} img-src 'self'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'`;
 }
 
-const BLUE = "#61afef";
-const GREEN = "#98c379";
-const YELLOW = "#e5c07b";
-const RED = "#e06c75";
-const LIVE_SCRIPT = '(function(){function on(){try{return sessionStorage.getItem("im-privacy")!=="0"}catch(e){return true}}function apply(){var p=on();document.body.classList.toggle("privacy",p);var b=document.getElementById("privacy");if(b){b.textContent=p?"PRIVACY ON":"PRIVACY";b.classList.toggle("on",p)}}document.addEventListener("click",function(e){var t=e.target;if(!t||t.id!=="privacy")return;try{sessionStorage.setItem("im-privacy",on()?"0":"1")}catch(x){}apply()});apply();var busy=0;function g(){if(busy)return;busy=1;fetch(location.pathname,{cache:"no-store",credentials:"omit"}).then(function(r){return r.ok?r.text():Promise.reject()}).then(function(h){var d=new DOMParser().parseFromString(h,"text/html");var n=d.getElementById("view"),c=document.getElementById("view");if(!n||!c)return;var y=scrollY;c.replaceWith(document.importNode(n,true));scrollTo(0,y);apply()}).catch(function(){}).then(function(){busy=0})}setInterval(g,5000)})();';
+const MAX_BG_BYTES = 8 * 1024 * 1024;
+const THEME_COLORS_PATH = join(HOME, ".local/state/omarchy/current/theme/colors.toml");
+const BACKGROUND_LINK = join(HOME, ".local/state/omarchy/current/background");
 
-function renderBar(label: string, value: string, fraction: number, fill: string, rawLabel = false): string {
-  const pct = Math.max(0, Math.min(1, Number(fraction) || 0));
-  const width = Math.round(pct * 1000) / 10;
-  const color = /^#[0-9a-fA-F]{6}$/.test(fill) ? fill : "#abb2bf";
-  const shown = rawLabel ? label : escapeHtml(label, 32);
-  return `<div class="meter"><div class="meter-row"><span>${shown}</span><span>${escapeHtml(value, 48)}</span></div><div class="track"><div class="fill" style="width:${width}%;background:${color}"></div></div></div>`;
+export function loadTheme(): ThemeColors {
+  const raw = readRegularFileLimited(THEME_COLORS_PATH, 16_384);
+  return raw ? parseThemeColors(raw) : FALLBACK_THEME;
 }
 
-function usageKeysOf(usage: any): string[] {
-  return Object.keys(usage || {}).filter(key => usage[key] && usage[key].ready !== false).slice(0, 8);
+export function loadDashPrefs(): DashPrefs {
+  const raw = readRegularFileLimited(join(STATE_DIR, "dashboard.json"), 256 * 1024);
+  if (!raw) return parseDashPrefs({});
+  const parsed = parseJsonBounded(raw, 256 * 1024, 16);
+  return parseDashPrefs(parsed);
 }
 
-export function usageSeriesOf(usage: any, metric: "tokens" | "value"): { provider: string; points: number[] }[] {
-  const out: { provider: string; points: number[] }[] = [];
-  for (const key of usageKeysOf(usage)) {
-    const row = usage[key] || {};
-    const daily = Array.isArray(row.dailyTokens) ? row.dailyTokens.map((x: unknown) => Number(x) || 0) : [];
-    if (!daily.some((x: number) => x > 0)) continue;
-    if (metric === "tokens") {
-      out.push({ provider: key, points: daily.slice(0, 7) });
-      continue;
+export function imageContentType(buf: Buffer): string {
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
+  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return "image/png";
+  if (buf.length >= 12 && buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WEBP") return "image/webp";
+  if (buf.length >= 6 && (buf.toString("ascii", 0, 6) === "GIF87a" || buf.toString("ascii", 0, 6) === "GIF89a")) return "image/gif";
+  return "";
+}
+
+export function resolveBackgroundPath(): string {
+  try {
+    const target = readlinkSync(BACKGROUND_LINK);
+    if (!target) return "";
+    return target.startsWith("/") ? target : join(dirname(BACKGROUND_LINK), target);
+  } catch {
+    return "";
+  }
+}
+
+export function readBackgroundImage(): { type: string; bytes: Buffer } | null {
+  const path = resolveBackgroundPath();
+  if (!path || path.length > 512 || path.includes("\0")) return null;
+  let fd = -1;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const st = fstatSync(fd);
+    if (!st.isFile() || st.size <= 0 || st.size > MAX_BG_BYTES) return null;
+    const buf = Buffer.allocUnsafe(st.size);
+    let off = 0;
+    while (off < st.size) {
+      const n = readSync(fd, buf, off, Math.min(64 * 1024, st.size - off), off);
+      if (n <= 0) break;
+      off += n;
     }
-    const totals = (row.value || {}).totals || {};
-    const tokens = Number(totals.inputTokens || 0) + Number(totals.outputTokens || 0) + Number(totals.cacheReadInputTokens || 0) + Number(totals.cacheCreationInputTokens || 0);
-    const lifetime = Number((row.value || {}).lifetime);
-    if (!Number.isFinite(lifetime) || tokens <= 0) continue;
-    const rate = lifetime / tokens;
-    out.push({ provider: key, points: daily.slice(0, 7).map((x: number) => x * rate) });
+    if (off !== st.size) return null;
+    const type = imageContentType(buf);
+    return type ? { type, bytes: buf } : null;
+  } catch {
+    return null;
+  } finally {
+    if (fd >= 0) try { closeSync(fd); } catch {}
   }
-  return out;
 }
 
-export function renderTrendSvg(series: { provider: string; points: number[] }[], days: string[], fmt: (n: number) => string): string {
-  if (!series.length) return "";
-  const n = series[0].points.length;
-  if (n < 1) return "";
-  let max = 1;
-  for (const row of series) for (const p of row.points) max = Math.max(max, p);
-  const w = 320, h = 88, left = 44, top = 10, bottom = 72, plot = w - left - 6;
-  const xAt = (i: number) => left + (n === 1 ? plot / 2 : i * plot / (n - 1));
-  const yAt = (v: number) => bottom - (v / max) * (bottom - top);
-  const grid: string[] = [];
-  for (let t = 0; t < 3; t++) {
-    const y = top + (bottom - top) * t / 2;
-    grid.push(`<line x1="${left}" y1="${y.toFixed(1)}" x2="${w}" y2="${y.toFixed(1)}" stroke="#444" stroke-width="1"/>`);
-    grid.push(`<text x="2" y="${(y + 3).toFixed(1)}" fill="#888" font-size="9" font-family="ui-monospace,monospace">${escapeHtml(fmt(max * (1 - t / 2)), 12)}</text>`);
-  }
-  const lines: string[] = [];
-  for (const row of series) {
-    const color = providerColorHex(row.provider);
-    const pts = row.points.map((v, i) => `${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`).join(" ");
-    const area = `${xAt(0).toFixed(1)},${bottom} ${pts} ${xAt(n - 1).toFixed(1)},${bottom}`;
-    lines.push(`<polygon points="${area}" fill="${color}" fill-opacity="0.08"/>`);
-    lines.push(`<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2"/>`);
-  }
-  const labels: string[] = [];
-  if (n > 1) {
-    const first = String(days[0] || "").slice(5);
-    const last = String(days[n - 1] || "").slice(5);
-    labels.push(`<text x="${left}" y="84" fill="#888" font-size="9" font-family="ui-monospace,monospace">${escapeHtml(first, 8)}</text>`);
-    labels.push(`<text x="${w - 2}" y="84" fill="#888" font-size="9" font-family="ui-monospace,monospace" text-anchor="end">${escapeHtml(last, 8)}</text>`);
-  }
-  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" aria-hidden="true">${grid.join("")}${lines.join("")}${labels.join("")}</svg>`;
-}
-
-function renderMeter(limit: any, tone: string): string {
-  const pct = Math.max(0, Math.min(1, Number(limit.percent) || 0));
-  const width = Math.round(pct * 1000) / 10;
-  const until = limit.resetsAt ? "  ↻ " + fmtUntil(String(limit.resetsAt)) : "";
-  const fill = pct > 0.85 ? "#e06c75" : pct > 0.6 ? "#e5c07b" : tone;
-  return `<div class="meter"><div class="meter-row"><span>${escapeHtml(limit.label || limit.title, 32)}</span><span>${escapeHtml(Math.round(pct * 100) + "%" + until, 40)}</span></div><div class="track"><div class="fill" style="width:${width}%;background:${fill}"></div></div></div>`;
-}
-
-export function renderUsageSection(snap: any): string {
-  const ai = snap.ai || {};
-  const usage = ai.usage && typeof ai.usage === "object" ? ai.usage : {};
-  const keys = usageKeysOf(usage);
-  const parts: string[] = [];
-  parts.push(`<h2>USAGE &amp; LIMITS</h2>`);
-  if (!keys.length) {
-    parts.push(`<div class="card meta">no usage cache yet</div>`);
-    return parts.join("");
-  }
-  const chips = keys.map(key => `<span class="chip" style="color:${providerColorHex(key)};border-color:${providerColorHex(key)}">${escapeHtml(usage[key].name || key, 24)}</span>`).join("");
-  parts.push(`<div class="chips">${chips}</div>`);
-  for (const key of keys) {
-    const row = usage[key] || {};
-    const tone = providerColorHex(key);
-    const v = row.value || {}, t = v.totals || {};
-    const all = Number(t.inputTokens || 0) + Number(t.outputTokens || 0) + Number(t.cacheReadInputTokens || 0) + Number(t.cacheCreationInputTokens || 0);
-    const life: string[] = [];
-    if (all > 0) life.push("lifetime " + fmtTokens(all) + " tok");
-    if (all > 0) life.push(Math.round(100 * Number(t.cacheReadInputTokens || 0) / all) + "% cache reads");
-    if (v.lifetime !== null && v.lifetime !== undefined) life.push("≈" + fmtMoney(v.lifetime) + " est.");
-    else if (all > 0) life.push("unpriced");
-    if (row.totalSessions) life.push(row.totalSessions + " sessions");
-    const todayValue = v.today !== null && v.today !== undefined ? " · ≈" + fmtMoney(v.today) : "";
-    const limits = take(row.limits, 8).map((limit: any) => renderMeter(limit, tone)).join("");
-    const status = row.authHelpText || row.usageStatusText;
-    parts.push(`<div class="card" style="border-color:${tone}44"><div class="usage-head"><span class="tag" style="color:${tone}">${escapeHtml(row.name || key, 40)}</span> <span class="meta">${escapeHtml(row.tierLabel, 32)}</span></div><div class="meta">today ${escapeHtml(row.todayPrompts || 0, 12)}p · ${escapeHtml(fmtTokens(row.todayTotalTokens), 16)} tok${escapeHtml(todayValue, 24)}</div>${status ? `<div class="meta">${escapeHtml(status, 200)}</div>` : ""}${life.length ? `<div class="meta">${escapeHtml(life.join(" · "), 220)}</div>` : ""}${limits}</div>`);
-  }
-  return parts.join("");
-}
-
-export function renderMachineSection(snap: any): string {
-  const machine = snap && snap.machine && typeof snap.machine === "object" ? snap.machine : {};
-  const cpu = machine.cpu && typeof machine.cpu === "object" ? machine.cpu : {};
-  const mem = machine.mem && typeof machine.mem === "object" ? machine.mem : {};
-  const net = machine.net && typeof machine.net === "object" ? machine.net : {};
-  const ping = machine.ping && typeof machine.ping === "object" ? machine.ping : {};
-  const bat = machine.battery && typeof machine.battery === "object" ? machine.battery : null;
-  const disks = take(machine.disks, 2);
-  const cpuPct = Number(cpu.pct);
-  const ramPct = Number(mem.pct);
-  const load = Array.isArray(cpu.load) ? Number(cpu.load[0]) : NaN;
-  const temp = Number(machine.temp);
-  const cpuBits = [fmtPct(cpu.pct)];
-  if (Number.isFinite(load)) cpuBits.push(load.toFixed(2));
-  if (Number.isFinite(temp)) cpuBits.push(Math.round(temp) + "°");
-  const ramBits: string[] = [];
-  if (mem.used && mem.total) ramBits.push(fmtBytes(mem.used) + "/" + fmtBytes(mem.total));
-  ramBits.push(fmtPct(mem.pct));
-  const parts: string[] = [];
-  parts.push(`<h2>MACHINE</h2><div class="card"><div class="grid">`);
-  parts.push(renderBar("CPU", cpuBits.join(" · "), (Number.isFinite(cpuPct) ? cpuPct : 0) / 100, cpuPct > 85 ? RED : BLUE));
-  parts.push(renderBar("RAM", ramBits.join(" · "), (Number.isFinite(ramPct) ? ramPct : 0) / 100, ramPct > 90 ? RED : GREEN));
-  for (const disk of disks) {
-    const d = disk && typeof disk === "object" ? disk : {};
-    const pct = Number(d.pct);
-    const rawMount = String(d.mount || "/").slice(0, 24);
-    const hiddenMount = displayMount(d.mount || "/") || "/";
-    const labelHtml = hiddenMount === rawMount
-      ? escapeHtml("DISK " + rawMount, 32)
-      : `<span class="shut">${escapeHtml("DISK " + hiddenMount, 32)}</span><span class="open">${escapeHtml("DISK " + rawMount, 32)}</span>`;
-    const value = (d.used && d.size ? fmtBytes(d.used) + "/" + fmtBytes(d.size) + " · " : "") + fmtPct(d.pct);
-    parts.push(renderBar(labelHtml, value, (Number.isFinite(pct) ? pct : 0) / 100, pct > 90 ? RED : YELLOW, true));
-  }
-  const hasSignal = net.signal !== null && net.signal !== undefined && net.signal !== "";
-  const signal = hasSignal ? Number(net.signal) : NaN;
-  const wifiFrac = Number.isFinite(signal) ? Math.max(0, Math.min(1, (signal + 90) / 60)) : (net.dev ? 1 : 0);
-  const wifiVal = Number.isFinite(signal) ? signal + " dBm" : (net.dev ? "up" : "—");
-  const wifiFill = Number.isFinite(signal) && signal < -75 ? YELLOW : GREEN;
-  const ssid = String(net.ssid || "").slice(0, 32);
-  const wifiShut = wifiLabel(net);
-  const wifiOpen = net.wireless ? ("WIFI" + (ssid ? " " + ssid : "")) : wifiShut;
-  const wifiLabelHtml = wifiShut === wifiOpen
-    ? wifiShut
-    : `<span class="shut">${escapeHtml(wifiShut, 20)}</span><span class="open">${escapeHtml(wifiOpen, 40)}</span>`;
-  parts.push(renderBar(wifiLabelHtml, wifiVal, wifiFrac, wifiFill, true));
-  const pingOk = !!ping.ok;
-  const pingMs = Number(ping.ms);
-  const pingText = pingOk && Number.isFinite(pingMs) ? Math.round(pingMs) + " ms" : "timeout";
-  const pingClass = !pingOk ? "bad" : pingMs > 80 ? "warn" : "ok";
-  const batText = bat ? "BAT " + fmtPct(bat.pct) + " " + String(bat.status || "").toLowerCase() : "";
-  const batHot = !!(bat && Number(bat.pct) < 20 && String(bat.status || "") !== "Charging");
-  const up = machine.uptime ? "up " + fmtDur(machine.uptime) : "";
-  const wan = String(machine.externalIp || "").slice(0, 40);
-  const lan = String(net.addr || "").slice(0, 40);
-  const who = [snap.user, snap.host].filter(Boolean).join("@");
-  const openBits = [up, who, wan ? "WAN " + wan : "", lan ? "LAN " + lan : ""].filter(Boolean);
-  parts.push(`<div class="span foot"><span class="ok">${escapeHtml("↓" + fmtRate(net.rxRate) + " ↑" + fmtRate(net.txRate), 40)}</span><span class="${pingClass}">${escapeHtml("⇄ " + pingText, 24)}</span>${batText ? `<span class="${batHot ? "bad" : "meta"}">${escapeHtml(batText, 40)}</span>` : ""}</div>`);
-  parts.push(`<div class="span meta"><span class="shut">${escapeHtml([up, "WAN/LAN/SSID hidden"].filter(Boolean).join(" · "), 80)}</span><span class="open">${escapeHtml(openBits.join(" · ") || "up", 120)}</span></div>`);
-  parts.push(`</div></div>`);
-  return parts.join("");
-}
-
-export function renderPage(snap: any, refreshPath: string, nonce = ""): string {
-  const ai = snap.ai || {};
-  const sessions = take(ai.sessions, 12);
-  const attention = take(ai.attention, 8);
-  const n = /^[0-9a-f]{32}$/.test(nonce) ? nonce : "";
+export function parseAsciiQr(text: string): string[] {
+  const lines = String(text || "").replace(/\r/g, "").split("\n").filter(line => line.length > 0).slice(0, 80);
   const rows: string[] = [];
-  rows.push(`<!doctype html><html lang="en"><head><meta charset="utf-8">`);
-  rows.push(`<meta name="viewport" content="width=device-width,initial-scale=1">`);
-  rows.push(`<title>Infomarchy</title><style>
-:root { color-scheme: dark; }
-body { margin: 0; font: 15px/1.4 ui-sans-serif, system-ui, sans-serif; background: #111; color: #ddd; }
-main { max-width: 42rem; margin: 0 auto; padding: 12px; }
-h1 { font-size: 1.1rem; margin: 0 0 8px; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
-h1 .tools { display: flex; gap: 12px; align-items: baseline; }
-h2 { font-size: 0.8rem; letter-spacing: 0.08em; color: #8ad; margin: 18px 0 8px; }
-.card { background: #1b1b1b; border: 1px solid #333; border-radius: 10px; padding: 10px 12px; margin: 0 0 8px; }
-.meta { color: #888; font-size: 0.8rem; }
-.prompt { color: #eee; }
-.tag { display: inline-block; font-size: 0.75rem; letter-spacing: 0.04em; font-weight: 700; }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
-.chip { font: 11px ui-monospace, monospace; border: 1px solid; border-radius: 6px; padding: 2px 7px; }
-.chart { padding: 8px 8px 4px; }
-.chart-label { font: 11px ui-monospace, monospace; color: #8ad; letter-spacing: 0.06em; margin-bottom: 4px; }
-.usage-head { display: flex; gap: 8px; align-items: baseline; }
-.meter { margin-top: 8px; }
-.meter-row { display: flex; justify-content: space-between; font: 12px ui-monospace, monospace; color: #ccc; }
-.track { height: 7px; background: #2a2a2a; border-radius: 4px; margin-top: 4px; overflow: hidden; }
-.fill { height: 100%; border-radius: 4px; }
-.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
-.grid .meter { margin-top: 0; }
-.span { grid-column: 1 / -1; }
-.foot { display: flex; flex-wrap: wrap; gap: 10px 14px; font: 12px ui-monospace, monospace; }
-.ok { color: #98c379; }
-.warn { color: #e5c07b; }
-.bad { color: #e06c75; }
-a.refresh, button.privacy-btn { color: #8ad; font-size: 0.8rem; font-weight: 600; letter-spacing: 0.06em; text-decoration: none; background: none; border: 0; padding: 0; font-family: inherit; cursor: pointer; }
-button.privacy-btn.on { color: #e5c07b; }
-body.privacy .open { display: none; }
-body:not(.privacy) .shut { display: none; }
-@media (max-width: 520px) { .grid { grid-template-columns: 1fr; } }
-</style></head><body class="privacy"><main id="view">`);
-  rows.push(`<h1>Infomarchy <span class="tools"><button type="button" id="privacy" class="privacy-btn on">PRIVACY ON</button> <a class="refresh" href="${escapeHtml(refreshPath, 200)}">Refresh</a></span></h1><p class="meta">read-only</p>`);
-  rows.push(renderUsageSection(snap));
-
-  rows.push(`<h2>NEXT ACTIONS</h2>`);
-  if (!attention.length) rows.push(`<div class="card meta">none</div>`);
-  for (const item of attention) {
-    rows.push(`<div class="card"><span class="tag">${escapeHtml(item.provider, 32)}</span> ${escapeHtml(item.project, 80)}<div class="prompt">${escapeHtml(item.attentionReason || item.attention, 240)}</div></div>`);
+  for (const line of lines) {
+    let bits = "";
+    for (let i = 0; i + 1 < line.length && bits.length < 80; i += 2) bits += line.slice(i, i + 2) === "##" ? "1" : "0";
+    if (bits.length) rows.push(bits);
   }
+  if (rows.length < 21 || rows.some(row => row.length !== rows[0].length)) return [];
+  return rows;
+}
 
-  rows.push(`<h2>LIVE SESSIONS</h2>`);
-  if (!sessions.length) rows.push(`<div class="card meta">none</div>`);
-  for (const item of sessions) {
-    rows.push(`<div class="card"><span class="tag">${escapeHtml(item.provider, 32)}</span> ${escapeHtml(item.project || item.name, 80)}<div class="prompt">${escapeHtml(item.topic || "", 240)}</div><div class="meta">${escapeHtml(item.git?.branch ? "git " + item.git.branch : "", 80)}</div></div>`);
-  }
-
-  rows.push(renderMachineSection(snap));
-  rows.push(`</main>`);
-  if (n) rows.push(`<script nonce="${n}">${LIVE_SCRIPT}</script>`);
-  rows.push(`</body></html>`);
-  return rows.join("");
+export async function qrMatrixForUrl(url: string): Promise<string[]> {
+  if (!/^http:\/\/[0-9a-zA-Z.:[\]]+\/t\/[0-9a-f]{48}\/$/.test(url)) return [];
+  const proc = Bun.spawn(["/usr/bin/qrencode", "-t", "ASCII", "-m", "0", "-o", "-"], {
+    stdin: new Blob([url]),
+    stdout: "pipe",
+    stderr: "ignore",
+  });
+  const raw = await new Response(proc.stdout).text();
+  await proc.exited;
+  return parseAsciiQr(raw);
 }
 
 export const SECURITY_HEADERS: Record<string, string> = {
@@ -537,7 +416,9 @@ export const SECURITY_HEADERS: Record<string, string> = {
   "Content-Security-Policy": contentSecurityPolicy(),
 };
 
-function reply(status: number, body: string, type = "text/html; charset=utf-8", nonce = ""): { status: number; headers: Record<string, string>; body: string } {
+type Reply = { status: number; headers: Record<string, string>; body: string | Uint8Array };
+
+function reply(status: number, body: string | Uint8Array, type = "text/html; charset=utf-8", nonce = ""): Reply {
   return { status, headers: { ...SECURITY_HEADERS, "Content-Type": type, "Content-Security-Policy": contentSecurityPolicy(nonce) }, body };
 }
 
@@ -566,6 +447,51 @@ export function originAllowed(origin: string | null, allowedHosts: string[], por
   }
 }
 
+export function jsonContentType(value: string): boolean {
+  return String(value || "").split(";")[0].trim().toLowerCase() === "application/json";
+}
+
+export function parsePrefsPatch(raw: string): { webSections?: Record<string, boolean>; webNarrowOrder?: string[] } | null {
+  const parsed = parseJsonBounded(raw, 4096, 6);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const out: { webSections?: Record<string, boolean>; webNarrowOrder?: string[] } = {};
+  if (parsed.webSections && typeof parsed.webSections === "object" && !Array.isArray(parsed.webSections)) {
+    const sections: Record<string, boolean> = Object.create(null);
+    for (const id of WEB_SECTION_IDS) {
+      if (Object.prototype.hasOwnProperty.call(parsed.webSections, id)) sections[id] = parsed.webSections[id] === true;
+    }
+    out.webSections = sections;
+  }
+  if (Array.isArray(parsed.webNarrowOrder)) out.webNarrowOrder = normalizeOrder(parsed.webNarrowOrder, DEFAULT_NARROW_ORDER);
+  if (!out.webSections && !out.webNarrowOrder) return null;
+  return out;
+}
+
+export function patchDashboardPrefs(patch: { webSections?: Record<string, boolean>; webNarrowOrder?: string[] }): boolean {
+  const raw = readRegularFileLimited(join(STATE_DIR, "dashboard.json"), 256 * 1024);
+  let parsed: Record<string, unknown> = {};
+  if (raw) {
+    const current = parseJsonBounded(raw, 256 * 1024, 16);
+    if (!current || typeof current !== "object" || Array.isArray(current)) return false;
+    parsed = current as Record<string, unknown>;
+  }
+  if (patch.webSections) {
+    const prev = parsed.webSections && typeof parsed.webSections === "object" && !Array.isArray(parsed.webSections)
+      ? parsed.webSections as Record<string, unknown>
+      : {};
+    const next: Record<string, boolean> = Object.create(null);
+    for (const key of Object.keys(prev)) {
+      if ((WEB_SECTION_IDS as readonly string[]).includes(key)) next[key] = prev[key] === true;
+    }
+    for (const id of WEB_SECTION_IDS) {
+      if (Object.prototype.hasOwnProperty.call(patch.webSections, id)) next[id] = patch.webSections[id] === true;
+    }
+    parsed.webSections = next;
+  }
+  if (patch.webNarrowOrder) parsed.webNarrowOrder = patch.webNarrowOrder;
+  return writePrivateStateFile(STATE_DIR, "dashboard.json", JSON.stringify(parsed, null, 2) + "\n");
+}
+
 export function handleRequest(input: {
   method: string;
   pathname: string;
@@ -573,27 +499,50 @@ export function handleRequest(input: {
   origin: string | null;
   sourceIp: string;
   contentLength: number;
-  token: string;
+  tokens: WebToken[];
   port: number;
   allowedHosts: string[];
   cidrs: Cidr[];
   snapshot: any | null;
-}): { status: number; headers: Record<string, string>; body: string } {
+  prefs?: DashPrefs;
+  theme?: ThemeColors;
+  background?: { type: string; bytes: Buffer } | null;
+  body?: string;
+  contentType?: string;
+}): Reply {
   const method = String(input.method || "").toUpperCase();
   if (input.contentLength > MAX_REQUEST_BYTES) return reply(413, "too large");
   if (!ipAllowed(input.sourceIp, input.cidrs)) return reply(403, "forbidden");
   if (!hostAllowed(input.host, input.allowedHosts, input.port)) return reply(403, "forbidden");
   if (!originAllowed(input.origin, input.allowedHosts, input.port)) return reply(403, "forbidden");
-  if (method !== "GET" && method !== "HEAD") return reply(405, "method not allowed");
+  if (method !== "GET" && method !== "HEAD" && method !== "POST") return reply(405, "method not allowed");
 
   const path = String(input.pathname || "");
   if (path.length > 256 || path.includes("..") || path.includes("//") || path.includes("\\") || path.includes("%")) return reply(404, "not found");
-  const match = path.match(/^\/t\/([0-9a-f]{48})\/(snapshot\.json)?$/);
-  if (!match || !tokensEqual(match[1], input.token)) return reply(404, "not found");
+  const match = path.match(/^\/t\/([0-9a-f]{48})\/(snapshot\.json|bg|prefs)?$/);
+  if (!match || !tokenAllowed(match[1], input.tokens || [])) return reply(404, "not found");
 
+  if (method === "POST") {
+    if (match[2] !== "prefs") return reply(405, "method not allowed");
+    if (!input.origin) return reply(403, "forbidden");
+    if (!jsonContentType(input.contentType || "")) return reply(415, "unsupported media type");
+    const patch = parsePrefsPatch(input.body || "");
+    if (!patch) return reply(400, "bad request");
+    if (!patchDashboardPrefs(patch)) return reply(500, "unavailable");
+    return reply(200, JSON.stringify({ ok: true }), "application/json; charset=utf-8");
+  }
+  if (match[2] === "prefs") return reply(405, "method not allowed");
+
+  const pagePath = `/t/${match[1]}/`;
+  if (match[2] === "bg") {
+    const image = input.background === undefined ? readBackgroundImage() : input.background;
+    if (!image) return reply(404, "not found");
+    const result = reply(200, image.bytes, image.type);
+    if (method === "HEAD") result.body = "";
+    return result;
+  }
   if (!input.snapshot) return reply(503, "collecting");
   const masked = maskSnapshot(input.snapshot);
-  const pagePath = `/t/${input.token}/`;
   if (match[2] === "snapshot.json") {
     const body = JSON.stringify({ ts: masked.ts || 0, ai: { sessions: take(masked.ai?.sessions, 12), attention: take(masked.ai?.attention, 8), usage: masked.ai?.usage || {} } });
     const result = reply(200, body, "application/json; charset=utf-8");
@@ -601,7 +550,10 @@ export function handleRequest(input: {
     return result;
   }
   const nonce = newNonce();
-  const html = renderPage(input.snapshot, pagePath, nonce);
+  const prefs = input.prefs || loadDashPrefs();
+  const theme = input.theme || loadTheme();
+  const hasBackground = input.background === undefined ? !!resolveBackgroundPath() : !!input.background;
+  const html = renderPage(input.snapshot, pagePath, nonce, prefs, theme, hasBackground);
   const result = reply(200, html, "text/html; charset=utf-8", nonce);
   if (method === "HEAD") result.body = "";
   return result;
@@ -614,8 +566,15 @@ export function loadSnapshot(): any | null {
   return parsed && typeof parsed === "object" ? parsed : null;
 }
 
-export function publicUrl(config: WebConfig, bind: string): string {
-  return `http://${bind}:${config.port}/t/${config.token}/`;
+export function publicUrl(config: WebConfig, bind: string, token?: string): string {
+  const value = validToken(token) || config.tokens[0]?.token || "";
+  return `http://${bind}:${config.port}/t/${value}/`;
+}
+
+export function tokenById(config: WebConfig, id: string): WebToken | null {
+  const wanted = validTokenId(id);
+  if (!wanted) return config.tokens[0] || null;
+  return config.tokens.find(row => row.id === wanted) || null;
 }
 
 export function publishSnapshot(snapshot: unknown): boolean {
@@ -628,9 +587,12 @@ export function publishSnapshot(snapshot: unknown): boolean {
 }
 
 export function disableWebFiles(): void {
-  for (const name of [CONFIG_NAME, SNAPSHOT_NAME]) {
-    try { if (existsSync(join(STATE_DIR, name))) unlinkSync(join(STATE_DIR, name)); } catch {}
+  const existing = loadConfig();
+  if (existing) {
+    existing.listening = false;
+    saveConfig(existing);
   }
+  try { if (existsSync(join(STATE_DIR, SNAPSHOT_NAME))) unlinkSync(join(STATE_DIR, SNAPSHOT_NAME)); } catch {}
 }
 
 const hits = new Map<string, { window: number; count: number }>();
@@ -652,8 +614,8 @@ function rateOk(ip: string): boolean {
 }
 
 async function serve() {
-  const extra = process.argv.filter(arg => parseCidr(arg)).slice(0, 8);
-  const config = ensureConfig(extra);
+  const extra = process.argv.filter(arg => parseCidr(arg)).slice(0, MAX_EXTRA_CIDRS);
+  const config = ensureConfig(extra, true);
   const bind = advertisedBind(localPrivateIPv4());
   const cidrs = parseCidrList(config.extraCidrs);
   const allowedHosts = [...localPrivateIPv4(), "127.0.0.1"];
@@ -663,22 +625,27 @@ async function serve() {
     port: requestedPort,
     maxRequestBodySize: MAX_REQUEST_BYTES,
     idleTimeout: 10,
-    fetch(req, srv) {
+    async fetch(req, srv) {
       const sourceIp = canonicalIp(srv.requestIP(req)?.address || "");
       if (!rateOk(sourceIp)) return new Response("rate", { status: 429, headers: SECURITY_HEADERS });
       const url = new URL(req.url);
+      const live = loadConfig() || config;
+      const path = url.pathname;
+      const pathname = path.endsWith("/") || path.endsWith("snapshot.json") || path.endsWith("/bg") || path.endsWith("/prefs") ? path : path + "/";
       const result = handleRequest({
         method: req.method,
-        pathname: url.pathname.endsWith("/") || url.pathname.endsWith("snapshot.json") ? url.pathname : url.pathname + "/",
+        pathname,
         host: req.headers.get("host") || "",
         origin: req.headers.get("origin"),
         sourceIp,
         contentLength: Number(req.headers.get("content-length") || 0),
-        token: config.token,
+        tokens: live.tokens,
         port: srv.port,
         allowedHosts,
-        cidrs,
+        cidrs: parseCidrList(live.extraCidrs),
         snapshot: loadSnapshot(),
+        body: req.method.toUpperCase() === "POST" ? await req.text() : "",
+        contentType: req.headers.get("content-type") || "",
       });
       return new Response(result.body, { status: result.status, headers: result.headers });
     },
@@ -699,13 +666,63 @@ if (import.meta.main) {
       await Bun.write(Bun.stdout, JSON.stringify({ ok: false }) + "\n");
       process.exit(0);
     }
-    await Bun.write(Bun.stdout, JSON.stringify({ ok: true, url: publicUrl(config, bind), port: config.port, bind }) + "\n");
+    const row = tokenById(config, process.argv[3] || "");
+    if (!row) {
+      await Bun.write(Bun.stdout, JSON.stringify({ ok: false }) + "\n");
+      process.exit(0);
+    }
+    await Bun.write(Bun.stdout, JSON.stringify({ ok: true, url: publicUrl(config, bind, row.token), port: config.port, bind, id: row.id, label: row.label }) + "\n");
     process.exit(0);
+  }
+  if (cmd === "tokens") {
+    const config = loadConfig();
+    if (!config) {
+      await Bun.write(Bun.stdout, JSON.stringify({ ok: false, tokens: [] }) + "\n");
+      process.exit(0);
+    }
+    await Bun.write(Bun.stdout, JSON.stringify({ ok: true, tokens: publicTokenList(config), extraCidrs: config.extraCidrs, defaults: DEFAULT_CIDRS, listening: config.listening }) + "\n");
+    process.exit(0);
+  }
+  if (cmd === "token-add") {
+    const created = addWebToken(process.argv[3] || "token");
+    await Bun.write(Bun.stdout, JSON.stringify(created ? { ok: true, id: created.id, label: created.label } : { ok: false }) + "\n");
+    process.exit(created ? 0 : 1);
+  }
+  if (cmd === "token-revoke") {
+    const ok = revokeWebToken(process.argv[3] || "");
+    await Bun.write(Bun.stdout, JSON.stringify({ ok }) + "\n");
+    process.exit(ok ? 0 : 1);
+  }
+  if (cmd === "cidr-add") {
+    const ok = addExtraCidr(process.argv[3] || "");
+    await Bun.write(Bun.stdout, JSON.stringify({ ok }) + "\n");
+    process.exit(ok ? 0 : 1);
+  }
+  if (cmd === "cidr-remove") {
+    const ok = removeExtraCidr(process.argv[3] || "");
+    await Bun.write(Bun.stdout, JSON.stringify({ ok }) + "\n");
+    process.exit(ok ? 0 : 1);
   }
   if (cmd === "cidrs") {
     const config = ensureConfig(process.argv.slice(3));
-    await Bun.write(Bun.stdout, JSON.stringify({ ok: true, extraCidrs: config.extraCidrs }) + "\n");
+    await Bun.write(Bun.stdout, JSON.stringify({ ok: true, extraCidrs: config.extraCidrs, defaults: DEFAULT_CIDRS }) + "\n");
     process.exit(0);
+  }
+  if (cmd === "qr") {
+    const config = loadConfig();
+    const bind = advertisedBind(localPrivateIPv4());
+    if (!config) {
+      await Bun.write(Bun.stdout, JSON.stringify({ ok: false }) + "\n");
+      process.exit(0);
+    }
+    const row = tokenById(config, process.argv[3] || "");
+    if (!row) {
+      await Bun.write(Bun.stdout, JSON.stringify({ ok: false }) + "\n");
+      process.exit(0);
+    }
+    const rows = await qrMatrixForUrl(publicUrl(config, bind, row.token));
+    await Bun.write(Bun.stdout, JSON.stringify({ ok: rows.length > 0, size: rows.length, rows }) + "\n");
+    process.exit(rows.length ? 0 : 1);
   }
   await serve();
 }

@@ -4,14 +4,16 @@ import { tmpdir } from "os";
 import { join } from "path";
 import {
   DEFAULT_CIDRS, displayMount, escapeHtml, fmtBytes, fmtRate, handleRequest, hostAllowed, ipAllowed, maskSnapshot,
-  originAllowed, parseCidr, parseCidrList, tokensEqual, newToken, ipv4ToInt, wifiLabel,
+  originAllowed, parseCidr, parseCidrList, parseAsciiQr, parsePrefsPatch, tokensEqual, newToken, ipv4ToInt, wifiLabel,
 } from "./web-server";
+import { obfuscatePrompt, parseDashPrefs, parseThemeColors, renderPage, webSectionEnabled } from "./web-page";
 
 const root = mkdtempSync(join(tmpdir(), "infomarchy-web-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 const token = "a".repeat(48);
 const cidrs = parseCidrList([]);
+const tokens = [{ id: "aaaaaaaa", token, label: "default", createdAt: 1 }];
 const base = {
   method: "GET",
   pathname: `/t/${token}/`,
@@ -19,14 +21,17 @@ const base = {
   origin: null as string | null,
   sourceIp: "172.20.20.192",
   contentLength: 0,
-  token,
+  tokens,
   port: 8787,
   allowedHosts: ["172.20.20.142", "127.0.0.1"],
   cidrs,
-  snapshot: { ts: 1, user: "larry", host: "box", machine: { externalIp: "203.0.113.9", net: { ssid: "secret", addr: "172.20.20.142", wireless: true, signal: -47, dev: "wlan0", rxRate: 2_420_000, txRate: 386_000 }, cpu: { pct: 27.4, load: [1.18, 0.92] }, mem: { pct: 44.4, used: 15_246_073_856, total: 34_359_738_368 }, disks: [{ mount: "/home/larry", size: 1_999_844_147_200, used: 816_043_786_240, pct: 40.8 }], ping: { ok: true, ms: 18.6 }, battery: { pct: 81, status: "Charging" }, temp: 52, uptime: 186_300 }, ai: { sessions: [{ provider: "pi", project: "Halo", topic: "<img src=x onerror=alert(1)>" }], attention: [], recent: [{ provider: "opencode", project: "~/Work", text: "<script>alert(1)</script>" }], usageDays: ["2026-09-01","2026-09-02","2026-09-03","2026-09-04","2026-09-05","2026-09-06","2026-09-07"], usage: { grok: { name: "Grok", ready: true, tierLabel: "weekly", todayPrompts: 4, todayTotalTokens: 4000, dailyTokens: [0,0,0,0,0,100,50], limits: [{ label: "WEEKLY", percent: 0.03, resetsAt: "2026-09-14T00:26:00-07:00" }], value: { lifetime: 1.2, today: 0.1, totals: { inputTokens: 100, outputTokens: 50, cacheReadInputTokens: 10, cacheCreationInputTokens: 0 } } }, claude: { name: "Claude Code", ready: true, tierLabel: "Max 5x", todayPrompts: 0, todayTotalTokens: 0, authHelpText: "Claude Code's saved sign-in expired", limits: [{ label: "Session (5-hour)", percent: 0.16, resetsAt: "2026-09-07T13:10:00Z" }] } }, github: { login: "TechLuddite" } } },
+  prefs: parseDashPrefs({}),
+  theme: parseThemeColors('background = "#1f1f28"\nforeground = "#dcd7ba"\n'),
+  background: null,
+  snapshot: { ts: 1, user: "larry", host: "box", machine: { externalIp: "203.0.113.9", net: { ssid: "secret", addr: "172.20.20.142", wireless: true, signal: -47, dev: "wlan0", rxRate: 2_420_000, txRate: 386_000 }, cpu: { pct: 27.4, load: [1.18, 0.92] }, mem: { pct: 44.4, used: 15_246_073_856, total: 34_359_738_368 }, disks: [{ mount: "/home/larry", size: 1_999_844_147_200, used: 816_043_786_240, pct: 40.8 }], ping: { ok: true, ms: 18.6 }, battery: { pct: 81, status: "Charging" }, temp: 52, uptime: 186_300 }, containers: { present: true, engine: "docker", up: 1, total: 1, items: [{ id: "abc", name: "lab-search-1", label: "search", running: true, state: "running", health: "healthy" }] }, ai: { sessions: [{ provider: "pi", project: "Halo", topic: "<img src=x onerror=alert(1)>" }], attention: [], recent: [{ provider: "opencode", project: "~/Work", text: "<script>alert(1)</script>" }], heatmap: { start: 1, days: [1,2,3,4,5,6,7], cells: Array.from({ length: 168 }, () => [0, {}]) }, usageDays: ["2026-09-01","2026-09-02","2026-09-03","2026-09-04","2026-09-05","2026-09-06","2026-09-07"], usage: { grok: { name: "Grok", ready: true, tierLabel: "weekly", todayPrompts: 4, todayTotalTokens: 4000, dailyTokens: [0,0,0,0,0,100,50], limits: [{ label: "WEEKLY", percent: 0.03, resetsAt: "2026-09-14T00:26:00-07:00" }], value: { lifetime: 1.2, today: 0.1, totals: { inputTokens: 100, outputTokens: 50, cacheReadInputTokens: 10, cacheCreationInputTokens: 0 } } }, claude: { name: "Claude Code", ready: true, tierLabel: "Max 5x", todayPrompts: 0, todayTotalTokens: 0, authHelpText: "Claude Code's saved sign-in expired", limits: [{ label: "Session (5-hour)", percent: 0.16, resetsAt: "2026-09-07T13:10:00Z" }] } }, github: { login: "TechLuddite", cells: Array.from({ length: 168 }, () => [0, {}, {}]), days: [1,2,3,4,5,6,7] }, providers: { ollama: { present: true, up: true, loaded: [{ name: "qwen3:8b" }], models: [{ name: "qwen3:8b", size: 1 }] } } } },
 };
 
-describe("phone view access control", () => {
+describe("web mode access control", () => {
   test("parses CIDRs and admits the phone LAN plus loopback", () => {
     expect(parseCidr("172.16.0.0/12")?.text).toBe("172.16.0.0/12");
     expect(parseCidr("999.0.0.0/8")).toBeNull();
@@ -56,14 +61,14 @@ describe("phone view access control", () => {
     expect(hostAllowed("evil.example", base.allowedHosts, 8787)).toBe(false);
     expect(originAllowed("http://evil.example", base.allowedHosts, 8787)).toBe(false);
     expect(originAllowed(null, base.allowedHosts, 8787)).toBe(true);
-    expect(handleRequest({ ...base, method: "POST" }).status).toBe(405);
+    expect(handleRequest({ ...base, method: "PUT" }).status).toBe(405);
     expect(handleRequest({ ...base, pathname: `/t/${token}/../../etc/passwd` }).status).toBe(404);
     expect(handleRequest({ ...base, pathname: `/t/${token}/%2e%2e/` }).status).toBe(404);
     expect(handleRequest({ ...base, contentLength: 9000 }).status).toBe(413);
   });
 });
 
-describe("phone view rendering", () => {
+describe("web mode rendering", () => {
   test("escapes HTML and strips identity fields", () => {
     expect(escapeHtml("<script>x</script>")).toBe("&lt;script&gt;x&lt;/script&gt;");
     const masked = maskSnapshot(base.snapshot);
@@ -75,58 +80,134 @@ describe("phone view rendering", () => {
     expect(masked.ai.github.login).toBe("");
     const page = handleRequest(base);
     expect(page.status).toBe(200);
+    const body = String(page.body);
     expect(page.headers["Content-Security-Policy"]).toContain("default-src 'none'");
+    expect(page.headers["Content-Security-Policy"]).toContain("img-src 'self'");
     expect(page.headers["X-Frame-Options"]).toBe("DENY");
-    expect(page.body).toContain("Halo");
-    expect(page.body).toContain("&lt;img src=x");
-    expect(page.body).not.toContain("<img src");
-    expect(page.body).not.toContain("<script>alert");
-    expect(page.body.match(/<script/g)?.length).toBe(1);
-    expect(page.body).not.toContain("TechLuddite");
-    expect(page.body).toContain('class="privacy"');
-    expect(page.body).toContain('id="privacy"');
-    expect(page.body).toContain("PRIVACY ON");
-    expect(page.body).toContain("WAN/LAN/SSID hidden");
-    expect(page.body).toContain("WAN 203.0.113.9");
-    expect(page.body).toContain("WIFI secret");
-    expect(page.body).toContain("DISK ~");
-    expect(page.body).toContain("DISK /home/larry");
-    expect(page.body).not.toContain("<h2>RECENT</h2>");
-    const usageAt = page.body.indexOf("USAGE");
-    const sessionsAt = page.body.indexOf("LIVE SESSIONS");
+    expect(body).toContain("Halo");
+    expect(body).toContain("&lt;img src=x");
+    expect(body).not.toContain("<img src");
+    expect(body).not.toContain("<script>alert");
+    expect(body.match(/<script/g)?.length).toBe(1);
+    expect(body).not.toContain("TechLuddite");
+    expect(body).toContain('class="privacy"');
+    expect(body).toContain('id="privacy"');
+    expect(body).toContain("PRIVACY ON");
+    expect(body).toContain("WAN/LAN/SSID hidden");
+    expect(body).toContain("WAN 203.0.113.9");
+    expect(body).toContain("WIFI secret");
+    expect(body).toContain("DISK ~");
+    expect(body).toContain("DISK /home/larry");
+    expect(body).toContain("LIVE AI SESSIONS");
+    expect(body).toContain("RECENT TASKS");
+    expect(body).toContain("LOCAL AI");
+    expect(body).toContain("CONTAINERS");
+    expect(body).toContain("search");
+    expect(body).not.toContain("MEDIA CONTROLS");
+    expect(body).toContain("grid-template-columns:minmax(0,1fr) minmax(300px,28%)");
+    expect(body).toContain("background-position:center");
+    expect(body).toContain("background-size:cover");
+    const usageAt = body.indexOf("USAGE");
+    const sessionsAt = body.indexOf("LIVE AI SESSIONS");
     expect(usageAt).toBeGreaterThan(0);
-    expect(usageAt).toBeLessThan(sessionsAt);
-    expect(page.body).not.toContain("TOKENS · 7 days");
-    expect(page.body).not.toContain("$ VALUE · 7 days");
-    expect(page.body).not.toContain("polyline");
-    expect(page.body).toContain("WEEKLY");
-    expect(page.body).toContain("3%");
-    expect(page.body).toContain("Claude Code");
-    expect(page.body).toContain("sign-in expired");
-    expect(page.body).not.toContain('http-equiv="refresh"');
-    expect(page.body).not.toContain("refreshes every 5s");
-    expect(page.body).toContain(">Refresh</a>");
-    expect(page.body).toContain('id="view"');
-    expect(page.body).toContain("fetch(location.pathname");
+    expect(sessionsAt).toBeGreaterThan(0);
+    expect(body).toContain("TOKENS · 7 days");
+    expect(body).not.toContain("$ VALUE · 7 days");
+    expect(body).toContain("polyline");
+    expect(body).toContain('width="100%"');
+    expect(body).toContain("preserveAspectRatio=\"xMinYMid meet\"");
+    expect(body).toContain(".chart svg { display:block; width:100%; height:auto; }");
+    expect(body).not.toContain('height="88"');
+    expect(body).toContain("WEEKLY");
+    expect(body).toContain("3%");
+    expect(body).toContain("Claude Code");
+    expect(body).toContain("sign-in expired");
+    expect(body).not.toContain('http-equiv="refresh"');
+    expect(body).toContain(">Refresh</a>");
+    expect(body).toContain('id="view"');
+    expect(body).toContain("fetch(location.pathname");
+    expect(body).toContain('id="zoom-in"');
+    expect(body).toContain("data-toggle-section");
+    expect(body).toContain("data-move");
+    expect(body).toContain("--stack-order");
+    expect(body).toContain("zoom:var(--scale)");
+    expect(body).toContain("display:contents");
     expect(page.headers["Content-Security-Policy"]).toContain("connect-src 'self'");
     expect(page.headers["Content-Security-Policy"]).toMatch(/script-src 'nonce-[0-9a-f]{32}'/);
-    expect(page.body).toMatch(/<script nonce="[0-9a-f]{32}">/);
-    expect(page.body).toContain("CPU");
-    expect(page.body).toContain("RAM");
-    expect(page.body).toContain("DISK ~");
-    expect(page.body).toContain("WIFI");
-    expect(page.body).toContain("-47 dBm");
-    expect(page.body).toContain("BAT 81% charging");
-    expect(page.body).toContain("⇄ 19 ms");
+    expect(body).toMatch(/<script nonce="[0-9a-f]{32}">/);
+    expect(body).toContain("CPU");
+    expect(body).toContain("RAM");
+    expect(body).toContain("DISK ~");
+    expect(body).toContain("WIFI");
+    expect(body).toContain("-47 dBm");
+    expect(body).toContain("BAT 81% charging");
+    expect(body).toContain("⇄ 19 ms");
     expect(fmtBytes(15_246_073_856)).toBe("14.2G");
     expect(fmtRate(2_420_000)).toBe("19.4Mb/s");
     expect(displayMount("/home/larry/Projects")).toBe("~/Projects");
     expect(wifiLabel({ wireless: true, ssid: "secret", dev: "wlan0" })).toBe("WIFI");
   });
 
+  test("web section prefs hide a card and media never renders", () => {
+    expect(webSectionEnabled("media", parseDashPrefs({ webSections: { media: true } }))).toBe(false);
+    expect(webSectionEnabled("recent", parseDashPrefs({ webSections: { recent: false } }))).toBe(false);
+    const html = renderPage(base.snapshot, "/t/" + token + "/", "", parseDashPrefs({ webSections: { recent: false, containers: false } }), parseThemeColors(""), false);
+    expect(html).toContain('data-section="recent"');
+    expect(html).toContain('data-section="recent" style="--stack-order:');
+    expect(html).toMatch(/class="card block off"[^>]*data-section="recent"/);
+    expect(html).toMatch(/class="card block off"[^>]*data-section="containers"/);
+    expect(html).toContain("LIVE AI SESSIONS");
+    expect(html).not.toContain("MEDIA CONTROLS");
+  });
+
+  test("privacy masks recent-task prompts the same way as the desk", () => {
+    expect(obfuscatePrompt("one two three four five six")).toBe("one two three four ···");
+    expect(obfuscatePrompt("one two three four")).toBe("one two three four");
+    const snap = {
+      ...base.snapshot,
+      ai: {
+        ...base.snapshot.ai,
+        recent: [{ provider: "opencode", project: "~/Work", text: "please review the secret token dump now" }],
+      },
+    };
+    const html = renderPage(snap, "/t/" + token + "/", "", parseDashPrefs({}), parseThemeColors(""), false);
+    expect(html).toContain("please review the secret ···");
+    expect(html).toContain("please review the secret token dump now");
+    expect(html).toContain('class="shut"');
+  });
+
+  test("accepts a second token and serves wallpaper bytes", () => {
+    const other = "b".repeat(48);
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 1, 2, 3]);
+    const extra = handleRequest({ ...base, pathname: `/t/${other}/`, tokens: [...tokens, { id: "bbbbbbbb", token: other, label: "phone", createdAt: 2 }] });
+    expect(extra.status).toBe(200);
+    const bg = handleRequest({ ...base, pathname: `/t/${token}/bg`, background: { type: "image/png", bytes: png } });
+    expect(bg.status).toBe(200);
+    expect(bg.headers["Content-Type"]).toBe("image/png");
+    expect(Buffer.from(bg.body as Uint8Array).equals(png)).toBe(true);
+  });
+
+  test("parses qrencode ASCII into a square matrix", () => {
+    const rows = parseAsciiQr("######  ######\n##      ##    \n######  ######\n");
+    expect(rows.length).toBe(0);
+    const square = parseAsciiQr(Array.from({ length: 21 }, () => "##".repeat(21)).join("\n"));
+    expect(square.length).toBe(21);
+    expect(square[0]).toBe("1".repeat(21));
+  });
+
   test("HEAD is empty and missing snapshots are 503", () => {
     expect(handleRequest({ ...base, method: "HEAD" }).body).toBe("");
     expect(handleRequest({ ...base, snapshot: null }).status).toBe(503);
+  });
+
+  test("prefs POST is origin and JSON bounded", () => {
+    const prefsPath = `/t/${token}/prefs`;
+    expect(handleRequest({ ...base, method: "POST", pathname: prefsPath }).status).toBe(403);
+    expect(handleRequest({ ...base, method: "POST", pathname: prefsPath, origin: "http://172.20.20.142:8787", contentType: "text/plain", body: "{}" }).status).toBe(415);
+    expect(handleRequest({ ...base, method: "POST", pathname: prefsPath, origin: "http://172.20.20.142:8787", contentType: "application/json", body: "{" }).status).toBe(400);
+    expect(parsePrefsPatch(JSON.stringify({ webSections: { recent: false, media: true, __proto__: { x: 1 } } }))).toEqual({ webSections: { recent: false } });
+    expect(parsePrefsPatch(JSON.stringify({ webNarrowOrder: ["machine", "sessions", "nope"] }))?.webNarrowOrder?.[0]).toBe("machine");
+    expect(parsePrefsPatch("{}")).toBeNull();
   });
 });
 
@@ -146,14 +227,19 @@ describe("live listen", () => {
     expect(status.url).toContain("/t/");
     writeFileSync(join(root, ".local", "state", "infomarchy", "web-snapshot.json"), JSON.stringify(base.snapshot));
     const page = await fetch(status.url, { headers: { Host: `127.0.0.1:${status.port}` } });
-    // fetch from this process uses 127.0.0.1, which is allowed, but Host is the URL host.
     const text = await page.text();
+    const prefs = await fetch(status.url + "prefs", {
+      method: "POST",
+      headers: { Host: `127.0.0.1:${status.port}`, "content-type": "application/json", Origin: `http://127.0.0.1:${status.port}` },
+      body: JSON.stringify({ webSections: { recent: false }, webNarrowOrder: ["machine", "sessions"] }),
+    });
     proc.kill("SIGTERM");
     await proc.exited;
     expect([200, 403]).toContain(page.status);
     if (page.status === 200) {
       expect(text).toContain("Infomarchy");
       expect(text).not.toContain("<script>alert");
+      expect(prefs.status).toBe(200);
     }
   });
 });
