@@ -1332,8 +1332,9 @@ Item {
               cells: (view.ai.heatmap || {}).cells || []
               startTs: (view.ai.heatmap || {}).start || 0
               days: (view.ai.heatmap || {}).days || []
-              kinds: ["claude", "codex", "grok", "opencode", "pi", "gemini", "ollama"]
+              kinds: ["claude", "codex", "grok", "hermes", "opencode", "pi", "gemini", "ollama"]
               unit: "prompts"
+              kindFiltersCells: true
               selectedCell: view.activityCellFilter
               selectedKind: view.activityProviderFilter
               filterActive: view.activityFilterActive
@@ -1716,12 +1717,12 @@ Item {
                     PlainText { text: up.u.name || up.modelData; color: up.tone; font.family: view.mono; font.bold: true; font.pixelSize: Style.font.body }
                     PlainText { text: up.u.tierLabel || ""; color: view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption }
                     Item { Layout.fillWidth: true }
-                    PlainText { text: "today " + (up.u.todayPrompts || 0) + "p · " + view.desk.tokens(up.u.todayTotalTokens) + " tok" + (up.u.value && up.u.value.today !== null && up.u.value.today !== undefined ? " · ≈" + view.usageMoney(up.u.value.today) : ""); color: view.textDim; font.family: view.mono; font.pixelSize: Style.font.caption }
+                    PlainText { text: "today " + (up.u.todayPrompts || 0) + "p" + (up.u.todaySessions ? " · " + up.u.todaySessions + " sess" : "") + (up.u.hasTokenData ? " · " + view.desk.tokens(up.u.todayTotalTokens) + " tok" + (up.u.value && up.u.value.today !== null && up.u.value.today !== undefined ? " · ≈" + view.usageMoney(up.u.value.today) : "") : ""); color: view.textDim; font.family: view.mono; font.pixelSize: Style.font.caption }
                   }
                   PlainText {
                     Layout.fillWidth: true
-                    visible: !!(up.u.authHelpText || up.u.usageStatusText)
-                    text: up.u.authHelpText || up.u.usageStatusText || ""
+                    visible: !!up.u.authHelpText
+                    text: up.u.authHelpText || ""
                     color: view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption
                     elide: Text.ElideRight
                   }
@@ -1741,6 +1742,26 @@ Item {
                       return parts.join(" · ")
                     }
                     color: view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption
+                  }
+                  Repeater {
+                    model: (up.u.models || []).filter(function(m) { return m && ((m.share || 0) > 0 || (m.sessions || 0) > 0) })
+                    delegate: Meter {
+                      required property var modelData
+                      Layout.fillWidth: true
+                      label: modelData.id || ""
+                      value: up.u.hasTokenData
+                        ? view.desk.tokens(modelData.todayTokens) + " tok  ·  " + Math.round((modelData.share || 0) * 100) + "%"
+                        : (modelData.sessions || 0) + " sess"
+                      fraction: up.u.hasTokenData ? (modelData.share || 0) : 0
+                      tone: up.tone
+                    }
+                  }
+                  PlainText {
+                    Layout.fillWidth: true
+                    visible: !!up.u.usageStatusText && !(up.u.limits || []).length
+                    text: up.u.usageStatusText || ""
+                    color: view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption
+                    elide: Text.ElideRight
                   }
                   Repeater {
                     model: up.u.limits || []
@@ -1937,6 +1958,7 @@ Item {
               Tag { visible: !!(provRow.ps.grok && provRow.ps.grok.present); text: "grok " + (provRow.ps.grok ? provRow.ps.grok.sessions : 0) + " sess"; tone: view.desk.providerColor("grok") }
               Tag { visible: !!(provRow.ps.grokBot && provRow.ps.grokBot.present); text: "grok bot " + (provRow.ps.grokBot ? provRow.ps.grokBot.sessions : 0) + " bots" + (provRow.ps.grokBot && provRow.ps.grokBot.unread ? " · " + provRow.ps.grokBot.unread + " unread" : ""); tone: view.desk.providerColor("grok-bot") }
               Tag { visible: !!(provRow.ps.opencode && provRow.ps.opencode.present); text: "opencode " + (provRow.ps.opencode ? provRow.ps.opencode.sessions : 0) + " sess"; tone: view.desk.providerColor("opencode") }
+              Tag { visible: !!(provRow.ps.hermes && provRow.ps.hermes.present); text: "hermes " + (provRow.ps.hermes ? provRow.ps.hermes.sessions : 0) + " sess"; tone: view.desk.providerColor("hermes") }
               Tag { visible: !!(provRow.ps.pi && provRow.ps.pi.present); text: "pi " + (provRow.ps.pi ? provRow.ps.pi.sessions : 0) + " sess"; tone: view.desk.providerColor("pi") }
             }
           }
