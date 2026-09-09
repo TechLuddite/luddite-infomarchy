@@ -67,6 +67,7 @@ Scope {
       visible: root.opened && !remapGuard.remapping
       anchors { top: true; bottom: true; left: true; right: true }
       color: "transparent"
+      updatesEnabled: root.opened
       WlrLayershell.namespace: "infomarchy-overlay"
       WlrLayershell.layer: WlrLayer.Overlay
       WlrLayershell.keyboardFocus: root.opened ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
@@ -89,13 +90,14 @@ Scope {
           opacity: dashboardSettings.ready && dashboardSettings.dashboardVisible ? root.wallpaperOpacity : 1.0
           Behavior on opacity { NumberAnimation { duration: 300 } }
 
-          Image {
+          WaveWallpaper {
             anchors.fill: parent
             visible: !root.videoBackground
             source: root.videoBackground ? "" : Util.fileUrl(root.background)
             fillMode: Image.PreserveAspectCrop
             asynchronous: true
             cache: true
+            playing: root.opened
           }
 
           Loader {
