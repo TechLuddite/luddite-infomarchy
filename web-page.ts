@@ -663,7 +663,13 @@ function renderContainers(snap: any, prefs: DashPrefs = parseDashPrefs({}), them
 
 export const LIVE_SCRIPT = '(function(){function privacyOn(){try{return sessionStorage.getItem("im-privacy")!=="0"}catch(e){return true}}function scale(){try{var n=Number(sessionStorage.getItem("im-scale"));return isFinite(n)&&n>=0.6&&n<=1.6?Math.round(n*10)/10:1}catch(e){return 1}}function setScale(n){n=Math.min(1.6,Math.max(0.6,Math.round(Number(n)*10)/10));try{sessionStorage.setItem("im-scale",String(n))}catch(e){}apply()}function apply(){var p=privacyOn();document.body.classList.toggle("privacy",p);var b=document.getElementById("privacy");if(b){b.textContent=p?"PRIVACY ON":"PRIVACY";b.classList.toggle("on",p)}var s=scale();document.documentElement.style.setProperty("--scale",String(s));var lab=document.getElementById("zoom-label");if(lab)lab.textContent=Math.round(s*100)+"%"}function prefsUrl(){var path=location.pathname;if(path.charAt(path.length-1)!=="/")path+="/";return path+"prefs"}function collect(){var sections={},order=[],chips=document.querySelectorAll("[data-toggle-section]");for(var i=0;i<chips.length;i++){var id=chips[i].getAttribute("data-toggle-section");if(id)sections[id]=!chips[i].classList.contains("off")}var blocks=document.querySelectorAll(".block[data-section]"),items=[];for(var j=0;j<blocks.length;j++)items.push({id:blocks[j].getAttribute("data-section"),order:Number((blocks[j].style.getPropertyValue("--stack-order")||j))});items.sort(function(a,b){return a.order-b.order});for(var k=0;k<items.length;k++)if(items[k].id)order.push(items[k].id);return{webSections:sections,webNarrowOrder:order}}function save(){fetch(prefsUrl(),{method:"POST",cache:"no-store",credentials:"omit",headers:{"content-type":"application/json"},body:JSON.stringify(collect())}).catch(function(){})}document.addEventListener("click",function(e){var t=e.target;if(!t||!t.closest)return;if(t.id==="privacy"){try{sessionStorage.setItem("im-privacy",privacyOn()?"0":"1")}catch(x){}apply();return}if(t.id==="zoom-in"){setScale(scale()+0.1);return}if(t.id==="zoom-out"){setScale(scale()-0.1);return}if(t.id==="zoom-label"){setScale(1);return}var chip=t.closest("[data-toggle-section]");if(chip){var sid=chip.getAttribute("data-toggle-section"),on=chip.classList.contains("off"),label=chip.getAttribute("data-label")||"";chip.classList.toggle("off",!on);chip.textContent=(on?"\\u25cf ":"\\u25cb ")+label;var block=document.querySelector(\'.block[data-section="\'+sid+\'"]\');if(block)block.classList.toggle("off",!on);save();return}var mv=t.closest("[data-move]");if(!mv)return;var dir=Number(mv.getAttribute("data-move")),msid=mv.getAttribute("data-section"),list=Array.prototype.slice.call(document.querySelectorAll(".block[data-section]"));list.sort(function(a,b){return Number(a.style.getPropertyValue("--stack-order"))-Number(b.style.getPropertyValue("--stack-order"))});var idx=-1;for(var n=0;n<list.length;n++)if(list[n].getAttribute("data-section")===msid)idx=n;var swap=idx+dir;if(idx<0||swap<0||swap>=list.length)return;var ao=list[idx].style.getPropertyValue("--stack-order"),bo=list[swap].style.getPropertyValue("--stack-order");list[idx].style.setProperty("--stack-order",bo);list[swap].style.setProperty("--stack-order",ao);save()});apply();var busy=0;function g(){if(busy)return;busy=1;fetch(location.pathname,{cache:"no-store",credentials:"omit"}).then(function(r){return r.ok?r.text():Promise.reject()}).then(function(h){var d=new DOMParser().parseFromString(h,"text/html");var n=d.getElementById("view"),c=document.getElementById("view");if(!n||!c)return;var ns=d.querySelector("style"),cs=document.querySelector("style");if(ns&&cs)cs.replaceWith(document.importNode(ns,true));var y=scrollY;c.replaceWith(document.importNode(n,true));scrollTo(0,y);apply()}).catch(function(){}).then(function(){busy=0})}setInterval(g,5000)})();';
 
-function pageCss(theme: ThemeColors, hasBackground: boolean): string {
+function backgroundCssUrl(hasBackground: boolean, revision = ""): string {
+  if (!hasBackground) return "none";
+  const rev = /^[0-9]{1,16}-[0-9]{1,16}$/.test(revision) ? revision : "";
+  return rev ? `url("bg?v=${rev}")` : `url("bg")`;
+}
+
+function pageCss(theme: ThemeColors, hasBackground: boolean, bgRev = ""): string {
   const bg = themeRole(theme, "background");
   const fg = themeRole(theme, "foreground");
   const green = themeRole(theme, "green");
@@ -673,7 +679,7 @@ function pageCss(theme: ThemeColors, hasBackground: boolean): string {
   const magenta = themeRole(theme, "magenta");
   const cyan = themeRole(theme, "cyan");
   const accent = themeRole(theme, "accent");
-  const wall = hasBackground ? `url("bg")` : "none";
+  const wall = backgroundCssUrl(hasBackground, bgRev);
   return `
 :root { color-scheme: dark; --bg:${bg}; --fg:${fg}; --green:${green}; --yellow:${yellow}; --red:${red}; --blue:${blue}; --magenta:${magenta}; --cyan:${cyan}; --accent:${accent}; --card:${hexToRgba(bg, 0.62)}; --border:${hexToRgba(fg, 0.14)}; --dim:${hexToRgba(fg, 0.62)}; --faint:${hexToRgba(fg, 0.38)}; --gap:8px; --pad:16px; --radius:6px; --scale:1; }
 html, body { margin:0; min-height:100%; background:var(--bg); color:var(--fg); font:13px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -755,7 +761,7 @@ body:not(.privacy) .shut { display:none; }
 `;
 }
 
-export function renderPage(snap: any, refreshPath: string, nonce = "", prefs: DashPrefs = parseDashPrefs({}), theme: ThemeColors = FALLBACK_THEME, hasBackground = false): string {
+export function renderPage(snap: any, refreshPath: string, nonce = "", prefs: DashPrefs = parseDashPrefs({}), theme: ThemeColors = FALLBACK_THEME, hasBackground = false, bgRev = ""): string {
   const n = /^[0-9a-f]{32}$/.test(nonce) ? nonce : "";
   const strip: string[] = [];
   for (const id of WEB_SECTION_IDS) {
@@ -781,9 +787,9 @@ export function renderPage(snap: any, refreshPath: string, nonce = "", prefs: Da
   const rows: string[] = [];
   rows.push(`<!doctype html><html lang="en"><head><meta charset="utf-8">`);
   rows.push(`<meta name="viewport" content="width=device-width,initial-scale=1">`);
-  rows.push(`<title>Infomarchy</title><style>${pageCss(theme, hasBackground)}</style></head>`);
-  rows.push(`<body class="privacy"><div class="wall" aria-hidden="true"></div>`);
-  rows.push(`<div id="view" class="stage"><div class="desk">`);
+  rows.push(`<title>Infomarchy</title><style>${pageCss(theme, hasBackground, bgRev)}</style></head>`);
+  rows.push(`<body class="privacy">`);
+  rows.push(`<div id="view" class="stage"><div class="wall" aria-hidden="true"></div><div class="desk">`);
   rows.push(`<div class="strip">${strip.join("")}<button type="button" id="privacy" class="privacy-btn on">PRIVACY ON</button><a class="refresh" href="${escapeHtml(refreshPath, 200)}">Refresh</a></div>`);
   rows.push(`<div class="board"><div class="columns"><div class="left">`);
   rows.push(renderSessions(snap, prefs, theme));

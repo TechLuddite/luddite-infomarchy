@@ -270,7 +270,16 @@ describe("web mode rendering", () => {
     const bg = handleRequest({ ...base, pathname: `/t/${token}/bg`, background: { type: "image/png", bytes: png } });
     expect(bg.status).toBe(200);
     expect(bg.headers["Content-Type"]).toBe("image/png");
+    expect(bg.headers["Cache-Control"]).toBe("no-store");
     expect(Buffer.from(bg.body as Uint8Array).equals(png)).toBe(true);
+    const page = handleRequest({ ...base, background: { type: "image/png", bytes: png } });
+    const html = String(page.body);
+    expect(html).toContain('url("bg?v=1-1")');
+    expect(html).toMatch(/id="view"[^>]*>[\s\S]*class="wall"/);
+    expect(html).not.toContain('url("bg?v=1-1");</head>');
+    const poisoned = renderPage(base.snapshot, "/t/" + token + "/", "", parseDashPrefs({}), parseThemeColors(""), true, '1-1") url("http://evil');
+    expect(poisoned).not.toContain("evil");
+    expect(poisoned).toContain('url("bg")');
   });
 
   test("parses qrencode ASCII into a square matrix", () => {
