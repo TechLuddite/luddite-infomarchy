@@ -6,7 +6,7 @@ import {
   DEFAULT_CIDRS, displayMount, escapeHtml, fmtBytes, fmtRate, handleRequest, hostAllowed, ipAllowed, maskSnapshot,
   originAllowed, parseCidr, parseCidrList, parseAsciiQr, parsePrefsPatch, tokensEqual, newToken, ipv4ToInt, wifiLabel,
 } from "./web-server";
-import { obfuscatePrompt, parseDashPrefs, parseThemeColors, renderPage, webSectionEnabled } from "./web-page";
+import { obfuscatePrompt, parseDashPrefs, parseThemeColors, renderPage, renderUsageSection, webSectionEnabled } from "./web-page";
 
 const root = mkdtempSync(join(tmpdir(), "infomarchy-web-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -28,7 +28,7 @@ const base = {
   prefs: parseDashPrefs({}),
   theme: parseThemeColors('background = "#1f1f28"\nforeground = "#dcd7ba"\n'),
   background: null,
-  snapshot: { ts: 1, user: "larry", host: "box", machine: { externalIp: "203.0.113.9", net: { ssid: "secret", addr: "172.20.20.142", wireless: true, signal: -47, dev: "wlan0", rxRate: 2_420_000, txRate: 386_000 }, cpu: { pct: 27.4, load: [1.18, 0.92] }, mem: { pct: 44.4, used: 15_246_073_856, total: 34_359_738_368 }, disks: [{ mount: "/home/larry", size: 1_999_844_147_200, used: 816_043_786_240, pct: 40.8 }], ping: { ok: true, ms: 18.6 }, battery: { pct: 81, status: "Charging" }, temp: 52, uptime: 186_300 }, containers: { present: true, engine: "docker", up: 1, total: 1, items: [{ id: "abc", name: "lab-search-1", label: "search", running: true, state: "running", health: "healthy" }] }, ai: { sessions: [{ provider: "pi", project: "Halo", topic: "<img src=x onerror=alert(1)>" }], attention: [], recent: [{ provider: "opencode", project: "~/Work", text: "<script>alert(1)</script>" }], heatmap: { start: 1, days: [1,2,3,4,5,6,7], cells: Array.from({ length: 168 }, () => [0, {}]) }, usageDays: ["2026-09-01","2026-09-02","2026-09-03","2026-09-04","2026-09-05","2026-09-06","2026-09-07"], usage: { grok: { name: "Grok", ready: true, tierLabel: "weekly", todayPrompts: 4, todayTotalTokens: 4000, dailyTokens: [0,0,0,0,0,100,50], limits: [{ label: "WEEKLY", percent: 0.03, resetsAt: "2026-09-14T00:26:00-07:00" }], value: { lifetime: 1.2, today: 0.1, totals: { inputTokens: 100, outputTokens: 50, cacheReadInputTokens: 10, cacheCreationInputTokens: 0 } } }, claude: { name: "Claude Code", ready: true, tierLabel: "Max 5x", todayPrompts: 0, todayTotalTokens: 0, authHelpText: "Claude Code's saved sign-in expired", limits: [{ label: "Session (5-hour)", percent: 0.16, resetsAt: "2026-09-07T13:10:00Z" }] } }, github: { login: "TechLuddite", cells: Array.from({ length: 168 }, () => [0, {}, {}]), days: [1,2,3,4,5,6,7] }, providers: { ollama: { present: true, up: true, loaded: [{ name: "qwen3:8b" }], models: [{ name: "qwen3:8b", size: 1 }] } } } },
+  snapshot: { ts: 1, user: "larry", host: "box", machine: { externalIp: "203.0.113.9", net: { ssid: "secret", addr: "172.20.20.142", wireless: true, signal: -47, dev: "wlan0", rxRate: 2_420_000, txRate: 386_000 }, cpu: { pct: 27.4, load: [1.18, 0.92] }, mem: { pct: 44.4, used: 15_246_073_856, total: 34_359_738_368 }, disks: [{ mount: "/home/larry", size: 1_999_844_147_200, used: 816_043_786_240, pct: 40.8 }], ping: { ok: true, ms: 18.6 }, battery: { pct: 81, status: "Charging" }, temp: 52, uptime: 186_300 }, containers: { present: true, engine: "docker", up: 1, total: 1, items: [{ id: "abc", name: "lab-search-1", label: "search", running: true, state: "running", health: "healthy" }] }, ai: { sessions: [{ provider: "pi", project: "Halo", topic: "<img src=x onerror=alert(1)>" }], attention: [], recent: [{ provider: "opencode", project: "~/Work", text: "<script>alert(1)</script>" }], heatmap: { start: 1, days: [1,2,3,4,5,6,7], cells: Array.from({ length: 168 }, () => [0, {}]) }, usageDays: ["2026-09-01","2026-09-02","2026-09-03","2026-09-04","2026-09-05","2026-09-06","2026-09-07"], usage: { grok: { name: "Grok", ready: true, tierLabel: "weekly", todayPrompts: 4, todaySessions: 2, todayTotalTokens: 4000, hasTokenData: true, dailyTokens: [0,0,0,0,0,100,50], models: [{ id: "grok-4.6", share: 0.75, todayTokens: 3000, sessions: 2 }], limits: [{ label: "WEEKLY", percent: 0.03, resetsAt: "2026-09-14T00:26:00-07:00" }], value: { lifetime: 1.2, today: 0.1, totals: { inputTokens: 100, outputTokens: 50, cacheReadInputTokens: 10, cacheCreationInputTokens: 0 } } }, claude: { name: "Claude Code", ready: true, tierLabel: "Max 5x", todayPrompts: 0, todayTotalTokens: 0, hasTokenData: false, authHelpText: "Claude Code's saved sign-in expired", limits: [{ label: "Session (5-hour)", percent: 0.16, resetsAt: "2026-09-07T13:10:00Z" }] } }, github: { login: "TechLuddite", cells: Array.from({ length: 168 }, () => [0, {}, {}]), days: [1,2,3,4,5,6,7] }, providers: { ollama: { present: true, up: true, loaded: [{ name: "qwen3:8b" }], models: [{ name: "qwen3:8b", size: 1 }] } } } },
 };
 
 describe("web mode access control", () => {
@@ -120,8 +120,12 @@ describe("web mode rendering", () => {
     expect(body).not.toContain('height="88"');
     expect(body).toContain("WEEKLY");
     expect(body).toContain("3%");
+    expect(body).toContain("today 4p · 2 sess · 4K tok");
+    expect(body).toContain("grok-4.6");
+    expect(body).toContain("3K tok  ·  75%");
     expect(body).toContain("Claude Code");
     expect(body).toContain("sign-in expired");
+    expect(body).not.toContain("today 0p · 0 tok");
     expect(body).not.toContain('http-equiv="refresh"');
     expect(body).toContain(">Refresh</a>");
     expect(body).toContain('id="view"');
@@ -146,6 +150,35 @@ describe("web mode rendering", () => {
     expect(fmtRate(2_420_000)).toBe("19.4Mb/s");
     expect(displayMount("/home/larry/Projects")).toBe("~/Projects");
     expect(wifiLabel({ wireless: true, ssid: "secret", dev: "wlan0" })).toBe("WIFI");
+  });
+
+  test("usage matches the desk: sessions, hasTokenData, per-model meters, status when no bars", () => {
+    const html = renderUsageSection({
+      ai: {
+        usage: {
+          grok: {
+            name: "Grok", ready: true, todayPrompts: 18, todaySessions: 5, hasTokenData: false,
+            models: [{ id: "session-model", share: 0, sessions: 3, todayTokens: 0 }],
+            limits: [], usageStatusText: "credits, not rate-limit windows",
+          },
+          claude: {
+            name: "Claude", ready: true, todayPrompts: 4, todayTotalTokens: 12000, hasTokenData: true,
+            models: [{ id: "family-a", share: 0.7, todayTokens: 8400, sessions: 2 }],
+            limits: [{ label: "WEEKLY", percent: 0.4 }],
+          },
+        },
+      },
+    });
+    expect(html).toContain("today 18p · 5 sess");
+    expect(html).not.toContain("today 18p · 5 sess · 0 tok");
+    expect(html).toContain("credits, not rate-limit windows");
+    expect(html).toContain("session-model");
+    expect(html).toContain("3 sess");
+    expect(html).toContain("family-a");
+    expect(html).toContain("8K tok  ·  70%");
+    expect(html).toContain('class="meter"');
+    expect(html).toContain('class="fill"');
+    expect(html).not.toContain("$ VALUE · 7 days");
   });
 
   test("web section prefs hide a card and media never renders", () => {

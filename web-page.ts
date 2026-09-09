@@ -411,18 +411,19 @@ export function renderUsageSection(snap: any, prefs: DashPrefs = parseDashPrefs(
     if (v.lifetime !== null && v.lifetime !== undefined) life.push("≈" + fmtMoney(v.lifetime) + " est.");
     else if (all > 0) life.push("unpriced");
     if (row.totalSessions) life.push(row.totalSessions + " sessions");
-    const todayValue = v.today !== null && v.today !== undefined ? " · ≈" + fmtMoney(v.today) : "";
+    const hasTok = row.hasTokenData === true;
+    const todayValue = hasTok && v.today !== null && v.today !== undefined ? " · ≈" + fmtMoney(v.today) : "";
     const todayBits = ["today " + String(row.todayPrompts || 0) + "p"];
     if (row.todaySessions) todayBits.push(String(row.todaySessions) + " sess");
-    if (row.hasTokenData) todayBits.push(fmtTokens(row.todayTotalTokens) + " tok" + todayValue);
+    if (hasTok) todayBits.push(fmtTokens(row.todayTotalTokens) + " tok" + todayValue);
     const limits = take(row.limits, 8).map((limit: any) => renderLimit(limit, tone)).join("");
     const help = row.authHelpText ? `<div class="meta">${escapeHtml(row.authHelpText, 200)}</div>` : "";
     const status = row.usageStatusText && !(row.limits || []).length ? `<div class="meta">${escapeHtml(row.usageStatusText, 200)}</div>` : "";
     const models = take(row.models, 8).filter((m: any) => m && ((m.share || 0) > 0 || (m.sessions || 0) > 0)).map((m: any) => {
-      const label = row.hasTokenData
-        ? fmtTokens(m.todayTokens) + " tok · " + Math.round((m.share || 0) * 100) + "%"
+      const value = hasTok
+        ? fmtTokens(m.todayTokens) + " tok  ·  " + Math.round((m.share || 0) * 100) + "%"
         : String(m.sessions || 0) + " sess";
-      return `<div class="meta">${escapeHtml(m.id || "", 40)} · ${escapeHtml(label, 48)}</div>`;
+      return renderMeterBar(String(m.id || ""), value, hasTok ? Number(m.share) || 0 : 0, tone);
     }).join("");
     blocks.push(`<div class="subcard" style="border-color:${tone}44"><div class="usage-head"><span class="tag" style="color:${tone}">${escapeHtml(row.name || key, 40)}</span> <span class="meta">${escapeHtml(row.tierLabel, 32)}</span></div><div class="meta">${escapeHtml(todayBits.join(" · "), 80)}</div>${help}${life.length ? `<div class="meta">${escapeHtml(life.join(" · "), 220)}</div>` : ""}${models}${status}${limits}</div>`);
   }
