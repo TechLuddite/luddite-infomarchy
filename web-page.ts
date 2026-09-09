@@ -626,7 +626,7 @@ function renderRecent(snap: any, prefs: DashPrefs = parseDashPrefs({}), theme: T
       ? escapeHtml(full, 200)
       : `<span class="shut">${escapeHtml(shut, 80)}</span><span class="open">${escapeHtml(full, 200)}</span>`;
     const project = folderName(item.project);
-    return `<div class="recent-row"><span class="recent-ago">${escapeHtml(fmtAgo(item.ts), 8)}</span><span class="tag" style="color:${tone}">${escapeHtml(item.provider, 16)}</span><span class="recent-project">${escapeHtml(project, 32)}</span><span class="recent-text">${textHtml}</span></div>`;
+    return `<div class="recent-row"><span class="recent-ago">${escapeHtml(fmtAgo(item.ts), 8)}</span><span class="tag" style="color:${tone}">${escapeHtml(item.provider, 16)}</span><span class="recent-project">${escapeHtml(project, 80)}</span><span class="recent-text">${textHtml}</span></div>`;
   }).join("");
   return card("RECENT TASKS · WHAT GOT ASKED", `<div class="recent">${rows}</div>`, "", "recent", m.on, m.order);
 }
@@ -720,11 +720,12 @@ html, body { margin:0; min-height:100%; background:var(--bg); color:var(--fg); f
 .session-topic { color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .row { border:1px solid var(--border); border-radius:var(--radius); padding:6px 8px; margin:0 0 6px; }
 .row:last-child { margin-bottom:0; }
-.recent { max-height:42vh; overflow:auto; }
-.recent-row { display:grid; grid-template-columns:2.2em auto minmax(4em,7em) minmax(0,1fr); gap:8px; align-items:baseline; padding:3px 0; border-bottom:1px solid var(--border); }
-.recent-ago { color:var(--faint); font-size:12px; text-align:right; }
-.recent-project { color:var(--dim); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.recent-text { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.recent { display:grid; grid-template-columns:max-content max-content max-content minmax(0,1fr); column-gap:8px; align-items:baseline; max-height:42vh; overflow:auto; }
+.recent-row { display:grid; grid-template-columns:subgrid; grid-column:1 / -1; align-items:baseline; padding:3px 0; border-bottom:1px solid var(--border); }
+.recent-ago { color:var(--faint); font-size:12px; text-align:right; white-space:nowrap; }
+.recent-row .tag { white-space:nowrap; }
+.recent-project { color:var(--dim); font-size:12px; white-space:nowrap; }
+.recent-text { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
 .heat { display:flex; flex-direction:column; gap:2px; }
 .heat-row { display:grid; grid-template-columns:22px repeat(24,minmax(0,1fr)); gap:2px; height:14px; }
 .heat-day { font-size:9px; color:var(--faint); }
@@ -746,7 +747,6 @@ body:not(.privacy) .shut { display:none; }
   .block { order:var(--stack-order, 50); }
   .move { display:inline-flex; gap:4px; margin-left:8px; }
   .recent { max-height:none; }
-  .recent-row { grid-template-columns:2.2em auto minmax(3.5em,6em) minmax(0,1fr); }
 }
 @media (max-width:640px) {
   .grid { grid-template-columns:1fr; }

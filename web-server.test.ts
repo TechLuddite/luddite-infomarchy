@@ -104,6 +104,10 @@ describe("web mode rendering", () => {
     expect(body).toContain(">2h<");
     expect(body).toContain('class="recent-project"');
     expect(body).toContain(">Work<");
+    expect(body).toContain("grid-template-columns:subgrid");
+    expect(body).toContain("grid-column:1 / -1");
+    expect(body).not.toContain("minmax(4em,7em)");
+    expect(body).not.toContain(".recent-project { color:var(--dim); font-size:12px; overflow:hidden; text-overflow:ellipsis");
     expect(body).not.toContain(".recent-row .meta { display:none; }");
     expect(body).toContain("LOCAL AI");
     expect(body).toContain("CONTAINERS");
