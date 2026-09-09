@@ -66,13 +66,26 @@ describe("interactive information modules", () => {
   test("offers safe selectable Ollama load and unload controls", () => {
     expect(settings).toContain("property string selectedOllamaModel");
     expect(settings).toContain("function setSelectedOllamaModel");
+    expect(settings).toContain("property string ollamaHost: \"\"");
+    expect(settings).toContain("function setOllamaHost");
+    expect(settings).toContain("function normalizeOllamaHost");
     expect(model).toContain('ollamaControlPath: Qt.resolvedUrl("ollama-control.ts")');
     expect(model).toContain("ollamaProcess.pendingFrame");
     expect(model).toContain("write(JSON.stringify(pendingFrame)");
+    expect(model).toContain("environment: root.ollamaHost !== \"\" ? ({ OLLAMA_HOST: root.ollamaHost }) : ({})");
+    expect(service).toContain("function setOllamaHost(v: string): void { dashboardSettings.setOllamaHost(v) }");
+    expect(overlay).toContain("ollamaHost: dashboardSettings.ollamaHost");
     expect(view).toContain("function needsConfirmation");
     expect(view).toContain('view.desk.controlOllama("load"');
     expect(view).toContain('view.desk.controlOllama("unload"');
     expect(view).toContain('"CONFIRM"');
+    const source = settings.match(/function normalizeOllamaHost\([\s\S]*?\n  \}/)?.[0];
+    expect(source).toBeTruthy();
+    const normalizeOllamaHost = Function(`return (${source})`)();
+    expect(normalizeOllamaHost("http://127.0.0.1:11435")).toBe("http://127.0.0.1:11435");
+    expect(normalizeOllamaHost("127.0.0.1:11435")).toBe("http://127.0.0.1:11435");
+    expect(normalizeOllamaHost("http://user:secret@127.0.0.1:11435")).toBe("");
+    expect(normalizeOllamaHost("")).toBe("");
   });
 
   test("deduplicates configurable attention and lifecycle notifications", () => {
@@ -379,4 +392,14 @@ describe("github activity heatmap", () => {
     expect(view).toContain("pinnedBreakdown: true");
     expect(view).toContain('"pinned · " + panel.cellLabel(panel.selectedCell)');
   });
+});
+
+
+test("persisted Ollama origins reject credentials and request paths", () => {
+  const source = settings.match(/function normalizeOllamaHost\([\s\S]*?\n  \}/)?.[0];
+  const normalize = Function(`return (${source})`)();
+  expect(normalize("127.0.0.1:11435")).toBe("http://127.0.0.1:11435");
+  expect(normalize("https://ollama.example/")).toBe("https://ollama.example");
+  expect(normalize("http://[::1]:11434")).toBe("http://[::1]:11434");
+  for (const invalid of ["http://u:password@host", "http://host/api", "http://host?q=x", "http://host#x", "http://host:65536"]) expect(normalize(invalid)).toBe("");
 });
