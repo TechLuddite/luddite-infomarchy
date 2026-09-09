@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, sy
 import { Database } from "bun:sqlite";
 import { tmpdir } from "os";
 import { join, relative } from "path";
-import { providerOf, titleLooksBusy, cmdIsTurnInhibitor, sessionIdFrom, sessionHostsFromEnvironment, tmuxSocketFromEnvironment, parseTmuxPanes, parseTmuxClients, tmuxPaneForAncestors, linkRecentToLive, inferSessionIdsFromRecent, attachSessionTopics, localSessionSummary, cleanGeneratedSummary, activityCellIndex, parseExternalIpTrace, externalIpCacheFresh, frameSnapshot, parseJsonBounded, readRegularFileLimited, safePrompt, sessionPresentation, writePrivateStateFile, decodeProjectDir, dropPartialFirstLine, readHistoryTail, readRegularFileHead, rolloutSessionId, rolloutCwd, topicCacheHit, topicRetryBlocked, pruneTopicCache, reapStateTempFiles, parseGpuLine, parseDfRows, plausibleTimestamp, normalizeUsage, normalizeUsageLimit, ollamaHostIsLocal, topicRefinementAllowed, terminate, rateForModel, estimateValue, valueSummary, alignDailyTokens, localDayKey, loadPricing, todayValueEstimate, herdrSocketFromEnvironment, herdrClientPids, herdrWindowFor, boomuxClientShellId, boomuxWindowFor, backgroundDaemonKind, parseClaudeAgents, sessionStaleness, STALE_AFTER_MS, decodeBase32, grokBotLine, grokBotRow, grokBotAttention, attachGrokBotRoster, grokSessionUsage, usageModelBreakdown } from "./collector.ts";
+import { providerOf, titleLooksBusy, cmdIsTurnInhibitor, sessionIdFrom, sessionHostsFromEnvironment, tmuxSocketFromEnvironment, parseTmuxPanes, parseTmuxClients, tmuxPaneForAncestors, linkRecentToLive, inferSessionIdsFromRecent, attachSessionTopics, localSessionSummary, cleanGeneratedSummary, activityCellIndex, parseExternalIpTrace, externalIpCacheFresh, frameSnapshot, parseJsonBounded, readRegularFileLimited, safePrompt, sessionPresentation, writePrivateStateFile, decodeProjectDir, dropPartialFirstLine, readHistoryTail, readRegularFileHead, rolloutSessionId, rolloutCwd, topicCacheHit, topicRetryBlocked, pruneTopicCache, reapStateTempFiles, parseGpuLine, parseDfRows, plausibleTimestamp, normalizeUsage, normalizeUsageLimit, ollamaHostIsLocal, topicRefinementAllowed, terminate, rateForModel, estimateValue, valueSummary, alignDailyTokens, localDayKey, loadPricing, todayValueEstimate, herdrSocketFromEnvironment, herdrClientPids, herdrWindowFor, boomuxClientShellId, boomuxWindowFor, backgroundDaemonKind, parseClaudeAgents, sessionStaleness, STALE_AFTER_MS, decodeBase32, grokBotLine, grokBotRow, grokBotAttention, attachGrokBotRoster, grokSessionUsage, usageModelBreakdown, windowMatchesProvider, hermesSessionByPid } from "./collector.ts";
 import { sessionEventId } from "./notification-events.ts";
 
 const testRoot = mkdtempSync(join(tmpdir(), "infomarchy-test-"));
@@ -921,6 +921,45 @@ describe("Claude's own session registry", () => {
     expect(map.get(305287)?.status).toBe("busy");
     expect(map.get(7)?.sessionId).toBe("");
     expect(parseClaudeAgents("not json").size).toBe(0);
+  });
+});
+
+describe("an app that launches its own GUI is still clickable", () => {
+  test("a window below the agent counts only when it answers to the provider's name", () => {
+    // Hermes is a launcher that spawns an Electron app, so the window is a
+    // DESCENDANT, not an ancestor, and the card had none at all.
+    expect(windowMatchesProvider({ class: "Hermes" }, "hermes")).toBe(true);
+    expect(windowMatchesProvider({ class: "hermes-desktop" }, "hermes")).toBe(true);
+    expect(windowMatchesProvider({ class: "grok-bot" }, "grok-bot")).toBe(true);
+
+    // The reason the search is gated at all: an agent that opened a browser
+    // must not have its card hijacked by the browser.
+    expect(windowMatchesProvider({ class: "brave-browser" }, "claude")).toBe(false);
+    expect(windowMatchesProvider({ class: "foot" }, "claude")).toBe(false);
+    // A class that merely contains the name is not the app.
+    expect(windowMatchesProvider({ class: "not-hermes" }, "hermes")).toBe(false);
+    expect(windowMatchesProvider({ class: "" }, "hermes")).toBe(false);
+    expect(windowMatchesProvider(null, "hermes")).toBe(false);
+    expect(windowMatchesProvider({ class: "Hermes" }, "")).toBe(false);
+  });
+
+  test("the live Hermes session is read from the lease, which names the backend pid", () => {
+    // The card is built from the launcher; the lease records the backend.
+    const byPid = hermesSessionByPid({
+      entries: [
+        { pid: 1046613, session_id: "20260908_204340_1c9196", surface: "desktop" },
+        { pid: 4242, session_id: "20260908_210000_aaaaaa", surface: "cli" },
+        { pid: 0, session_id: "20260908_210000_bbbbbb" },
+        { pid: 99, session_id: "no" },
+        null,
+      ],
+    });
+    expect(byPid.get(1046613)).toBe("20260908_204340_1c9196");
+    expect(byPid.get(4242)).toBe("20260908_210000_aaaaaa");
+    // A bad pid or an id too short to be a session id contributes nothing.
+    expect(byPid.size).toBe(2);
+    expect(hermesSessionByPid(null).size).toBe(0);
+    expect(hermesSessionByPid({ entries: "nope" }).size).toBe(0);
   });
 });
 

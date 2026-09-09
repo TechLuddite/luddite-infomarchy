@@ -494,6 +494,25 @@ function info(pid: number): Proc | null {
   }
   infoCache.set(pid, p); return p;
 }
+// Hermes runs a launcher, an Electron app and a backend as separate processes
+// and records the live session against the backend's pid, not the launcher the
+// card is built from. Read the lease file and match on the agent's own tree.
+export function hermesSessionByPid(raw: unknown): Map<number, string> {
+  const byPid = new Map<number, string>();
+  const entries = (raw && typeof raw === "object" && Array.isArray((raw as any).entries)) ? (raw as any).entries : [];
+  for (const entry of entries.slice(0, MAX_COLLECTION_ITEMS)) {
+    if (!entry || typeof entry !== "object") continue;
+    const id = cleanSessionId(entry.session_id);
+    const pid = Number(entry.pid);
+    if (id && Number.isInteger(pid) && pid > 0) byPid.set(pid, id);
+  }
+  return byPid;
+}
+function hermesSessions(): Map<number, string> {
+  const home = process.env.HERMES_HOME || join(HOME, ".hermes");
+  return hermesSessionByPid(readJson(join(home, "runtime/active_sessions.json")));
+}
+
 // provider detection from argv — match the launcher name, not the runtime
 const PROVIDERS: [string, RegExp][] = [
   ["claude", /(^|\/)claude(\.js|\.mjs|\.cjs)?$/],
@@ -1082,8 +1101,31 @@ function processAncestors(pid: number): number[] {
   }
   return result;
 }
-function windowForProcess(pid: number, winByPid: Map<number, any>): any {
+// A window class names the app that owns it, so it is the check that keeps a
+// descendant search honest: an agent's own GUI answers to the provider's name,
+// a browser it happened to launch does not.
+export function windowMatchesProvider(window: any, provider: string): boolean {
+  const name = String(provider || "").toLowerCase();
+  if (!name) return false;
+  const cls = String(window?.class || "").toLowerCase();
+  return !!cls && (cls === name || cls.startsWith(name + ".") || cls.startsWith(name + "-"));
+}
+function windowForProcess(pid: number, winByPid: Map<number, any>, provider = ""): any {
   for (const ancestor of processAncestors(pid)) if (winByPid.has(ancestor)) return winByPid.get(ancestor);
+  // Nothing above. An app like Hermes is a launcher that spawns its own
+  // Electron process, so the window is BELOW the agent, not above it. Only a
+  // window whose class answers to the provider's own name counts, or a
+  // terminal agent that opened a browser would be handed the browser.
+  if (!provider) return null;
+  const queue = childPids(pid), seen = new Set<number>();
+  while (queue.length && seen.size < MAX_COLLECTION_ITEMS) {
+    const child = queue.shift()!;
+    if (!child || seen.has(child)) continue;
+    seen.add(child);
+    const window = winByPid.get(child);
+    if (window && windowMatchesProvider(window, provider)) return window;
+    queue.push(...childPids(child));
+  }
   return null;
 }
 export function sessionPresentation(window: any, cmd: string[]): { window: any; args: string } {
@@ -1260,6 +1302,7 @@ async function liveSessions(pids: number[]) {
   const winByPid = new Map<number, any>(clients.map((c: any) => [c.pid, c]));
   const sessions: any[] = [];
   const [gpuByPid, tmux, claudeRegistry] = await Promise.all([gpuMemoryByPid(), tmuxState(winByPid, pids), claudeAgents()]);
+  const hermesByPid = hermesSessions();
   const herdrClients = herdrState(winByPid);
   const boomuxClients = boomuxState(winByPid);
   for (const pid of pids) {
@@ -1271,7 +1314,7 @@ async function liveSessions(pids: number[]) {
     if (child) continue;
     // Direct terminals share ancestry with the agent. Multiplexer servers do
     // not, so tmux is resolved through its pane and attached client below.
-    let w: any = windowForProcess(p.pid, winByPid);
+    let w: any = windowForProcess(p.pid, winByPid, prov);
     const environ = environOf(p.pid);
     const hosts = sessionHostsFromEnvironment(environ);
     for (const ancestor of processAncestors(p.pid).slice(1)) {
@@ -1336,6 +1379,12 @@ async function liveSessions(pids: number[]) {
       }
     }
     const sample = processTreeSample(p.pid);
+    // The lease names the backend process; the card is the launcher above it.
+    if (prov === "hermes" && hermesByPid.size)
+      for (const child of sample.pids) {
+        const id = hermesByPid.get(child);
+        if (id && !sessionIds.includes(id)) { sessionIds.unshift(id); break; }
+      }
     // A reused pid with a fresh process must not inherit the old baseline.
     const agentKey = `${p.pid}:${Math.round(p.start)}`;
     currentAgentRaw[agentKey] = sample.ticks;

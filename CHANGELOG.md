@@ -4,6 +4,11 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 
 ## [Unreleased]
 
+## [1.3.1] — 2026-09-08
+
+### Fixed
+- **Clicking a Hermes card opens the Hermes app.** It did nothing at all. Hermes is a launcher that spawns its own Electron app and a backend as separate processes, so the window sits *below* the agent in the process tree; window resolution only ever looked upward, at the terminal an agent was started from, and a Hermes card ended up with no window to focus. A descendant is now accepted too, but only when the window's class answers to the provider's own name — otherwise a terminal agent that opened a browser would have its card hijacked by the browser. The card also carries the live session id now, read from Hermes' own lease file, which records the backend pid rather than the launcher the card is built from.
+
 ## [1.3.0] — 2026-09-08
 
 ### Added
