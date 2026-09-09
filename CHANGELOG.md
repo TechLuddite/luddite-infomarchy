@@ -57,6 +57,12 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 - The heatmap canvas, tooltip and legend are one `HeatPanel` component used by both cards. Card header hints now elide instead of pushing past a half-width card.
 
 ### Fixed
+- **Web Mode cards match Overlay dimming.** Opaque theme fill, wallpaper as an `img` at 0.32, cards at 0.62. No `backdrop-filter`. A CSS `background-image` on the same layer as the dim left the wallpaper at full strength.
+- **Web Mode wallpaper follows a theme swap.** `bg?v=<mtime>-<size>` so the 5s HTML swap does not keep the previous image.
+- **Web Mode clicks work after a live theme swap.** An extra `)` in `LIVE_SCRIPT` broke every handler.
+- **Web Mode USAGE matches the desk meters.** Per-model rows, `hasTokenData`, TOKENS · 7 days with section-sized axis labels. No $ VALUE chart.
+- **Web Mode RECENT TASKS shows age and folder** (last path segment) on one aligned grid. Prompt ellipsizes only.
+- **Web Mode colors follow the live Omarchy theme**, including named `green`/`yellow`/`red`.
 - **Clicking a Hermes card opens the Hermes app.** Window resolution accepts a descendant whose class answers to the provider name. The live session id comes from Hermes' lease file (backend pid).
 - **Clicking a Herdr card now jumps to that agent's pane.**
 - **Video wallpapers show.** Infomarchy hosts the background layer in place of `omarchy.background`, and drew the wallpaper with a plain `Image`. Omarchy's video wallpapers therefore arrived as `Error decoding: ... Unsupported image format` and left the desk on the flat theme colour. Stills and videos now go to separate surfaces, and a video goes to Omarchy's own `BackgroundMedia`, reached through a Loader by URL so an Omarchy without video support never resolves the type. Playback stops while a fullscreen window covers that output. The SUPER+D overlay had the same blank and is fixed with it, and decodes only while it is open.
