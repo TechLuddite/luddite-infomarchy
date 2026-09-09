@@ -8,7 +8,9 @@ Never print a web token URL, `web.json`, or `~/.grok/auth.json` / `~/.claude/.cr
 
 The live desk is a separate clone: `~/.config/omarchy/plugins/techluddite.luddite-infomarchy`. Edits here do not run until copied there (then `omarchy restart shell`). Turning WEB off keeps tokens. Revoke a token to rotate it.
 
-Do not write into `omarchy/agents/usage`. Grok billing cache is `$XDG_STATE_HOME/infomarchy/grok-billing.json`, 60s TTL, wallpaper and overlay both fetch. Claude OAuth refresh is `claude -p ping --max-turns 0` when the saved access token has lapsed (`INFOMARCHY_SKIP_CLAUDE_USAGE=1` skips it). Overlay does not ping Claude unless HARD REFRESH. Do not treat Omarchy's leftover `Run claude auth login…` help line as expired: `normalizeUsage` keeps `authHelpText` only when `usageStatusText` is set. HARD REFRESH is the first module-strip chip and runs collector `--force-refresh`.
+Do not write into `omarchy/agents/usage`. Grok billing cache is `$XDG_STATE_HOME/infomarchy/grok-billing.json`, 60s TTL, wallpaper and overlay both fetch. If `updates.jsonl` has no token snaps, Grok USAGE falls back to session-directory counts with no invented bars. `hasTokenData` hides `0 tok` when the provider published none. Per-model rows come from `usageModelBreakdown`. Claude OAuth refresh is `claude -p ping --max-turns 0` when the saved access token has lapsed (`INFOMARCHY_SKIP_CLAUDE_USAGE=1` skips it). Overlay does not ping Claude unless HARD REFRESH. Do not treat Omarchy's leftover `Run claude auth login…` help line as expired: `normalizeUsage` keeps `authHelpText` only when `usageStatusText` is set. HARD REFRESH is the first module-strip chip and runs collector `--force-refresh`.
+
+Hermes recent tasks read `$HERMES_HOME/state.db` or `~/.hermes/state.db`. Live card click accepts a descendant window whose class matches the provider. Session id from `runtime/active_sessions.json` (backend pid). Pi stays.
 
 LOCAL AI talks to `dashboard.json` `ollamaHost`, else `OLLAMA_HOST`, else `http://127.0.0.1:11434`. Topic refinement stays loopback-only unless `INFOMARCHY_ALLOW_REMOTE_OLLAMA=1`.
 

@@ -531,6 +531,25 @@ function info(pid: number): Proc | null {
   }
   infoCache.set(pid, p); return p;
 }
+// Hermes runs a launcher, an Electron app and a backend as separate processes
+// and records the live session against the backend's pid, not the launcher the
+// card is built from. Read the lease file and match on the agent's own tree.
+export function hermesSessionByPid(raw: unknown): Map<number, string> {
+  const byPid = new Map<number, string>();
+  const entries = (raw && typeof raw === "object" && Array.isArray((raw as any).entries)) ? (raw as any).entries : [];
+  for (const entry of entries.slice(0, MAX_COLLECTION_ITEMS)) {
+    if (!entry || typeof entry !== "object") continue;
+    const id = cleanSessionId(entry.session_id);
+    const pid = Number(entry.pid);
+    if (id && Number.isInteger(pid) && pid > 0) byPid.set(pid, id);
+  }
+  return byPid;
+}
+function hermesSessions(): Map<number, string> {
+  const home = process.env.HERMES_HOME || join(HOME, ".hermes");
+  return hermesSessionByPid(readJson(join(home, "runtime/active_sessions.json")));
+}
+
 // provider detection from argv — match the launcher name, not the runtime
 const PROVIDERS: [string, RegExp][] = [
   ["claude", /(^|\/)claude(\.js|\.mjs|\.cjs)?$/],
@@ -1130,8 +1149,31 @@ function processAncestors(pid: number): number[] {
   }
   return result;
 }
-function windowForProcess(pid: number, winByPid: Map<number, any>): any {
+// A window class names the app that owns it, so it is the check that keeps a
+// descendant search honest: an agent's own GUI answers to the provider's name,
+// a browser it happened to launch does not.
+export function windowMatchesProvider(window: any, provider: string): boolean {
+  const name = String(provider || "").toLowerCase();
+  if (!name) return false;
+  const cls = String(window?.class || "").toLowerCase();
+  return !!cls && (cls === name || cls.startsWith(name + ".") || cls.startsWith(name + "-"));
+}
+function windowForProcess(pid: number, winByPid: Map<number, any>, provider = ""): any {
   for (const ancestor of processAncestors(pid)) if (winByPid.has(ancestor)) return winByPid.get(ancestor);
+  // Nothing above. An app like Hermes is a launcher that spawns its own
+  // Electron process, so the window is BELOW the agent, not above it. Only a
+  // window whose class answers to the provider's own name counts, or a
+  // terminal agent that opened a browser would be handed the browser.
+  if (!provider) return null;
+  const queue = childPids(pid), seen = new Set<number>();
+  while (queue.length && seen.size < MAX_COLLECTION_ITEMS) {
+    const child = queue.shift()!;
+    if (!child || seen.has(child)) continue;
+    seen.add(child);
+    const window = winByPid.get(child);
+    if (window && windowMatchesProvider(window, provider)) return window;
+    queue.push(...childPids(child));
+  }
   return null;
 }
 export function sessionPresentation(window: any, cmd: string[]): { window: any; args: string } {
@@ -1308,6 +1350,7 @@ async function liveSessions(pids: number[]) {
   const winByPid = new Map<number, any>(clients.map((c: any) => [c.pid, c]));
   const sessions: any[] = [];
   const [gpuByPid, tmux, claudeRegistry] = await Promise.all([gpuMemoryByPid(), tmuxState(winByPid, pids), claudeAgents()]);
+  const hermesByPid = hermesSessions();
   const herdrClients = herdrState(winByPid);
   const boomuxClients = boomuxState(winByPid);
   for (const pid of pids) {
@@ -1319,7 +1362,7 @@ async function liveSessions(pids: number[]) {
     if (child) continue;
     // Direct terminals share ancestry with the agent. Multiplexer servers do
     // not, so tmux is resolved through its pane and attached client below.
-    let w: any = windowForProcess(p.pid, winByPid);
+    let w: any = windowForProcess(p.pid, winByPid, prov);
     const environ = environOf(p.pid);
     const hosts = sessionHostsFromEnvironment(environ);
     for (const ancestor of processAncestors(p.pid).slice(1)) {
@@ -1354,9 +1397,16 @@ async function liveSessions(pids: number[]) {
       }
     }
     const herdrHost = hosts.find(host => host.kind === "herdr");
-    if (herdrHost && !w) {
-      const clientWindow = herdrWindowFor(herdrHost, herdrClients);
-      if (clientWindow) { w = clientWindow; herdrHost.attached = true; }
+    if (herdrHost) {
+      if (!w) {
+        const clientWindow = herdrWindowFor(herdrHost, herdrClients);
+        if (clientWindow) w = clientWindow;
+      }
+      // Herdr renders every workspace inside a single window, so most agents
+      // reach it through their own ancestry and the lookup above never runs.
+      // Setting attached only on that branch left every ordinary Herdr session
+      // reporting "not attached" while its pane was perfectly reachable.
+      herdrHost.attached = !!w;
     }
     const sessionIds = processSessionIds(p.pid, prov, p.cmd);
     // Claude's own registry wins over heuristics: exact id, display name, and
@@ -1377,6 +1427,12 @@ async function liveSessions(pids: number[]) {
       }
     }
     const sample = processTreeSample(p.pid);
+    // The lease names the backend process; the card is the launcher above it.
+    if (prov === "hermes" && hermesByPid.size)
+      for (const child of sample.pids) {
+        const id = hermesByPid.get(child);
+        if (id && !sessionIds.includes(id)) { sessionIds.unshift(id); break; }
+      }
     // A reused pid with a fresh process must not inherit the old baseline.
     const agentKey = `${p.pid}:${Math.round(p.start)}`;
     currentAgentRaw[agentKey] = sample.ticks;
@@ -1635,6 +1691,68 @@ function grokHistory() {
     }))
     .filter((a: any) => a.pid !== null);
   return { present: true, sessions: sessionIds.size, active: activeSessions };
+}
+
+function hermesTimestampMs(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return n < 1e12 ? Math.floor(n * 1000) : Math.floor(n);
+}
+
+// Hermes stores sessions in SQLite (~/.hermes/state.db), not a prompt jsonl.
+// Recent Tasks only ingested Claude/Grok/Codex/OpenCode files, so Hermes work
+// never appeared. Paths come from HERMES_HOME or $HOME/.hermes.
+function hermesHistory() {
+  const home = process.env.HERMES_HOME || join(HOME, ".hermes");
+  const path = join(home, "state.db");
+  try {
+    const stat = lstatSync(path);
+    if (!stat.isFile()) return { present: false };
+  } catch { return { present: false }; }
+  let db: Database | null = null;
+  try {
+    db = new Database(path, { readonly: true });
+    const countRows = db.query(`
+      SELECT m.timestamp AS timestamp FROM messages m
+        JOIN sessions s ON s.id = m.session_id
+       WHERE m.role = 'user' AND ifnull(m.active, 1) = 1 AND m.timestamp IS NOT NULL
+         AND ifnull(s.archived, 0) = 0 AND ifnull(s.hidden, 0) = 0
+         AND ifnull(s.source, '') NOT IN ('cron')
+       ORDER BY m.id DESC LIMIT 4000
+    `).all() as any[];
+    for (const row of countRows) {
+      const ts = hermesTimestampMs(row.timestamp);
+      if (ts) { bump(ts, "hermes"); cnt("hermes", ts); }
+    }
+    // One Recent row per user prompt, like Claude jsonl — not one stale session title.
+    const rows = db.query(`
+      SELECT m.timestamp AS ts, substr(m.content, 1, 280) AS text,
+             s.id AS session, s.cwd AS project
+        FROM messages m
+        JOIN sessions s ON s.id = m.session_id
+       WHERE m.role = 'user' AND ifnull(m.active, 1) = 1
+         AND ifnull(s.archived, 0) = 0 AND ifnull(s.hidden, 0) = 0
+         AND ifnull(s.source, '') NOT IN ('cron')
+       ORDER BY m.id DESC
+       LIMIT 2000
+    `).all() as any[];
+    let prompts = 0;
+    const sessionIds = new Set<string>();
+    for (const row of rows) {
+      const ts = hermesTimestampMs(row.ts);
+      const session = cleanSessionId(row.session);
+      const text = safePrompt(row.text || "");
+      if (!ts || !text) continue;
+      prompts++;
+      if (session) sessionIds.add(session);
+      if (plausibleTimestamp(ts)) recent.push({ provider: "hermes", ts, project: shortPath(String(row.project || "")), text, session });
+    }
+    return { present: true, prompts, sessions: sessionIds.size };
+  } catch (error) {
+    return { present: true, prompts: 0, sessions: 0, error: String(error) };
+  } finally {
+    try { db?.close(); } catch {}
+  }
 }
 
 // ------------------------------------------------------------------ Grok Bot
@@ -2054,6 +2172,41 @@ export function normalizeUsageLimit(limit: any, stamp = now): any | null {
     forecast: limitForecast(limit, stamp),
   };
 }
+// Per-model breakdown. Anthropic publishes a real rate-limit window per model
+// family (that is where "Fable Weekly" comes from); OpenAI and xAI do not, so
+// for those the honest equivalent is each model's share of the work. Built by
+// union of whatever the provider reports, so a model that ships tomorrow shows
+// up on its own — nothing here knows the name of a single model.
+export function usageModelBreakdown(j: any): any[] {
+  const count = (value: unknown) => { const n = Number(value); return Number.isFinite(n) && n >= 0 ? n : 0; };
+  const asMap = (value: unknown) => (value && typeof value === "object" && !Array.isArray(value)) ? value as Record<string, any> : {};
+  const today = asMap(j.todayTokensByModel), lifetime = asMap(j.modelUsage), sessions = asMap(j.modelSessions);
+  const ids: string[] = [];
+  for (const source of [today, lifetime, sessions])
+    for (const key of Object.keys(source).slice(0, 32)) {
+      const id = uiString(key, 64);
+      if (id && !ids.includes(id)) ids.push(id);
+    }
+  const tokensOf = (value: unknown) => {
+    if (typeof value === "number") return count(value);
+    const entry = asMap(value);
+    return count(entry.inputTokens) + count(entry.outputTokens) + count(entry.cacheReadInputTokens) + count(entry.cacheCreationInputTokens);
+  };
+  const models = ids.map(id => ({
+    id,
+    todayTokens: tokensOf(today[id]),
+    lifetimeTokens: tokensOf(lifetime[id]),
+    sessions: count(sessions[id]),
+  }));
+  const todayTotal = models.reduce((sum, m) => sum + m.todayTokens, 0);
+  const lifetimeTotal = models.reduce((sum, m) => sum + m.lifetimeTokens, 0);
+  // Share of today when there was any work today, otherwise of lifetime, so a
+  // quiet morning still shows the mix rather than a row of empty bars.
+  return models
+    .map(m => ({ ...m, share: todayTotal ? m.todayTokens / todayTotal : lifetimeTotal ? m.lifetimeTokens / lifetimeTotal : 0 }))
+    .sort((a, b) => (b.todayTokens - a.todayTokens) || (b.lifetimeTokens - a.lifetimeTokens) || (b.sessions - a.sessions) || a.id.localeCompare(b.id))
+    .slice(0, 8);
+}
 export function normalizeUsage(j: any, stamp = now): any {
   const count = (value: unknown) => { const n = Number(value); return Number.isFinite(n) && n >= 0 ? n : 0; };
   const modelUsage: Record<string, any> = {};
@@ -2077,6 +2230,10 @@ export function normalizeUsage(j: any, stamp = now): any {
   const authHelpText = usageStatusText ? uiString(j.authHelpText, 200) : "";
   return {
     name: uiString(j.name, 64), ready: j.ready !== false, tierLabel: uiString(j.tierLabel, 32),
+    // A provider that publishes no token counts must not read as one that used
+    // no tokens. "0 tok" is a measurement; absent data is not.
+    hasTokenData: count(j.todayTotalTokens) > 0 || Object.keys(modelUsage).length > 0 || recentDays.length > 0,
+    models: usageModelBreakdown(j),
     // Ship the projection from the tested implementation instead of letting
     // the QML re-derive it (the copy there had drifted out of test coverage).
     limits: (Array.isArray(j.limits) ? j.limits : []).slice(0, 16).map((limit: any) => normalizeUsageLimit(limit, stamp)).filter(Boolean),
@@ -2530,6 +2687,57 @@ async function refreshClaudeAuthIfNeeded() {
   } catch {}
 }
 
+// Grok publishes no usage cache the way Claude and Codex do: Omarchy ships no
+// collector for it, it bills credits rather than rate-limit windows, and
+// `/usage` opens billing in a browser. What it does keep on disk is one
+// directory per session with a signals.json, so the desk reports the part that
+// is real — prompts, sessions and the models used — and says plainly that the
+// rest is not published locally rather than drawing an empty limit bar.
+export function grokSessionUsage(base: string): { sessions: number; todaySessions: number; models: string[]; modelSessions: Record<string, number> } {
+  const models = new Set<string>();
+  const modelSessions: Record<string, number> = {};
+  let sessions = 0, todaySessions = 0, scanned = 0;
+  for (const dir of ls(join(base, "sessions"))) {
+    const group = join(base, "sessions", dir);
+    try { const state = lstatSync(group); if (state.isSymbolicLink() || !state.isDirectory()) continue; } catch { continue; }
+    for (const entry of ls(group)) {
+      if (!cleanSessionId(entry) || scanned >= MAX_COLLECTION_ITEMS) continue;
+      const sessionDir = join(group, entry);
+      try { const state = lstatSync(sessionDir); if (state.isSymbolicLink() || !state.isDirectory()) continue; } catch { continue; }
+      scanned++; sessions++;
+      const summary = readJson(join(sessionDir, "summary.json"));
+      const active = Date.parse(uiString(summary?.last_active_at || summary?.updated_at, 64));
+      if (Number.isFinite(active) && active >= todayStart) todaySessions++;
+      const model = uiString(summary?.current_model_id, 64);
+      if (model && (models.has(model) || models.size < 8)) {
+        models.add(model);
+        modelSessions[model] = (modelSessions[model] || 0) + 1;
+      }
+    }
+  }
+  return { sessions, todaySessions, models: [...models], modelSessions };
+}
+function grokUsage() {
+  const base = process.env.GROK_HOME || join(HOME, ".grok");
+  if (!existsSync(base)) return null;
+  const { sessions, todaySessions, modelSessions } = grokSessionUsage(base);
+  const prompts = counts.grok || { today: 0, week: 0, total: 0 };
+  return normalizeUsage({
+    name: "Grok",
+    ready: true,
+    tierLabel: "",
+    todayPrompts: prompts.today,
+    totalPrompts: prompts.total,
+    todaySessions,
+    totalSessions: sessions,
+    // No token totals and no rate-limit windows exist on disk. Reporting zeros
+    // as if they were measurements is the thing to avoid here.
+    limits: [],
+    // No tokens to weigh models by, so the breakdown counts sessions instead.
+    modelSessions,
+    usageStatusText: "credits, not rate-limit windows \u2014 run /usage in Grok for the balance",
+  });
+}
 function agentsUsage() {
   // Omarchy's own agents plugin caches rate limits + token usage here; reuse it when present.
   // Every field is normalized to what the cards display: two individually valid
@@ -2549,6 +2757,7 @@ function agentsUsage() {
   // local session files. Never write into Omarchy's usage directory, and never
   // replace a record Omarchy already produced.
   if (!out.grok) { const grok = grokLocalUsage(); if (grok) out.grok = grok; }
+  if (!out.grok) { const grok = grokUsage(); if (grok) out.grok = grok; }
   if (!out.opencode) { const oc = opencodeLocalUsage(); if (oc) out.opencode = oc; }
   return out;
 }
@@ -2713,7 +2922,7 @@ async function runCollector() {
   const [cpuS, memS, diskS, netS, pingS, gpuS, sessions, ollama, externalIpS, github, containers] = await Promise.all([
     Promise.resolve(cpu()), Promise.resolve(mem()), disk(), net(), ping(), gpu(), liveSessions(pids), ollamaState(), externalIp(), githubActivity(), containerState(), refreshGrokBilling(), refreshClaudeAuthIfNeeded(),
   ]);
-  const claude = claudeHistory(), codex = codexHistory(), grok = grokHistory(), grokBot = grokBotHistory(), opencode = opencodeHistory(), pi = piHistory();
+  const claude = claudeHistory(), codex = codexHistory(), grok = grokHistory(), grokBot = grokBotHistory(), opencode = opencodeHistory(), pi = piHistory(), hermes = hermesHistory();
   recent.sort((a, b) => b.ts - a.ts);
   for (const entry of recent) entry.activityCell = activityCellIndex(entry.ts, heatDays);
   inferSessionIdsFromRecent(sessions, recent);
@@ -2747,7 +2956,7 @@ async function runCollector() {
       attention: sessions.filter((s: any) => s.attention),
       events: notificationState.events,
       collisions: repoCollisions(sessions),
-      counts, providers: { claude, codex, grok, grokBot, opencode, pi, ollama }, usage: agentsUsage(),
+      counts, providers: { claude, codex, grok, grokBot, opencode, pi, hermes, ollama }, usage: agentsUsage(),
       usageDays: heatDays.map(localDayKey),
       heatmap: { start: start7, days: heatDays, cells: heat.map(c => [c.n, c.p]) },
       github,
