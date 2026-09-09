@@ -118,8 +118,8 @@ describe("web mode rendering", () => {
     const deskFill = readFileSync(join(import.meta.dir, "InfoView.qml"), "utf8").match(/cardBg:\s*Util\.alpha\(view\.desk\.themeBackground,\s*([0-9.]+)\)/)?.[1];
     expect(deskFill).toBeTruthy();
     expect(body).toMatch(new RegExp(`--card:rgba\\(\\d+,\\d+,\\d+,${deskFill}\\)`));
-    expect(body).toContain("background-position:center");
-    expect(body).toContain("background-size:cover");
+    expect(body).toContain("object-position:center");
+    expect(body).toContain("object-fit:cover");
     const usageAt = body.indexOf("USAGE");
     const sessionsAt = body.indexOf("LIVE AI SESSIONS");
     expect(usageAt).toBeGreaterThan(0);
@@ -278,12 +278,18 @@ describe("web mode rendering", () => {
     expect(Buffer.from(bg.body as Uint8Array).equals(png)).toBe(true);
     const page = handleRequest({ ...base, background: { type: "image/png", bytes: png } });
     const html = String(page.body);
-    expect(html).toContain('url("bg?v=1-1")');
+    expect(html).toContain('<img class="wall" src="bg?v=1-1" alt="" aria-hidden="true">');
     expect(html).toMatch(/id="view"[^>]*>[\s\S]*class="wall"/);
-    expect(html).not.toContain('url("bg?v=1-1");</head>');
-    const poisoned = renderPage(base.snapshot, "/t/" + token + "/", "", parseDashPrefs({}), parseThemeColors(""), true, '1-1") url("http://evil');
-    expect(poisoned).not.toContain("evil");
-    expect(poisoned).toContain('url("bg")');
+    expect(html).toContain(".stage { position:relative; isolation:isolate;");
+    expect(html).toContain("background:var(--bg)");
+    expect(html).toContain(".wall { position:absolute;");
+    expect(html).toContain("opacity:0.32");
+    expect(html).not.toContain("background-image:");
+    const deskWall = readFileSync(join(import.meta.dir, "Infomarchy.qml"), "utf8").match(/wallpaperOpacity:\s*([0-9.]+)/)?.[1];
+    expect(deskWall).toBe("0.32");
+    const poisoned = renderPage(base.snapshot, "/t/" + token + "/", "", parseDashPrefs({}), parseThemeColors(""), true, '1-1" onerror="alert(1)');
+    expect(poisoned).toContain('<img class="wall" src="bg" alt="" aria-hidden="true">');
+    expect(poisoned).not.toMatch(/<img class="wall"[^>]*onerror/i);
   });
 
   test("parses qrencode ASCII into a square matrix", () => {
