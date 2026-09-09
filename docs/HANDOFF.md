@@ -13,21 +13,22 @@ Start here. Details and dead ends: `~/Work/luddite-infomarchy/`.
 - Print `http://<lan-ip>:8787/t/<token>/` in chat or commits.
 - Print `web.json`, `~/.grok/auth.json`, or `~/.claude/.credentials.json`.
 - Write into `~/.local/state/omarchy/agents/usage`.
-- Bounce PHONE unless you intend to rotate the token.
+- Revoke a Web Mode token to rotate it. Turning WEB off keeps tokens.
 - Treat `100.64.0.0/10` as this host's VPN. That CIDR is still a default allow. The VLAN CIDR was never given.
 - Treat Omarchy's leftover `Run claude auth login…` help as Sign-in expired. `claude auth status` and a collector pass can refresh Anthropic limits and make the bars jump.
 
-## Phone view
+## Web Mode
 
-- `web-server.ts`. Token in `web.json` (0600). GET/HEAD only. Host/Origin. CSP nonce plus `connect-src 'self'` for the 5s HTML swap.
-- PRIVACY on by default. CSS hides WAN/LAN/SSID/`user@host`/home mounts. Those values are still in the HTML (`.open` spans). `snapshot.json` is masked. GitHub login is stripped.
-- No 7-day token/$ charts. MACHINE matches the desk meters.
-- Overlay COPY PHONE URL does not require keyboard focus. Both InfoSettings instances poll `bun web-server.ts url`.
+- `web-server.ts`. Tokens in `web.json` (0600). GET/HEAD for the page. POST `/prefs` (Origin required, JSON only) writes `webSections` and `webNarrowOrder` into `dashboard.json`. Host/Origin. CSP nonce plus `connect-src 'self'` and `img-src 'self'` for the 5s HTML swap, wallpaper, and prefs fetch.
+- HTML matches the SUPER+D desk: two columns, theme colors, wallpaper `cover`/`center` at 0.32 opacity. Narrow viewports stack, `display:contents` plus `--stack-order`, UP/DOWN on each card. Strip chips toggle section visibility. Zoom is session-local (`im-scale`). USAGE shows TOKENS · 7 days only, no $ VALUE graph. MEDIA never renders.
+- PRIVACY on by default. CSS hides WAN/LAN/SSID/`user@host`/home mounts and recent-task prompts after the first four words (same `obfuscatePrompt` as the desk). Full prompt stays in `.open` spans. Session topics stay. `snapshot.json` is masked. GitHub login is stripped.
+- SETTINGS on the strip and the Infomarchy bar widget manage tokens, QR, extra CIDRs, and desk/web section visibility. Turning WEB off keeps tokens. Revoke to rotate.
+- Overlay COPY URL lives in SETTINGS. Both InfoSettings instances poll `bun web-server.ts url`.
 - UFW: `sudo ufw allow from 172.20.20.0/24 to any port 8787 proto tcp`. Last-octet phone `.192` was the intended client.
 
 ## Stream privacy (desktop)
 
-- SUPER+SHIFT+I. One press on, three presses within 2s off (chip 1/3, 2/3). Overlay ignores auto-repeat. WAN, LAN, SSID, `user@host`, GitHub login, home mounts, window previews. `omarchy-shell infomarchy setPrivacy false` is the one-shot off. Phone PRIVACY is a separate CSS toggle and stays one click.
+- SUPER+SHIFT+I. One press on, three presses within 2s off (chip 1/3, 2/3). Overlay ignores auto-repeat. WAN, LAN, SSID, `user@host`, GitHub login, home mounts, window previews. `omarchy-shell infomarchy setPrivacy false` is the one-shot off. Web Mode PRIVACY is a separate CSS toggle and stays one click.
 - RECENT TASKS · WHAT GOT ASKED keeps the first four words and masks the rest (`obfuscatePrompt` / `displayPrompt`). Inspect drawer matches. COPY EXCERPT still copies the full text. OSS project names and session topics stay.
 
 ## CONTAINERS
@@ -35,11 +36,11 @@ Start here. Details and dead ends: `~/Work/luddite-infomarchy/`.
 - Right-column card, second-last by default (`rightOrder` ends with `containers`, then `media`). Per-row toggle starts/stops via `container-control.ts`. Inventory from `/usr/bin/docker ps -a`, else podman. Names as argv after a live inventory match.
 - Snapshot fields: id, name, label, service, project, image, state, running, health. Compose working_dir, env files, commands, mounts, and ports are dropped. Tests assert `/home/` and `.env` do not survive parse.
 - `INFOMARCHY_SKIP_CONTAINERS=1` skips collection. Demo data uses `lab-*` names, not this host's stack.
-- Not on the phone HTML. The phone `web-snapshot.json` still carries the object if PHONE is on.
+- Not on Web Mode. `web-snapshot.json` still carries the object if WEB is on.
 
 ## MEDIA CONTROLS
 
-- Last right-column card (`rightOrder` ends with `media`). Live MPRIS in QML, not the collector. Title, artist, album, identity. PREV / PLAY or PAUSE / NEXT. Prefers a playing player. Skips `playerctld` when another player exists. No `trackArtUrl`. Stream privacy leaves those fields in the clear. Not on the phone HTML. Demo mode shows a fake track and ignores clicks.
+- Last right-column card (`rightOrder` ends with `media`). Live MPRIS in QML, not the collector. Title, artist, album, identity. PREV / PLAY or PAUSE / NEXT. Prefers a playing player. Skips `playerctld` when another player exists. No `trackArtUrl`. Stream privacy leaves those fields in the clear. Not on Web Mode. Demo mode shows a fake track and ignores clicks.
 
 ## LOCAL AI
 
@@ -56,4 +57,4 @@ Start here. Details and dead ends: `~/Work/luddite-infomarchy/`.
 
 ## Open follow-ups
 
-Listed at the bottom of `TODO.md`. Highest: mask phone HTML (PRIVACY CSS is not a strip), Tailscale CIDR, live-plugin drift.
+Listed at the bottom of `TODO.md`. Highest: mask Web Mode HTML (PRIVACY CSS is not a strip), Tailscale CIDR, live-plugin drift.

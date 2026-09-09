@@ -48,6 +48,8 @@ Item {
   readonly property int privacyUnlockMs: 2000
   property bool webEnabled: false
   property string webUrl: ""
+  property var webSections: ({})
+  property var webNarrowOrder: ["sessions", "changes", "needs", "projects", "activity", "github", "recent", "usage", "localAi", "machine", "containers"]
   readonly property string webServerPath: Qt.resolvedUrl("web-server.ts").toString().replace(/^file:\/\//, "")
   property var rightOrder: ["usage", "localAi", "machine", "containers", "media"]
   property var opsOrder: ["changes", "needs", "projects"]
@@ -60,6 +62,12 @@ Item {
   }
   function normalizedOpsOrder(value) {
     var allowed = ["changes", "needs", "projects"], result = []
+    if (Array.isArray(value)) for (var i = 0; i < value.length; i++) if (allowed.indexOf(value[i]) >= 0 && result.indexOf(value[i]) < 0) result.push(value[i])
+    for (var j = 0; j < allowed.length; j++) if (result.indexOf(allowed[j]) < 0) result.push(allowed[j])
+    return result
+  }
+  function normalizedWebNarrowOrder(value) {
+    var allowed = ["sessions", "changes", "needs", "projects", "activity", "github", "recent", "usage", "localAi", "machine", "containers"], result = []
     if (Array.isArray(value)) for (var i = 0; i < value.length; i++) if (allowed.indexOf(value[i]) >= 0 && result.indexOf(value[i]) < 0) result.push(value[i])
     for (var j = 0; j < allowed.length; j++) if (result.indexOf(allowed[j]) < 0) result.push(allowed[j])
     return result
@@ -84,10 +92,12 @@ Item {
       privacyMode = !!(parsed && parsed.privacyMode === true)
       privacyUnlockCount = 0
       webEnabled = !!(parsed && parsed.webEnabled === true)
+      webSections = parsed && parsed.webSections && typeof parsed.webSections === "object" ? parsed.webSections : ({})
       if (webEnabled) Qt.callLater(refreshWebUrl)
       else webUrl = ""
       rightOrder = normalizedRightOrder(parsed ? parsed.rightOrder : null)
       opsOrder = normalizedOpsOrder(parsed ? parsed.opsOrder : null)
+      webNarrowOrder = normalizedWebNarrowOrder(parsed ? parsed.webNarrowOrder : null)
     } catch (e) {
       sections = ({})
       attentionMuted = ({})
@@ -106,8 +116,10 @@ Item {
       privacyUnlockCount = 0
       webEnabled = false
       webUrl = ""
+      webSections = ({})
       rightOrder = normalizedRightOrder(null)
       opsOrder = normalizedOpsOrder(null)
+      webNarrowOrder = normalizedWebNarrowOrder(null)
     }
     ready = true
   }
@@ -167,11 +179,29 @@ Item {
       dashboardVisible: dashboardVisible,
       privacyMode: privacyMode,
       webEnabled: webEnabled,
+      webSections: webSections,
+      webNarrowOrder: normalizedWebNarrowOrder(webNarrowOrder),
       rightOrder: normalizedRightOrder(rightOrder),
       opsOrder: normalizedOpsOrder(opsOrder)
     }, null, 2) + "\n")
   }
   function sectionEnabled(id) { return sections[id] !== false }
+  function webSectionEnabled(id) {
+    if (String(id) === "media") return false
+    if (webSections[id] === false) return false
+    if (webSections[id] === true) return true
+    return sectionEnabled(id)
+  }
+  function setWebSection(id, enabled) {
+    if (String(id) === "media") return false
+    var next = {}
+    for (var key in webSections) next[key] = webSections[key]
+    next[id] = !!enabled
+    webSections = next
+    persist()
+    return true
+  }
+  function toggleWebSection(id) { return setWebSection(id, !webSectionEnabled(id)) }
   function adjacentEnabledIndex(order, from, direction, sectionState) {
     var step = Number(direction) < 0 ? -1 : Number(direction) > 0 ? 1 : 0
     if (!step || from < 0 || from >= order.length) return from

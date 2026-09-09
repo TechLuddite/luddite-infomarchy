@@ -213,6 +213,8 @@ Scope {
     function geometry(): string { return root.deskView ? root.deskView.geometryReport() : "{}" }
     function setSection(id: string, v: string): void { dashboardSettings.setSection(id, ["1", "true", "on", "yes"].indexOf(String(v).toLowerCase()) >= 0) }
     function toggleSection(id: string): void { dashboardSettings.toggleSection(id) }
+    function setWebSection(id: string, v: string): void { dashboardSettings.setWebSection(id, ["1", "true", "on", "yes"].indexOf(String(v).toLowerCase()) >= 0) }
+    function toggleWebSection(id: string): void { dashboardSettings.toggleWebSection(id) }
     function setNotifications(v: string): void { dashboardSettings.setNotificationsEnabled(["1", "true", "on", "yes"].indexOf(String(v).toLowerCase()) >= 0) }
     function toggleNotifications(): void { dashboardSettings.toggleNotificationsEnabled() }
     function setQuietHours(v: string): void { dashboardSettings.setQuietHoursEnabled(["1", "true", "on", "yes"].indexOf(String(v).toLowerCase()) >= 0) }
