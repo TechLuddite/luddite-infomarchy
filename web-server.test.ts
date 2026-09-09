@@ -6,7 +6,7 @@ import {
   DEFAULT_CIDRS, displayMount, escapeHtml, fmtBytes, fmtRate, handleRequest, hostAllowed, ipAllowed, maskSnapshot,
   originAllowed, parseCidr, parseCidrList, parseAsciiQr, parsePrefsPatch, tokensEqual, newToken, ipv4ToInt, wifiLabel,
 } from "./web-server";
-import { obfuscatePrompt, parseDashPrefs, parseThemeColors, providerColorHex, renderPage, renderUsageSection, webSectionEnabled } from "./web-page";
+import { LIVE_SCRIPT, obfuscatePrompt, parseDashPrefs, parseThemeColors, providerColorHex, renderPage, renderUsageSection, webSectionEnabled } from "./web-page";
 
 const root = mkdtempSync(join(tmpdir(), "infomarchy-web-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -155,7 +155,8 @@ describe("web mode rendering", () => {
     expect(fmtRate(2_420_000)).toBe("19.4Mb/s");
     expect(displayMount("/home/larry/Projects")).toBe("~/Projects");
     expect(wifiLabel({ wireless: true, ssid: "secret", dev: "wlan0" })).toBe("WIFI");
-    expect(body).toContain("querySelector(\"style\")");
+    expect(body).toContain('querySelector("style")');
+    expect(() => new Function(LIVE_SCRIPT)).not.toThrow();
   });
 
   test("element colors come from the live Omarchy theme, including named green/yellow keys", () => {
