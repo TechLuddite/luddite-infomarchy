@@ -202,7 +202,14 @@ Item {
       included[rest] = true
       out.push(rows[j])
     }
-    return out
+    // Reservations choose membership, not display order. Keep the caller's
+    // pinned-first / newest-first order and emit duplicate keys only once.
+    return rows.filter(function(item) {
+      var k = key(item)
+      if (!included[k]) return false
+      delete included[k]
+      return true
+    })
   }
   // Columns are fractions of the view, never constants: a fixed right column
   // wider than the space left of the screen edge ran clean off the desk.
