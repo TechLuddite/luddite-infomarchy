@@ -56,7 +56,7 @@ o.bind("SUPER + SHIFT + I", "Infomarchy: stream privacy", "omarchy-shell infomar
 
 ## Web Mode
 
-Web Mode makes the Infomarchy desk available in a browser on your phone, tablet, or another computer. It runs with the desktop plugin, so the computer and Omarchy shell must stay running. Open **SETTINGS** from the desk's module strip or the Infomarchy bar widget to manage access.
+Web Mode makes the Infomarchy desk available in a browser on your phone, tablet, or another computer. It runs with the desktop plugin, so the computer and Omarchy shell must stay running. Open **SETTINGS** from the desk's module strip to manage access.
 
 The page follows the live Omarchy theme and wallpaper. Wide screens use two columns; narrow screens stack cards and offer **UP/DOWN** ordering. Module chips show or hide sections, and zoom is remembered for the current browser tab. Web section visibility and narrow-screen order are independent of the desktop layout but shared by web viewers. A successful refresh updates the page and theme every five seconds while preserving scroll position.
 
@@ -84,11 +84,11 @@ Turning desktop privacy off lets connected viewers receive the permitted full va
 
 ## Set up Web Mode
 
-Install and enable Infomarchy first using [Install](#install). Open the desk with **SUPER+D**, then **SETTINGS**, or open settings from the Infomarchy bar widget. Choose the desktop privacy setting you want before sharing a viewer link.
+Install and enable Infomarchy first using [Install](#install). Open the desk with **SUPER+D**, then **SETTINGS**. Choose the desktop privacy setting you want before sharing a viewer link.
 
 Web helpers require Bun, `flock` (util-linux) and `timeout` (coreutils). **SHOW QR** uses `qrencode`; **COPY URL** uses `wl-copy` from `wl-clipboard`. On Omarchy/Arch, install the optional viewer tools with `sudo pacman -S --needed qrencode wl-clipboard`. Tailscale process cleanup requires Python 3; the optional CA recipe requires OpenSSL, and its download helper uses Python 3.
 
-To add the optional settings bar widget, run `omarchy bar put techluddite.luddite-infomarchy --section right`. The overlay's SETTINGS works without adding the bar widget.
+The fork also retains an experimental settings bar widget. It needs more polish and is excluded from the upstream Web Mode contribution; use the dashboard SETTINGS for setup. On the tested Omarchy version, `omarchy bar put` reported success without adding its layout entry, so that command is not yet a reliable setup path for this combined service/overlay/widget plugin.
 
 ### LAN HTTP: on your trusted local network
 
