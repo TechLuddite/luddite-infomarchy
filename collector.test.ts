@@ -76,6 +76,13 @@ describe("providerOf", () => {
   test("recognizes Hermes as an interactive agent provider", () => {
     expect(providerOf(["/home/user/.hermes/bin/hermes"])).toBe("hermes");
   });
+
+  test("recognizes Antigravity and agy, ignoring background services", () => {
+    expect(providerOf(["/usr/bin/antigravity"])).toBe("antigravity");
+    expect(providerOf(["agy"])).toBe("antigravity");
+    expect(providerOf(["agy", "remote-control", "start"])).toBeNull();
+    expect(providerOf(["agy", "mic-serve"])).toBeNull();
+  });
 });
 
 describe("multiplexer session identity", () => {

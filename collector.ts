@@ -521,6 +521,9 @@ const PROVIDERS: [string, RegExp][] = [
   ["grok-bot", /(^|\/)grok-bot(\s|$)/],
   ["gemini", /(^|\/)gemini(\.js|\.mjs)?$/],
   ["hermes", /(^|\/)hermes(\.js|\.mjs|\.py)?$/],
+  // "agy" is the CLI's own short name (its mise shim resolves to the same
+  // binary as "antigravity"); both launch the identical program.
+  ["antigravity", /(^|\/)(antigravity|agy)$/],
   ["opencode", /(^|\/)opencode$/],
   ["aider", /(^|\/)aider$/],
   ["copilot", /(^|\/)copilot$/],
@@ -556,6 +559,10 @@ export function providerOf(cmd: string[]): string | null {
       // OpenCode also exposes several persistent services. Only its TUI/run
       // invocations represent a session that belongs on the desk.
       if (name === "opencode" && cmd.some(a => ["serve", "web", "acp", "mcp", "github"].includes(a))) return null;
+      // `agy remote-control start` and `agy mic-serve` are background
+      // services (a remote-access daemon and a mic-forwarding server), not
+      // an agent conversation — same shape as Codex's app-server exclusion.
+      if (name === "antigravity" && cmd.some(a => a === "remote-control" || a === "mic-serve")) return null;
       return name;
     }
   }
