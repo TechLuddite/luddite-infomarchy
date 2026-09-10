@@ -825,8 +825,25 @@ Item {
             spacing: Style.spacing.md
             // One row: four wide cards, or up to six narrower ones. Wrapping to a
             // second row pushed RECENT TASKS off the bottom of a 1080p desk.
-            readonly property int targetColumns: Math.max(4, Math.min(6, view.sessions.length))
-            readonly property int minimumCardWidth: Math.round((view.sessions.length > 4 ? 150 : 210) * Style.fontScale)
+            //
+            // Past a handful of agents that no longer holds: 25 sessions at six
+            // columns is five rows of eight-line cards, which is the whole
+            // screen and leaves no desk under it. ACTIVITY, RECENT TASKS and the
+            // ops cards are the reason the desk exists, so the session cards are
+            // the ones that give way. Dense mode narrows them and drops the
+            // lines a glance does not need — the inspector still has all of it.
+            readonly property bool dense: view.sessions.length > 8
+            // Columns are chosen to bound the number of ROWS, since rows are
+            // what push the desk off the screen. Fewest columns that keep it to
+            // about four, so the cards stay as wide as that allows.
+            readonly property int targetColumns: dense
+              ? Math.max(6, Math.min(8, Math.ceil(view.sessions.length / 4)))
+              : Math.max(4, Math.min(6, view.sessions.length))
+            // Measured, not guessed: this is multiplied by fontScale, and a
+            // dense minimum of 138 came out at 184 on a 1.33 desk — wider than
+            // the fitted width, so Flow fell back to six per row and the extra
+            // columns bought nothing. 112 leaves eight columns reachable.
+            readonly property int minimumCardWidth: Math.round((dense ? 112 : view.sessions.length > 4 ? 150 : 210) * Style.fontScale)
             readonly property int fittedCardWidth: Math.floor((width - spacing * (targetColumns - 1)) / targetColumns)
             Repeater {
               model: view.sessions
@@ -841,7 +858,7 @@ Item {
                 property string previewSource: view.previewCache[String((sc.modelData.window || {}).address || "")] || ""
                 // Fill four columns when they remain readable; narrower layouts
                 // retain a minimum width and let Flow wrap naturally.
-                width: Math.max(sessionFlow.minimumCardWidth, sessionFlow.fittedCardWidth); height: scol.implicitHeight + Style.spacing.lg * 2
+                width: Math.max(sessionFlow.minimumCardWidth, sessionFlow.fittedCardWidth); height: scol.implicitHeight + (sessionFlow.dense ? Style.spacing.sm : Style.spacing.lg) * 2
                 // A daemon-hosted background session is real but unattended; dim it so it reads as secondary next to the interactive one.
                 opacity: (sc.modelData.hosts || []).some(function(h) { return h && h.kind === "background" }) ? 0.72 : 1
                 color: hover.containsMouse ? Util.alpha(tone, 0.16) : Util.alpha(tone, 0.08)
@@ -866,7 +883,7 @@ Item {
                 }
                 ColumnLayout {
                   id: scol
-                  anchors { fill: parent; margins: Style.spacing.lg }
+                  anchors { fill: parent; margins: sessionFlow.dense ? Style.spacing.sm : Style.spacing.lg }
                   spacing: Style.spacing.xs
                   RowLayout {
                     Layout.fillWidth: true
@@ -890,13 +907,13 @@ Item {
                     font.pixelSize: Style.font.bodySmall
                     font.bold: !!sc.modelData.topic
                     wrapMode: Text.Wrap
-                    maximumLineCount: 2
+                    maximumLineCount: sessionFlow.dense ? 1 : 2
                     elide: Text.ElideRight
                   }
-                  PlainText { Layout.fillWidth: true; visible: !!sc.modelData.cwd; text: sc.modelData.cwd || ""; color: view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption; elide: Text.ElideMiddle }
-                  PlainText { Layout.fillWidth: true; visible: (sc.modelData.hosts || []).length > 0; text: "hosted in " + view.sessionHostLabel(sc.modelData) + (sc.modelData.window ? " · click jumps to the pane" : ((sc.modelData.hosts || []).some(function(h) { return h && h.kind === "background" && h.attachId }) ? " · click attaches a terminal" : " · no client window found")); color: sc.tone; font.family: view.mono; font.pixelSize: Style.font.caption; elide: Text.ElideRight }
-                  PlainText { Layout.fillWidth: true; visible: !!sc.modelData.topic && !!(sc.modelData.window && sc.modelData.window.title); text: sc.modelData.window ? (sc.modelData.window.title || "") : ""; color: view.textDim; font.family: view.mono; font.pixelSize: Style.font.caption; elide: Text.ElideRight }
-                  PlainText { Layout.fillWidth: true; visible: !!sc.modelData.git; text: sc.modelData.git ? ("git " + sc.modelData.git.branch + (sc.modelData.git.dirty ? " · " + sc.modelData.git.dirty + " changed" : " · clean") + (sc.modelData.git.ahead ? " · ↑" + sc.modelData.git.ahead : "") + (sc.modelData.git.behind ? " · ↓" + sc.modelData.git.behind : "") + (sc.modelData.git.conflicts ? " · " + sc.modelData.git.conflicts + " conflicts" : "")) : ""; color: sc.modelData.git && sc.modelData.git.conflicts ? view.desk.red : sc.modelData.git && sc.modelData.git.dirty ? view.desk.yellow : view.desk.green; font.family: view.mono; font.pixelSize: Style.font.caption; elide: Text.ElideRight }
+                  PlainText { Layout.fillWidth: true; visible: !sessionFlow.dense && (!!sc.modelData.cwd); text: sc.modelData.cwd || ""; color: view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption; elide: Text.ElideMiddle }
+                  PlainText { Layout.fillWidth: true; visible: !sessionFlow.dense && ((sc.modelData.hosts || []).length > 0); text: "hosted in " + view.sessionHostLabel(sc.modelData) + (sc.modelData.window ? " · click jumps to the pane" : ((sc.modelData.hosts || []).some(function(h) { return h && h.kind === "background" && h.attachId }) ? " · click attaches a terminal" : " · no client window found")); color: sc.tone; font.family: view.mono; font.pixelSize: Style.font.caption; elide: Text.ElideRight }
+                  PlainText { Layout.fillWidth: true; visible: !sessionFlow.dense && (!!sc.modelData.topic && !!(sc.modelData.window && sc.modelData.window.title)); text: sc.modelData.window ? (sc.modelData.window.title || "") : ""; color: view.textDim; font.family: view.mono; font.pixelSize: Style.font.caption; elide: Text.ElideRight }
+                  PlainText { Layout.fillWidth: true; visible: !sessionFlow.dense && (!!sc.modelData.git); text: sc.modelData.git ? ("git " + sc.modelData.git.branch + (sc.modelData.git.dirty ? " · " + sc.modelData.git.dirty + " changed" : " · clean") + (sc.modelData.git.ahead ? " · ↑" + sc.modelData.git.ahead : "") + (sc.modelData.git.behind ? " · ↓" + sc.modelData.git.behind : "") + (sc.modelData.git.conflicts ? " · " + sc.modelData.git.conflicts + " conflicts" : "")) : ""; color: sc.modelData.git && sc.modelData.git.conflicts ? view.desk.red : sc.modelData.git && sc.modelData.git.dirty ? view.desk.yellow : view.desk.green; font.family: view.mono; font.pixelSize: Style.font.caption; elide: Text.ElideRight }
                   PlainText { Layout.fillWidth: true; text: "pid " + sc.modelData.pid + (sc.modelData.name ? " · " + sc.modelData.name : "") + (sc.modelData.window ? " · ws " + sc.modelData.window.workspace : " · no window") + " · cpu " + (sc.modelData.resources && sc.modelData.resources.cpuPct !== null ? sc.modelData.resources.cpuPct.toFixed(1) + "%" : "—") + " · ram " + ((sc.modelData.resources || {}).rss !== null ? view.desk.bytes((sc.modelData.resources || {}).rss) : "—") + " · " + ((sc.modelData.resources || {}).processes !== null ? ((sc.modelData.resources || {}).processes || 0) : "—") + " proc" + ((sc.modelData.resources || {}).gpuMemory ? " · gpu " + view.desk.bytes(sc.modelData.resources.gpuMemory) : ""); color: view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption; elide: Text.ElideRight }
                 }
                 MouseArea {

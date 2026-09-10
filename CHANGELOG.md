@@ -4,6 +4,11 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 
 ## [Unreleased]
 
+## [1.3.2] — 2026-09-09
+
+### Changed
+- **A busy desk shrinks its session cards instead of burying the rest of itself.** Past eight agents the cards go dense: columns are chosen to bound the number of *rows* rather than the number of cards, and each card drops the working directory, host, window title and repository lines and keeps its topic to one line. Twenty-five sessions went from five rows of eight-line cards — the whole screen, with no ACTIVITY, RECENT TASKS or ops cards under it — to four rows of four-line cards. Nothing is lost: the inspector still carries every field. Measured rather than guessed, and the measuring caught a trap: the minimum card width is multiplied by `fontScale`, so a dense minimum of 138 became 184 on a 1.33 desk, exceeded the fitted width, and made Flow fall back to six per row so the extra columns bought nothing.
+
 ## [1.3.1] — 2026-09-08
 
 ### Fixed
