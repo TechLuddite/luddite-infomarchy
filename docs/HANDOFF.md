@@ -91,3 +91,9 @@ After removing the widget entrypoint, manifest registration and setup references
 ### Local bar preview
 
 The user confirmed seeing the widget after an explicit right-side `shell.json` layout entry was added beside Tailscale. `omarchy bar put` had reported success without creating that entry, even after a shell restart. The shell configuration was backed up before the change. The user judged the feature insufficiently polished for upstream; the fork retains it enabled for further work, tracked in TODO. Dashboard SETTINGS is the supported setup path. Noncredential live status remained Tailscale running/ready; no access-mode or credential changes were made.
+
+### Publication record
+
+[Upstream PR #25](https://github.com/nixfred/infomarchy/pull/25), **Add Web Mode with LAN, Tailscale and Manual HTTPS**, is submitted to `nixfred/infomarchy:master` from `TechLuddite:upstream/web-mode` at `95f1e24`. GitHub confirmed the expected 27-file diff, both docs and README, no bar entrypoint, and a mergeable open PR; no GitHub checks were configured/reported at submission. Upstream review and merge belong to the maintainer.
+
+[Fork PR #24](https://github.com/TechLuddite/luddite-infomarchy/pull/24) records this scope, README correction, experimental-widget TODO and context updates on the fork’s `master`; creation and merge were authorized. Consult the PR for its merge status/commit. These are documentation changes; the fork keeps its existing implementation and live Tailscale/bar preview.
