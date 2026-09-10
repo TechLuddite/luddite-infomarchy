@@ -35,6 +35,7 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 - **HARD REFRESH.** First chip on the module strip. Runs the collector with `--force-refresh` so Grok billing, GitHub, external IP, and local usage identity caches are bypassed, Claude limits are re-read in memory, and the snapshot is reloaded. `omarchy-shell infomarchy hardRefresh` hits the wallpaper collector.
 
 ### Changed
+- **Upstream 1.3.2 session density.** More than eight visible sessions use shorter cards and row-bounded columns. Directory, host, window title, and git details remain in the inspector. Fork privacy formatting and minimum-width fixes are preserved.
 - **A provider with no token data no longer reports `0 tok`.** `hasTokenData` distinguishes a missing measurement from a zero. Session counts still show.
 - **`usageStatusText` is drawn when a provider has no limit bars.** Claude `authHelpText` stays on its own line. Grok with billing bars does not repeat the status under the meters.
 - **Grok session-directory fallback.** When `updates.jsonl` has no token snaps, USAGE still shows Grok from session dirs (prompts, sessions, models) with no invented limit bars. Billing WEEKLY/BUILD and local token totals still win when those exist.

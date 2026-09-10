@@ -33,3 +33,9 @@ Runtime settings are machine-specific; inspect them safely when needed instead o
 - The failed-setup retry improvement was subsequently deployed and the shell restarted. The live Tailscale listener reported ready, and an HTTPS HEAD request returned 200 with normal certificate verification and `Cache-Control: no-store`. No credential URL was logged.
 
 Keep future test claims scoped to what was actually exercised. The known settings-write race and other unrelated follow-ups remain in TODO.
+
+## Upstream 1.3.2 sync — 2026-09-10
+
+- Merged upstream `f8447af` (dense desktop session cards above eight visible sessions). Retained fork path privacy, clipping, minimum-width constraints, plugin identity, and fork changelog structure; manifest now reports 1.3.2.
+- `bun test`: 265 passed, 0 failed across 18 files, including the Quickshell retry regression and upstream density arithmetic guard. `git diff --check` passed. Dense mode was not visually exercised with more than eight sessions.
+- Backed up and copied the four changed upstream-integration files to the separate live clone, preserving its existing local edits and extra files, then restarted the shell. Desktop geometry IPC responded; noncredential Web Mode status reported Tailscale running and ready.

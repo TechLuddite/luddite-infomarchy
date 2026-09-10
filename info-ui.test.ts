@@ -280,6 +280,37 @@ describe("right column fits a 1080p desk", () => {
     expect(source).toContain('if (!workspace && !tab && !pane) return false');
   });
 
+  test("a busy desk shrinks its session cards instead of burying everything below them", () => {
+    // 25 sessions at six columns was five rows of eight-line cards — the whole
+    // screen, with no ACTIVITY, RECENT TASKS or ops cards under it.
+    expect(view).toContain("readonly property bool dense: view.sessions.length > 8");
+
+    // Columns bound the number of ROWS, because rows are what push the desk off.
+    const columns = view.match(/readonly property int targetColumns: dense[\s\S]*?\n              : [^\n]*/)?.[0];
+    expect(columns).toBeTruthy();
+    expect(columns).toContain("Math.ceil(view.sessions.length / 4)");
+
+    const density = (n: number) => Math.max(6, Math.min(8, Math.ceil(n / 4)));
+    // Measured on a real desk: left column 1327, card padding 13, gap 11.
+    const rows = (n: number) => {
+      const cols = density(n);
+      const fitted = (1301 - 11 * (cols - 1)) / cols;
+      const width = Math.max(112 * 1.3333, fitted);
+      return Math.ceil(n / Math.floor((1301 + 11) / (width + 11)));
+    };
+    for (const n of [9, 12, 20, 25, 32]) expect(rows(n), `${n} sessions`).toBeLessThanOrEqual(4);
+
+    // The minimum is multiplied by fontScale. A dense minimum of 138 came out
+    // at 184 on a 1.33 desk, wider than the fitted width, so Flow fell back to
+    // six per row and the extra columns bought nothing at all.
+    expect(view).toContain("dense ? 112 :");
+    expect(Math.max(112 * 1.3333, (1301 - 11 * 6) / 7)).toBeCloseTo((1301 - 11 * 6) / 7, 5);
+
+    // A dense card drops what a glance does not need; the inspector keeps it.
+    expect(view).toContain("maximumLineCount: sessionFlow.dense ? 1 : 2");
+    expect((view.match(/visible: !sessionFlow\.dense && \(/g) || []).length).toBe(4);
+  });
+
   test("a provider with no token data says so instead of reporting zero", () => {
     // Grok publishes prompts and sessions but no token totals or rate-limit
     // windows. "0 tok" would read as a measurement it never made.
