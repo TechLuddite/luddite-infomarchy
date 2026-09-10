@@ -4,7 +4,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 
-// Shared Web Mode / desk settings. Hosted by the overlay drawer and the bar panel.
+// Web Mode / desk settings, hosted by the overlay drawer.
 ColumnLayout {
   id: root
   required property InfoSettings settings

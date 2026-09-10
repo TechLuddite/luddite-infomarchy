@@ -52,6 +52,8 @@ The listener requires the exact configured HTTPS Host/Origin plus source authori
 
 ## Credentials, requests, and UI
 
+Setup and viewer management are desktop controls in the dashboard SETTINGS drawer. This contribution does not register a bar widget.
+
 Viewer tokens are individually revocable bearer credentials stored in `web.json` with mode 0600. Credential reads validate the opened descriptor, ownership, link count, mode, and bounded size; symlinks and invalid files fail closed. Rejected state is not silently replaced with new credentials or stale cached tokens. All credential mutations (creation, token add/revoke, CIDR changes, and enable/disable) acquire `web-config.lock` before reading and retain it through atomic publication. The whole-config writer is private to those transactions, so an unrelated update cannot restore a revoked token from a stale read. Revocation affects subsequent authenticated requests. WEB off keeps credentials; add a replacement before revoking the last token.
 
 Page access is GET/HEAD. The JSON-only POST `/prefs` requires the expected Origin and accepts only `webSections` and `webNarrowOrder`. Existing escaping, request limits, authentication, no-store responses, and nonce CSP remain. `connect-src 'self'` and `img-src 'self'` restrict page fetches. Rate-limit bookkeeping is bounded and distinguishes authenticated viewers behind the loopback proxy.

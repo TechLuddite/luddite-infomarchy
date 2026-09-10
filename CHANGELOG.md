@@ -5,7 +5,7 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 ## [Unreleased]
 
 ### Added
-- Web Mode: browser dashboard with trusted LAN HTTP, guided private Tailscale HTTPS and Manual HTTPS using existing hostname/IP certificates; optional settings bar widget and deliberate viewer-token QR/clipboard actions.
+- Web Mode: browser dashboard with trusted LAN HTTP, guided private Tailscale HTTPS and Manual HTTPS using existing hostname/IP certificates; dashboard settings and deliberate viewer-token QR/clipboard actions.
 - Desktop-owned stream privacy with server-side browser filtering, layout-only browser preferences and individually revocable viewer credentials.
 - README setup for all three modes, including an operator-run CA/IP certificate recipe, Android trust, firewall guidance, renewal and cleanup; security design and maintenance handoff documents.
 
