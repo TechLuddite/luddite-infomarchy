@@ -14,7 +14,7 @@ Runtime settings are machine-specific; inspect them safely when needed instead o
 
 The user confirmed Android Manual HTTPS worked with the private-CA/IP certificate after the scoped firewall fix, and then confirmed the client successfully reopened its Tailscale dashboard URL after restoration. The live listener is back on Tailscale; the temporary CA download service is stopped and its temporary firewall rule removed. Saved Manual HTTPS certificate material and desktop user trust entries remain outside the repository; the phone's test CA may be removed from its user trust store when no longer needed. Historical “not deployed” and “phone unverified” entries below describe earlier stages and are superseded by these results.
 
-This change is being published through a PR to the fork's `master`, as explicitly authorized by the user. The separate upstream Web Mode PR remains unsubmitted pending agreement. Its review must include README setup changes and both HANDOFF and WEB-MODE-SECURITY; do not publish local PKI, runtime state or credential-bearing test artifacts.
+Publication record: [fork PR #22](https://github.com/TechLuddite/luddite-infomarchy/pull/22) targets the fork's `master`, with creation and merge explicitly authorized by the user. Consult the PR for the final merge commit. The separate upstream Web Mode PR remains unsubmitted pending agreement. Its review must include README setup changes and both HANDOFF and WEB-MODE-SECURITY; do not publish local PKI, runtime state or credential-bearing test artifacts.
 
 ## Source map
 
