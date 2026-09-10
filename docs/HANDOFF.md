@@ -1,6 +1,6 @@
 # Web Mode maintenance handoff
 
-README owns user-facing setup instructions; WEB-MODE-SECURITY.md owns implemented boundaries and rationale. This proposal is based on upstream `f8447af` and preserves `nixfred.infomarchy`, upstream installation instructions, desktop modules and provider collectors. It adds Web Mode, desktop privacy controls and the state transactions they require. It does not add containers, media controls, provider billing changes or a new LOCAL AI endpoint setting.
+README owns user-facing setup instructions; WEB-MODE-SECURITY.md owns implemented boundaries and rationale. This proposal is based on upstream `f8447af` and preserves `nixfred.infomarchy`, upstream installation instructions, desktop modules and provider collectors. It adds Web Mode, desktop privacy controls and the state transactions they require. It does not add containers, media controls, provider billing changes, a new LOCAL AI endpoint setting or a bar widget. Web Mode setup is accessed through the dashboard SETTINGS drawer.
 
 ## Source map
 
@@ -11,7 +11,7 @@ README owns user-facing setup instructions; WEB-MODE-SECURITY.md owns implemente
 | `web-tailscale.ts`, `web-child.py` | Read-only preflight, owned foreground Serve mapping, bounded CLI output, failure/retry and parent-death cleanup. |
 | `web-manual.ts` | Existing PEM/key descriptor validation, SHA-256 leaf pin, DNS/IP SAN, key/date/chain checks and private-interface TLS. |
 | `InfoSettings.qml`, `dashboard-state.ts`, `state-lock.ts` | Field/per-key patches under `dashboard.lock`, queued saves and launch/exit failure recovery. Credentials use a separate `web-config.lock`. |
-| `Infomarchy.qml`, `SettingsBody.qml`, `SettingsPanel.qml` | Service-owned lifecycle and retry IPC, overlay settings, optional bar widget, deliberate clipboard and QR actions. |
+| `Infomarchy.qml`, `SettingsBody.qml` | Service-owned lifecycle and retry IPC, overlay settings, deliberate clipboard and QR actions. |
 | `collector.ts`, `InfoView.qml`, `Overlay.qml` | Snapshot publication while Web Mode is enabled; desktop privacy controls, prompt masking, settings entry and hotkeys. |
 
 ## Invariants
@@ -24,10 +24,10 @@ Serve owns only its foreground mapping on 8788 and a loopback backend; never res
 
 ## Verification — 2026-09-10
 
-- Exact extracted branch: `bun test --timeout 30000` passed 247 tests across 20 files. Collector fixture subprocesses use `process.execPath` so they run the current Bun binary even with an isolated HOME. The longer per-test deadline avoids the default five-second timeout on hosts where collector fixtures run slowly. No Web assertions were relaxed.
+- Final proposal without the bar widget: `bun test --timeout 30000` passed 247 tests across 20 files. Collector fixture subprocesses use `process.execPath` so they run the current Bun binary even with an isolated HOME. The longer per-test deadline avoids the default five-second timeout on hosts where collector fixtures run slowly. No Web assertions were relaxed.
 - Tests include certificate-verified TLS for DNS and IP identities, Host/Origin/source/token/privacy boundaries, Tailscale failures and cleanup, actual offscreen QML retry, stale writers, failed writes, invalid mode rejection and failed helper launch followed by recovery. Missing QR/clipboard binaries fail gracefully.
 - Chromium against an isolated actual listener: 390px layout fit without horizontal overflow; privacy on/off/on changed response rendering through the actual five-second HTML swaps. Test data was synthetic and viewer URLs were never logged. Installed qrencode also generated a valid synthetic viewer matrix.
-- Actual upstream InfoView, InfoSettings and InfoModel rendered the Manual HTTPS settings panel at 1920×1080 in an offscreen QML harness. Theme singletons were stubbed; no matching QML runtime errors were observed. Actual bar anchoring, native clipboard success and a fresh phone install of this extracted branch were not exercised.
+- Actual upstream InfoView, InfoSettings and InfoModel rendered the Manual HTTPS settings panel at 1920×1080 in an offscreen QML harness. Theme singletons were stubbed; no matching QML runtime errors were observed. Native clipboard success and a fresh phone install of this extracted branch were not exercised.
 - README's OpenSSL recipe was executed in isolated storage during source preparation and verified the generated IP certificate. Prior real-device evidence for the source implementation: the user verified Android Manual HTTPS after CA installation and a scoped firewall correction, then verified restored Tailscale. This is separate from validation of the extracted branch.
 - Desktop-local probes do not exercise inbound firewall rules. Bun's live probe rejected the name-constrained test CA with `UNSPECIFIED`; independent OpenSSL/curl/Chromium verification and the Android test succeeded. Client trust compatibility remains a client responsibility.
 - `git diff --check` passed. No public exposure, live desktop replacement, local PKI or credential-bearing artifacts are part of this contribution.

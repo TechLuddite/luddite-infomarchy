@@ -5,26 +5,17 @@
   "version": "1.4.1",
   "author": "Fred Nix & Larry",
   "license": "MIT",
-  "description": "A live, clickable wallpaper desk for AI sessions, proactive next-action alerts, repository health, Ollama controls, activity, usage limits, and machine telemetry. Theme-driven. SUPER+D overlay. Optional Web Mode and settings bar widget.",
+  "description": "A live, clickable wallpaper desk for AI sessions, proactive next-action alerts, repository health, Ollama controls, activity, usage limits, and machine telemetry. Theme-driven. SUPER+D overlay. Optional Web Mode.",
   "kinds": [
     "service",
-    "overlay",
-    "bar-widget"
+    "overlay"
   ],
   "keepLoaded": true,
   "entryPoints": {
     "service": "Infomarchy.qml",
-    "overlay": "Overlay.qml",
-    "barWidget": "SettingsPanel.qml"
+    "overlay": "Overlay.qml"
   },
   "omarchy": {
     "clonedFrom": "omarchy.background"
-  },
-  "barWidget": {
-    "displayName": "Infomarchy",
-    "description": "Web Mode, section visibility, tokens, QR, and the LAN allow list",
-    "category": "AI",
-    "allowMultiple": false,
-    "defaultSection": "right"
   }
 }
