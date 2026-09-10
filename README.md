@@ -86,6 +86,10 @@ Turning desktop privacy off lets connected viewers receive the permitted full va
 
 Install and enable Infomarchy first using [Install](#install). Open the desk with **SUPER+D**, then **SETTINGS**, or open settings from the Infomarchy bar widget. Choose the desktop privacy setting you want before sharing a viewer link.
 
+Web helpers require Bun, `flock` (util-linux) and `timeout` (coreutils). **SHOW QR** uses `qrencode`; **COPY URL** uses `wl-copy` from `wl-clipboard`. On Omarchy/Arch, install the optional viewer tools with `sudo pacman -S --needed qrencode wl-clipboard`. Tailscale process cleanup requires Python 3; the optional CA recipe requires OpenSSL, and its download helper uses Python 3.
+
+To add the optional settings bar widget, run `omarchy bar put techluddite.luddite-infomarchy --section right`. The overlay's SETTINGS works without adding the bar widget.
+
 ### LAN HTTP: on your trusted local network
 
 1. Connect the desktop and viewing device to a local network you control and trust. Guest Wi-Fi or client isolation can prevent devices from reaching one another.

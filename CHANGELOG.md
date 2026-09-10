@@ -5,6 +5,7 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 ## [Unreleased]
 
 ### Security
+- Unknown saved Web modes keep sharing off; failed settings-helper launches restore persisted UI state and allow retry. LAN address selection follows route metrics instead of local subnet preferences; missing QR/clipboard tools have setup guidance.
 - **Concurrent settings changes preserve privacy and revocation.** Desktop and browser preferences merge field/per-key patches under one lock. Token, CIDR, and listener-state mutations reread credentials under a separate shared lock, preventing stale updates from restoring revoked tokens. QML queues rapid edits through helper startup and shows failed saves before reloading persisted settings.
 - **Web privacy is enforced server-side.** HTML and JSON follow desktop privacy, default on for invalid settings, and omit private values before transmission. Browser privacy mutation and hidden full-value spans are removed. JSON projects only web-facing fields; credential reads and revocation fail closed. LAN no longer default-allows CGNAT.
 - USAGE shows local Grok and OpenCode token totals from session files (`updates.jsonl`, `opencode.db`) when Omarchy has no collector for them. Rows are labelled `local` with no 5-hour/weekly meters. Omarchy cache records are never overwritten, and nothing is written into `omarchy/agents/usage`.

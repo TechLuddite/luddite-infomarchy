@@ -51,6 +51,7 @@ Item {
   property bool webReady: false
   property bool webStarting: false
   readonly property bool webFailed: webEnabled && !webReady && !webStarting
+  property bool webModeInvalid: false
   property string webAccessMode: "lan"
   property var manualHttps: ({})
   property string webStatusText: ""
@@ -98,9 +99,13 @@ Item {
       dashboardVisible = parsed && typeof parsed.dashboardVisible === "boolean" ? parsed.dashboardVisible : true
       privacyMode = !(parsed && parsed.privacyMode === false)
       privacyUnlockCount = 0
-      webAccessMode = parsed && (parsed.webAccessMode === "tailscale" || parsed.webAccessMode === "manual") ? parsed.webAccessMode : "lan"
+      // Only a missing mode is a legacy LAN setting. Unknown explicit values
+      // must never turn an intended HTTPS listener into plaintext HTTP.
+      webModeInvalid = !!parsed && Object.prototype.hasOwnProperty.call(parsed, "webAccessMode") && ["lan", "tailscale", "manual"].indexOf(parsed.webAccessMode) < 0
+      webAccessMode = webModeInvalid ? "" : (parsed && parsed.webAccessMode ? parsed.webAccessMode : "lan")
+      if (webModeInvalid) webStatusText = "Unknown saved access mode. Select an access mode before enabling WEB."
       manualHttps = parsed && parsed.manualHttps && typeof parsed.manualHttps === "object" ? parsed.manualHttps : ({})
-      webEnabled = !!(parsed && parsed.webEnabled === true)
+      webEnabled = !webModeInvalid && !!(parsed && parsed.webEnabled === true)
       webSections = parsed && parsed.webSections && typeof parsed.webSections === "object" ? parsed.webSections : ({})
       if (webEnabled) Qt.callLater(refreshWebStatus)
       else { webReady = false; webStarting = false }
@@ -123,6 +128,7 @@ Item {
       dashboardVisible = true
       privacyMode = true
       privacyUnlockCount = 0
+      webModeInvalid = false
       webAccessMode = "lan"
       manualHttps = ({})
       webEnabled = false
@@ -162,20 +168,34 @@ Item {
     settingsWriter.frame = JSON.stringify(pendingPatch)
     pendingPatch = ({})
     settingsError = ""
+    settingsLaunchWatch.start()
     settingsWriter.running = true
+  }
+  function settingsWriteFailed() {
+    settingsLaunchWatch.stop()
+    settingsWriteInFlight = false
+    pendingPatch = ({})
+    settingsWriter.frame = ""
+    settingsError = "Settings could not be saved. Check that Bun is installed, then try again."
+    Qt.callLater(function() { configFile.reload() })
+  }
+  // Quickshell Process exposes no launch-error signal. Failed launches do not
+  // emit exited; a bounded startup check restores the saved UI state instead.
+  Timer {
+    id: settingsLaunchWatch
+    interval: 1000
+    onTriggered: if (root.settingsWriteInFlight && !settingsWriter.running) root.settingsWriteFailed()
   }
   Process {
     id: settingsWriter
     property string frame: ""
     command: ["/usr/bin/bun", Qt.resolvedUrl("dashboard-state.ts").toString().replace(/^file:\/\//, "")]
     stdinEnabled: true
-    onStarted: { write(frame + "\n"); frame = "" }
+    onStarted: { settingsLaunchWatch.stop(); write(frame + "\n"); frame = "" }
     onExited: function(code) {
+      settingsLaunchWatch.stop()
       root.settingsWriteInFlight = false
-      if (code !== 0) {
-        root.pendingPatch = ({})
-        root.settingsError = "Settings could not be saved. Try again."
-      }
+      if (code !== 0) { root.settingsWriteFailed(); return }
       Qt.callLater(function() {
         if (Object.keys(root.pendingPatch).length) root.startSettingsWrite()
         else configFile.reload()
@@ -369,9 +389,12 @@ Item {
     webReady = false
     webStarting = false
     webAccessMode = mode
+    webModeInvalid = false
+    webStatusText = ""
     persist({ webAccessMode: webAccessMode, webEnabled: false })
   }
   function setWebEnabled(enabled) {
+    if (enabled && webModeInvalid) return
     webStarting = !!enabled
     webStatusText = ""
     webEnabled = !!enabled

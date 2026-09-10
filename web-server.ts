@@ -103,20 +103,29 @@ export function newToken(): string {
   return randomBytes(TOKEN_BYTES).toString("hex");
 }
 
-export function localPrivateIPv4(): string[] {
+export function rankLanAddresses(nets: ReturnType<typeof networkInterfaces>, routes: string): string[] {
+  const defaults = routes.split("\n").map(line => line.trim().split(/\s+/))
+    .filter(f => f[1] === "00000000" && f[7] === "00000000" && (parseInt(f[3], 16) & 1) && /^\d+$/.test(f[6]))
+    .sort((a, b) => Number(a[6]) - Number(b[6])).map(f => f[0]);
+  const names = Object.keys(nets).sort((a, b) => {
+    const rank = (n: string) => { const i = defaults.indexOf(n); return i < 0 ? defaults.length : i; };
+    return rank(a) - rank(b) || a.localeCompare(b);
+  });
   const found: string[] = [];
-  const nets = networkInterfaces();
-  for (const name of Object.keys(nets)) {
+  for (const name of names) {
+    // Virtual-only networks are not an automatic phone-view advertisement.
+    if (!defaults.includes(name) && /^(docker|br-|virbr|veth|tailscale|tun|tap|wg)/.test(name)) continue;
     for (const addr of nets[name] || []) {
       if (addr.internal || addr.family !== "IPv4") continue;
       const ip = canonicalIp(addr.address);
-      if (isIP(ip) === 4 && parseCidrList([]).some(cidr => cidr.text !== "127.0.0.0/8" && ipInCidr(ip, cidr))) {
-        if (!found.includes(ip)) found.push(ip);
-      }
+      if (isIP(ip) === 4 && parseCidrList([]).some(cidr => cidr.text !== "127.0.0.0/8" && ipInCidr(ip, cidr)) && !found.includes(ip)) found.push(ip);
     }
   }
-  const def = found.find(ip => ip.startsWith("172.20.") || ip.startsWith("192.168.") || ip.startsWith("10.")) || found[0] || "";
-  return def ? [def, ...found.filter(ip => ip !== def)] : found;
+  return found;
+}
+
+export function localPrivateIPv4(): string[] {
+  return rankLanAddresses(networkInterfaces(), readRegularFileLimited("/proc/net/route", 65536) || "");
 }
 
 export function advertisedBind(preferred: string[]): string {
@@ -433,11 +442,12 @@ export function parseAsciiQr(text: string): string[] {
   return rows;
 }
 
-export async function qrMatrixForUrl(url: string): Promise<string[]> {
+export async function qrMatrixForUrl(url: string, executable = "/usr/bin/qrencode"): Promise<string[]> {
   if (!/^https?:\/\/[0-9a-zA-Z.:[\]-]+\/t\/[0-9a-f]{48}\/$/.test(url)) return [];
-  const proc = Bun.spawn(["/usr/bin/qrencode", "-t", "ASCII", "-m", "2", "-o", "-"], {
+  let proc: ReturnType<typeof Bun.spawn>;
+  try { proc = Bun.spawn([executable, "-t", "ASCII", "-m", "2", "-o", "-"], {
     stdin: new Blob([url]), stdout: "pipe", stderr: "ignore",
-  });
+  }); } catch { return []; }
   const timer = setTimeout(() => proc.kill("SIGKILL"), 3000);
   let bytes = 0;
   const chunks: Uint8Array[] = [];
@@ -449,6 +459,15 @@ export async function qrMatrixForUrl(url: string): Promise<string[]> {
     }
     return await proc.exited === 0 ? parseAsciiQr(Buffer.concat(chunks).toString("utf8")) : [];
   } finally { clearTimeout(timer); proc.kill("SIGKILL"); await proc.exited; }
+}
+
+export async function copyWebLink(url: string, executable = "/usr/bin/wl-copy"): Promise<boolean> {
+  let proc: ReturnType<typeof Bun.spawn>;
+  try { proc = Bun.spawn([executable], { stdin: new Blob([url]), stdout: "ignore", stderr: "ignore" }); }
+  catch { return false; }
+  const timer = setTimeout(() => proc.kill("SIGKILL"), 3000);
+  try { return await proc.exited === 0; }
+  finally { clearTimeout(timer); }
 }
 
 export const SECURITY_HEADERS: Record<string, string> = {
@@ -805,10 +824,9 @@ if (import.meta.main) {
     }
     const url = `${status.origin}/t/${row.token}/`;
     if (cmd === "copy-url") {
-      const proc = Bun.spawn(["/usr/bin/wl-copy"], { stdin: new Blob([url]), stdout: "ignore", stderr: "ignore" });
-      const timer = setTimeout(() => proc.kill("SIGKILL"), 3000);
-      await proc.exited;
-      clearTimeout(timer);
+      const ok = await copyWebLink(url);
+      console.log(JSON.stringify({ ok, message: ok ? "Viewer link copied." : "Cannot copy link. Install wl-clipboard and check the Wayland session." }));
+      process.exit(ok ? 0 : 1);
     } else console.log(JSON.stringify({ ok: true, url, id: row.id, label: row.label }));
     process.exit(0);
   }
