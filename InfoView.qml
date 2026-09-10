@@ -926,6 +926,7 @@ Item {
           tone: view.desk.cyan
           MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: view.projectFilter = "" }
         }
+        Tag { visible: !!view.settings.settingsError; text: view.settings.settingsError; tone: view.desk.red }
         // Discoverability, faint and in the strip: the two keys everyone needs.
         // On the wallpaper SUPER+D opens the desktop view; in that view it closes it.
         Tag {

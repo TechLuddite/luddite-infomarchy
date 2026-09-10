@@ -4,6 +4,9 @@
 // HTML-escaped fields. GET/HEAD for the page. POST /prefs for web section
 // visibility and narrow-layout order. Token never travels in argv.
 
+import { loadManualTls, readManualPrefs, validManualOrigin } from "./web-manual";
+import { withStateLock } from "./state-lock";
+import { patchDashboard } from "./dashboard-state";
 import { networkInterfaces } from "os";
 import { randomBytes, timingSafeEqual } from "crypto";
 import { isIP } from "net";
@@ -233,7 +236,7 @@ export function loadConfig(): WebConfig | null {
   return { tokens, port, extraCidrs, listening: parsed.listening !== false };
 }
 
-export function saveConfig(config: WebConfig): boolean {
+function saveConfig(config: WebConfig): boolean {
   return writePrivateStateFile(STATE_DIR, CONFIG_NAME, JSON.stringify({
     tokens: config.tokens,
     port: config.port,
@@ -243,6 +246,10 @@ export function saveConfig(config: WebConfig): boolean {
 }
 
 export function ensureConfig(extraCidrs: string[] = [], listening?: boolean): WebConfig {
+  return withStateLock(STATE_DIR, "web-config.lock", () => ensureConfigLocked(extraCidrs, listening));
+}
+
+function ensureConfigLocked(extraCidrs: string[] = [], listening?: boolean): WebConfig {
   const existing = loadConfig();
   if (existing) {
     let changed = false;
@@ -273,42 +280,50 @@ export function ensureConfig(extraCidrs: string[] = [], listening?: boolean): We
 }
 
 export function addWebToken(label: string): WebToken | null {
-  const config = ensureConfig();
-  if (config.tokens.length >= MAX_TOKENS) return null;
-  const token = makeToken(label);
-  config.tokens.push(token);
-  return saveConfig(config) ? token : null;
+  try { return withStateLock(STATE_DIR, "web-config.lock", () => {
+    const config = ensureConfigLocked();
+    if (config.tokens.length >= MAX_TOKENS) return null;
+    const token = makeToken(label);
+    config.tokens.push(token);
+    return saveConfig(config) ? token : null;
+  }); } catch { return null; }
 }
 
 export function revokeWebToken(id: string): boolean {
-  const config = loadConfig();
-  if (!config) return false;
-  const next = config.tokens.filter(row => row.id !== id);
-  if (next.length === config.tokens.length) return false;
-  if (!next.length) return false;
-  config.tokens = next;
-  return saveConfig(config);
+  try { return withStateLock(STATE_DIR, "web-config.lock", () => {
+    const config = loadConfig();
+    if (!config) return false;
+    const next = config.tokens.filter(row => row.id !== id);
+    if (next.length === config.tokens.length) return false;
+    if (!next.length) return false;
+    config.tokens = next;
+    return saveConfig(config);
+  }); } catch { return false; }
 }
 
 export function addExtraCidr(text: string): boolean {
-  const cidr = parseCidr(text);
-  if (!cidr) return false;
-  const config = ensureConfig();
-  if (config.extraCidrs.includes(cidr.text)) return true;
-  if (config.extraCidrs.length >= MAX_EXTRA_CIDRS) return false;
-  config.extraCidrs.push(cidr.text);
-  return saveConfig(config);
+  try { return withStateLock(STATE_DIR, "web-config.lock", () => {
+    const cidr = parseCidr(text);
+    if (!cidr) return false;
+    const config = ensureConfigLocked();
+    if (config.extraCidrs.includes(cidr.text)) return true;
+    if (config.extraCidrs.length >= MAX_EXTRA_CIDRS) return false;
+    config.extraCidrs.push(cidr.text);
+    return saveConfig(config);
+  }); } catch { return false; }
 }
 
 export function removeExtraCidr(text: string): boolean {
-  const cidr = parseCidr(text);
-  if (!cidr) return false;
-  const config = loadConfig();
-  if (!config) return false;
-  const next = config.extraCidrs.filter(item => item !== cidr.text);
-  if (next.length === config.extraCidrs.length) return false;
-  config.extraCidrs = next;
-  return saveConfig(config);
+  try { return withStateLock(STATE_DIR, "web-config.lock", () => {
+    const cidr = parseCidr(text);
+    if (!cidr) return false;
+    const config = loadConfig();
+    if (!config) return false;
+    const next = config.extraCidrs.filter(item => item !== cidr.text);
+    if (next.length === config.extraCidrs.length) return false;
+    config.extraCidrs = next;
+    return saveConfig(config);
+  }); } catch { return false; }
 }
 
 export const maskSnapshot = filterWebSnapshot;
@@ -498,32 +513,7 @@ export function parsePrefsPatch(raw: string): { webSections?: Record<string, boo
 }
 
 export function patchDashboardPrefs(patch: { webSections?: Record<string, boolean>; webNarrowOrder?: string[] }): boolean {
-  const raw = readRegularFileLimited(join(STATE_DIR, "dashboard.json"), 256 * 1024);
-  let parsed: Record<string, unknown> = {};
-  if (raw === null) {
-    try { lstatSync(join(STATE_DIR, "dashboard.json")); return false; }
-    catch (error: any) { if (error.code !== "ENOENT") return false; }
-  }
-  if (raw) {
-    const current = parseJsonBounded(raw, 256 * 1024, 16);
-    if (!current || typeof current !== "object" || Array.isArray(current)) return false;
-    parsed = current as Record<string, unknown>;
-  }
-  if (patch.webSections) {
-    const prev = parsed.webSections && typeof parsed.webSections === "object" && !Array.isArray(parsed.webSections)
-      ? parsed.webSections as Record<string, unknown>
-      : {};
-    const next: Record<string, boolean> = Object.create(null);
-    for (const key of Object.keys(prev)) {
-      if ((WEB_SECTION_IDS as readonly string[]).includes(key)) next[key] = prev[key] === true;
-    }
-    for (const id of WEB_SECTION_IDS) {
-      if (Object.prototype.hasOwnProperty.call(patch.webSections, id)) next[id] = patch.webSections[id] === true;
-    }
-    parsed.webSections = next;
-  }
-  if (patch.webNarrowOrder) parsed.webNarrowOrder = patch.webNarrowOrder;
-  return writePrivateStateFile(STATE_DIR, "dashboard.json", JSON.stringify(parsed, null, 2) + "\n");
+  return patchDashboard(STATE_DIR, patch);
 }
 
 export function handleRequest(input: {
@@ -544,6 +534,7 @@ export function handleRequest(input: {
   body?: string;
   contentType?: string;
   externalOrigin?: string;
+  manualTls?: boolean;
 }): Reply {
   const method = String(input.method || "").toUpperCase();
   if (input.contentLength > MAX_REQUEST_BYTES) return reply(413, "too large");
@@ -552,8 +543,10 @@ export function handleRequest(input: {
     // no authority; the external origin is discovered locally, never from HTTP.
     let external: URL;
     try { external = new URL(input.externalOrigin); } catch { return reply(403, "forbidden"); }
-    if (tailOrigin(external.hostname) !== input.externalOrigin || canonicalIp(input.sourceIp) !== "127.0.0.1" ||
-        input.host.toLowerCase() !== external.host || (input.origin !== null && input.origin !== input.externalOrigin)) return reply(403, "forbidden");
+    const reachable = input.manualTls
+      ? validManualOrigin(input.externalOrigin) && ipAllowed(input.sourceIp, input.cidrs)
+      : tailOrigin(external.hostname) === input.externalOrigin && canonicalIp(input.sourceIp) === "127.0.0.1";
+    if (!reachable || input.host.toLowerCase() !== external.host || (input.origin !== null && input.origin !== input.externalOrigin)) return reply(403, "forbidden");
   } else {
     if (!ipAllowed(input.sourceIp, input.cidrs)) return reply(403, "forbidden");
     if (!hostAllowed(input.host, input.allowedHosts, input.port)) return reply(403, "forbidden");
@@ -632,11 +625,13 @@ export function publishSnapshot(snapshot: unknown): boolean {
 }
 
 export function disableWebFiles(): void {
-  const existing = loadConfig();
-  if (existing) {
-    existing.listening = false;
-    saveConfig(existing);
-  }
+  withStateLock(STATE_DIR, "web-config.lock", () => {
+    const existing = loadConfig();
+    if (existing) {
+      existing.listening = false;
+      if (!saveConfig(existing)) throw new Error("Cannot disable Web Mode");
+    }
+  });
   try { if (existsSync(join(STATE_DIR, SNAPSHOT_NAME))) unlinkSync(join(STATE_DIR, SNAPSHOT_NAME)); } catch {}
 }
 
@@ -669,21 +664,33 @@ export function webStatus(): { running: boolean; ready: boolean; mode: string; o
   const ready = !!(running && s.ready === true && loadConfig()?.listening);
   const origin = String(s?.origin || "");
   const valid = /^http:\/\/(?:[0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]{4,5}$/.test(origin) || (() => {
-    try { return tailOrigin(new URL(origin).hostname) === origin; } catch { return false; }
+    try { return s?.mode === "manual" ? validManualOrigin(origin) : tailOrigin(new URL(origin).hostname) === origin; } catch { return false; }
   })();
-  return { running: !!running, ready: ready && valid, mode: s?.mode === "tailscale" ? "tailscale" : "lan", origin: ready && valid ? origin : "",
+  return { running: !!running, ready: ready && valid, mode: s?.mode === "manual" ? "manual" : s?.mode === "tailscale" ? "tailscale" : "lan", origin: ready && valid ? origin : "",
     message: String(s?.message || (ready ? "" : "Listener is not running. Choose RETRY SETUP to try again.")).replace(/[<>\u0000-\u001f]/g, " ").slice(0, 400) };
 }
 
 export async function serve(mode = process.argv[3], integration = { inspectTailscale, startServe, serveMappingReady }) {
+  if (mode !== undefined && !["lan", "tailscale", "manual"].includes(mode)) throw new Error("Unknown Web Mode access mode");
+  mode = mode || "lan";
   const extra = process.argv.filter(arg => parseCidr(arg)).slice(0, MAX_EXTRA_CIDRS);
   const config = ensureConfig(extra, true);
   const bind = advertisedBind(localPrivateIPv4());
   const allowedHosts = [...localPrivateIPv4(), "127.0.0.1"];
   const requestedPort = process.env.INFOMARCHY_WEB_PORT === "0" ? 0 : (validPort(process.env.INFOMARCHY_WEB_PORT) || config.port);
   const tailscale = mode === "tailscale";
-  writeWebStatus(false, tailscale ? "tailscale" : "lan", "", "Starting listener…");
-  let externalOrigin = "";
+  writeWebStatus(false, mode, "", "Starting listener…");
+  let manual: ReturnType<typeof loadManualTls> | null = null;
+  if (mode === "manual") {
+    try { manual = loadManualTls(readManualPrefs()); }
+    catch (e) {
+      const message = e instanceof Error ? e.message : "Manual HTTPS setup failed.";
+      writeWebStatus(false, mode, "", message);
+      console.log(JSON.stringify({ ok: false, message }));
+      return;
+    }
+  }
+  let externalOrigin = manual?.origin || "";
   let proxy: ReturnType<typeof startServe> | null = null;
   let ready = !tailscale;
   if (tailscale) {
@@ -696,8 +703,9 @@ export async function serve(mode = process.argv[3], integration = { inspectTails
     externalOrigin = status.origin;
   }
   const server = Bun.serve({
-    hostname: tailscale ? "127.0.0.1" : "0.0.0.0",
-    port: requestedPort,
+    hostname: manual ? manual.config.bind : tailscale ? "127.0.0.1" : "0.0.0.0",
+    port: manual ? manual.config.port : requestedPort,
+    ...(manual ? { tls: manual.tls } : {}),
     maxRequestBodySize: MAX_REQUEST_BYTES,
     idleTimeout: 10,
     async fetch(req, srv) {
@@ -709,7 +717,7 @@ export async function serve(mode = process.argv[3], integration = { inspectTails
       // Serve connects every viewer from loopback. Give authenticated viewers
       // separate budgets; invalid credentials still share the peer IP bucket.
       if (!rateOk(sourceIp + (viewer ? ":" + viewer.id : ""))) return new Response("rate", { status: 429, headers: SECURITY_HEADERS });
-      if (!ready || !live || !live.listening) return new Response("unavailable", { status: 503, headers: SECURITY_HEADERS });
+      if (!ready || !live || !live.listening || (manual && Date.now() >= manual.expiresAt)) return new Response("unavailable", { status: 503, headers: SECURITY_HEADERS });
       const path = url.pathname;
       const pathname = path.endsWith("/") || path.endsWith("snapshot.json") || path.endsWith("/bg") || path.endsWith("/prefs") ? path : path + "/";
       const result = handleRequest({
@@ -723,6 +731,7 @@ export async function serve(mode = process.argv[3], integration = { inspectTails
         port: srv.port,
         allowedHosts,
         externalOrigin,
+        manualTls: !!manual,
         cidrs: parseCidrList(live.extraCidrs),
         snapshot: loadSnapshot(),
         body: req.method.toUpperCase() === "POST" ? await req.text() : "",
@@ -731,7 +740,9 @@ export async function serve(mode = process.argv[3], integration = { inspectTails
       return new Response(result.body, { status: result.status, headers: result.headers });
     },
   });
+  let expiryTimer: ReturnType<typeof setInterval> | undefined;
   const stop = () => {
+    if (expiryTimer) clearInterval(expiryTimer);
     ready = false;
     server.stop(true);
     proxy?.kill("SIGKILL");
@@ -739,6 +750,12 @@ export async function serve(mode = process.argv[3], integration = { inspectTails
   process.on("SIGTERM", () => { stop(); process.exit(0); });
   process.on("SIGINT", () => { stop(); process.exit(0); });
   process.on("exit", stop);
+  if (manual) expiryTimer = setInterval(() => {
+    if (Date.now() >= manual.expiresAt) {
+      stop();
+      writeWebStatus(false, "manual", "", "Certificate expired. Install a valid certificate, update its fingerprint and retry.");
+    }
+  }, 30000);
   if (tailscale) {
     writeWebStatus(false, "tailscale", "", "Configuring private HTTPS…");
     proxy = integration.startServe(server.port);
@@ -759,8 +776,8 @@ export async function serve(mode = process.argv[3], integration = { inspectTails
       writeWebStatus(false, "tailscale", "", "Tailscale Serve stopped. Check the connection and choose RETRY SETUP.");
     });
   }
-  writeWebStatus(true, tailscale ? "tailscale" : "lan", externalOrigin || `http://${bind}:${server.port}`, "");
-  console.log(JSON.stringify({ ok: true, ready: true, port: server.port, mode: tailscale ? "tailscale" : "lan" }));
+  writeWebStatus(true, mode, externalOrigin || `http://${bind}:${server.port}`, "");
+  console.log(JSON.stringify({ ok: true, ready: true, port: server.port, mode }));
 }
 
 if (import.meta.main) {
@@ -847,7 +864,7 @@ if (import.meta.main) {
   }
   try { await serve(); }
   catch {
-    writeWebStatus(false, process.argv[3] === "tailscale" ? "tailscale" : "lan", "", "Listener setup failed. Check port availability and state-file permissions, then retry.");
+    writeWebStatus(false, ["tailscale", "manual"].includes(process.argv[3]) ? process.argv[3] : "lan", "", "Listener setup failed. Check port availability and state-file permissions, then retry.");
     console.log(JSON.stringify({ ok: false, message: "Listener setup failed. Check port availability and state-file permissions, then retry." }));
     process.exit(1);
   }

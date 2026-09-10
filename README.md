@@ -28,7 +28,7 @@ The wallpaper desk, the collector, and the design are theirs. Use [the original]
 
 **MEDIA CONTROLS.** Last right-column card. Live MPRIS (`Quickshell.Services.Mpris`): title, artist, album, player identity, PREV / PLAY or PAUSE / NEXT. Prefers a playing player over `playerctld`. No album art fetch. Stream privacy leaves those fields in the clear. Not on Web Mode. Hide or reorder it from the module strip like the other right-column cards.
 
-**Web Mode.** A live browser version of the desk for your phone or another computer, with LAN HTTP or guided private HTTPS through Tailscale. See [Web Mode](#web-mode) for behavior and privacy, and [Set up Web Mode](#set-up-web-mode) for both setup paths.
+**Web Mode.** A live browser version of the desk for your phone or another computer, with LAN HTTP, guided private HTTPS through Tailscale, or Manual HTTPS using an existing certificate. See [Web Mode](#web-mode) for behavior and privacy, and [Set up Web Mode](#set-up-web-mode) for all three setup paths.
 
 **Grok weekly meter.** The collector reads the same billing route Grok `/usage` uses (`GET https://cli-chat-proxy.grok.com/v1/billing?format=credits` with the local CLI login), at most every 60 seconds, and caches it in `$XDG_STATE_HOME/infomarchy/grok-billing.json`. Wallpaper and overlay share that file and serialize requests with `flock`. Failed attempts also back off for 60 seconds. The overlay no longer skips the fetch. If that fetch is down it uses the latest `billing: fetched credits config` line in `~/.grok/logs/unified.jsonl`, then `$XDG_STATE_HOME/infomarchy/grok-limits.json`. Local session tokens still feed today/lifetime totals. No 5-hour Grok window is invented.
 
@@ -68,6 +68,7 @@ Web Mode displays sessions, recent tasks, activity, usage, local AI status, mach
 | --- | --- | --- | --- |
 | **LAN HTTP** | Trusted local IPv4 network; loopback/RFC1918 sources or explicitly allowed CIDRs | Dashboard data and viewer credentials travel unencrypted | 8787 |
 | **PRIVATE HTTPS** | Connected Tailscale devices permitted by your tailnet policy | HTTPS through Tailscale Serve to a loopback backend | 8788 |
+| **MANUAL HTTPS** | A configured private IPv4 interface or loopback, with the source allow list | Direct HTTPS using your existing certificate and private key | 8789 |
 
 The modes are mutually exclusive. Selecting a different mode turns WEB off; enable it again after reviewing the new setup. Private HTTPS supports viewing away from home through Tailscale. Public internet exposure and Funnel are outside the supported setup.
 
@@ -119,6 +120,100 @@ Infomarchy owns a foreground Serve mapping on **8788**, forwarding to its backen
 
 If setup reports local permissions, make sure the user running Omarchy is allowed to manage Serve; the Omarchy installer configures operator access. If it reports a missing/stopped/signed-out client or an unsupported CLI, correct that condition and retry. For more detail, **SETUP GUIDE** opens [Tailscale Serve documentation](https://tailscale.com/docs/features/tailscale-serve). Failed HTTPS setup never falls back to LAN HTTP or public access.
 
+### Manual HTTPS: bring an existing certificate
+
+This expert option uses certificate files you maintain. Starting without a CA? Follow [Private LAN HTTPS without DNS or Tailscale](#private-lan-https-without-dns-or-tailscale) below. Infomarchy binds the HTTPS listener and checks the certificate; you manage issuance, installation, DNS, client trust and renewal. The plugin does not create a CA, obtain certificates, change trust stores, or change DNS/firewall rules.
+
+1. **Choose the hostname or private IPv4 address and network.** To avoid DNS, enter the desktop’s private IPv4 address as both **HOSTNAME / IPv4** and **BIND IPv4**, and use a certificate with that exact IP SAN. Otherwise, arrange for that hostname to resolve to your desktop's private LAN/VPN IPv4 address on each viewing device. Use that specific interface address for **BIND IPv4**. The safe default is `127.0.0.1`, which permits local viewing only. Wildcard and public bind addresses are refused. `infomarchy.localhost` with loopback is useful for local testing without LAN DNS changes. Ports must be 1024–65535; the default is **8789**.
+2. **Prepare the certificate files.** Use a PEM certificate chain with the server/leaf certificate first, followed by its intermediates, and an unencrypted PEM private key that matches the leaf. A hostname must be covered by DNS subject alternative names; a literal address must match an IP subject alternative name (a DNS SAN containing IP text does not count). The files and their parent directories must be readable by the desktop user and protected against other users writing them. Use actual absolute paths without symlinks. The key must be owned by the desktop user or root and have mode **0600** or **0400**; Infomarchy does not elevate privileges to read it. An existing certificate's signed hostname coverage cannot be changed by entering another hostname here.
+3. **Obtain its SHA-256 fingerprint.** For example:
+
+   ```bash
+   openssl x509 -in /absolute/path/to/server-chain.pem -noout -fingerprint -sha256
+   ```
+
+   Enter the hex fingerprint after the `=` sign, with or without colons. This identifies the exact leaf certificate, not its public key alone. Confirm it is the certificate you intend to serve.
+4. **Configure the desk.** Select **MANUAL HTTPS**, fill in hostname, bind address, port, certificate-chain path, private-key path and fingerprint, then **SAVE CERTIFICATE SETTINGS**. Saving changes turns Manual HTTPS off. After saving finishes, **CHECK CERTIFICATE** verifies file safety, the fingerprint, validity dates, SAN hostname/IP identity, matching key and supplied chain signatures. It does not change files, install trust, or start a listener. Click **CONFIGURE & ENABLE**, wait for **WEB ON**, then use **COPY URL** or **SHOW QR**. Startup checks the files again; a failure offers **RETRY SETUP** and never falls back to HTTP.
+5. **Set up viewing clients.** A certificate from a CA already trusted by that browser requires no additional CA installation. For a private CA or self-signed certificate, configure trust deliberately on each client. The fingerprint entered on the desk does not install browser trust. Keep the existing source allow list and any firewall rules limited to your trusted networks; VPN ranges outside loopback/RFC1918 need an explicit allowed CIDR. Tokens and desktop-owned privacy work exactly as in the other modes.
+
+If the desktop’s IP changes, update the address and use a certificate covering the new IP, including its new fingerprint. Reserve the LAN address in DHCP for repeat use. `.localhost` names always refer to the viewing device itself, so they cannot be used to reach the desktop from a phone.
+
+6. **Handle renewal.** Install the renewed certificate/key and update the leaf fingerprint, then save and re-enable HTTPS. Certificate files are loaded at startup rather than automatically replaced in a running listener. Expiry stops disclosure and the listener shuts down within 30 seconds. Client trust and certificate-chain validation are still the client's responsibility.
+
+For background, see [Bun's TLS support](https://bun.sh/guides/http/tls) and [Mozilla's explanation of browser certificate trust](https://support.mozilla.org/en-US/kb/secure-website-certificate).
+
+### Private LAN HTTPS without DNS or Tailscale
+
+You can create your own CA and a certificate for the desktop's private IPv4 address using OpenSSL, then supply those files to Manual HTTPS. This is an operator-run setup; Infomarchy does not issue or renew certificates. The desktop and phone must be on a reachable trusted LAN. Reserve the desktop's address in DHCP if possible. These commands require Bash and OpenSSL; the optional download helper requires Python 3.
+
+**Create the files.** Replace `192.168.1.50` with the desktop's actual private IPv4 address (`ip -4 addr` shows interface addresses). Run this block once in a terminal. It creates a new directory and refuses to overwrite an existing setup. The CA lasts one year; the server certificate lasts 90 days. Both private keys remain protected by filesystem permissions; keep the CA key private and securely backed up, since it can sign certificates trusted by your clients.
+
+```bash
+(
+set -eu
+umask 077
+infomarchy_ip=192.168.1.50
+infomarchy_pki="${XDG_STATE_HOME:-$HOME/.local/state}/infomarchy/pki/private-lan"
+mkdir -p "$(dirname "$infomarchy_pki")"
+mkdir -m 700 "$infomarchy_pki"
+cd "$infomarchy_pki"
+
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+  -keyout ca.key -out ca.crt -days 365 -subj '/CN=Infomarchy private LAN CA' \
+  -addext 'basicConstraints=critical,CA:TRUE,pathlen:0' \
+  -addext 'keyUsage=critical,keyCertSign,cRLSign' \
+  -addext "nameConstraints=critical,permitted;IP:$infomarchy_ip/255.255.255.255,permitted;DNS:infomarchy.invalid"
+openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+  -keyout server.key -out server.csr -subj '/CN=Infomarchy LAN dashboard'
+cat > server.ext <<EOF
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature
+extendedKeyUsage=serverAuth
+subjectAltName=IP:$infomarchy_ip
+EOF
+openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+  -out server.pem -days 90 -extfile server.ext
+cat server.pem ca.crt > server-chain.pem
+openssl verify -CAfile ca.crt -verify_ip "$infomarchy_ip" server.pem
+openssl x509 -in server.pem -noout -fingerprint -sha256
+pwd
+)
+```
+
+The CA's IP constraint permits the chosen address; its DNS constraint permits only `infomarchy.invalid` and subdomains. The leaf contains only the chosen IP SAN. See [OpenSSL's extension syntax](https://docs.openssl.org/master/man5/x509v3_config/). Keep this CA dedicated to this setup. Do not share `ca.key` or `server.key`, or serve the certificate directory over HTTP.
+
+**Configure Manual HTTPS.** Use your desktop IP for both **HOSTNAME / IPv4** and **BIND IPv4**, port **8789**, and the absolute paths to `server-chain.pem` and `server.key` in the directory printed above. Enter the **server certificate** fingerprint printed by OpenSSL. Save, check the certificate, then enable WEB.
+
+**Allow incoming connections.** With UFW, the following example permits only one phone to reach the listener. Substitute your Wi-Fi interface, phone IP and desktop IP:
+
+```bash
+sudo ufw allow in on wlo1 proto tcp from 192.168.1.60 to 192.168.1.50 port 8789 comment infomarchy-manual
+```
+
+Use equivalent scoped rules for other firewalls. A successful request from the desktop itself does not test incoming firewall access. Do not configure router port forwarding. Guest Wi-Fi/client isolation may still prevent access.
+
+**Install the public CA on the phone.** Transfer only `ca.crt` by USB or another trusted transfer method. On Android, open Settings and find **Encryption & credentials → Install a certificate → CA certificate**, then select the file. Menu names vary by device; see [Google's certificate instructions](https://support.google.com/pixelphone/answer/2844832). Install it as a CA certificate, not a Wi-Fi or client certificate. Other viewing devices need their own browser/OS trust setup. The dashboard fingerprint does not install client trust.
+
+For a temporary LAN download instead of USB, copy only the public CA into a new, separate directory and serve that directory in a foreground terminal:
+
+```bash
+infomarchy_public=$(mktemp -d)
+cp "${XDG_STATE_HOME:-$HOME/.local/state}/infomarchy/pki/private-lan/ca.crt" "$infomarchy_public/infomarchy-ca.crt"
+python3 -m http.server 8790 --bind 192.168.1.50 --directory "$infomarchy_public"
+```
+
+Substitute the desktop IP. Temporarily allow TCP **8790** with the same phone/interface/address restriction as 8789, then download `http://192.168.1.50:8790/infomarchy-ca.crt` on the phone. Before trusting a CA transferred over HTTP, compare its SHA-256 fingerprint in the phone's certificate details with `openssl x509 -in /absolute/path/to/ca.crt -noout -fingerprint -sha256` on the desktop; use USB if the phone cannot show it. This CA fingerprint is separate from the server fingerprint entered in Infomarchy.
+
+After transferring, press **Ctrl+C**, remove the temporary directory with `rm -r -- "$infomarchy_public"`, and remove the download firewall rule:
+
+```bash
+sudo ufw delete allow in on wlo1 proto tcp from 192.168.1.60 to 192.168.1.50 port 8790
+```
+
+**Open the dashboard.** Once the CA is installed and WEB is on, use **SHOW QR** on the desktop and open the result in Chrome on Android. The CA download address is not the dashboard address. A long timeout usually calls for checking the address, listener, firewall and Wi-Fi isolation; a certificate error calls for checking CA trust, IP SAN, dates and the device clock. Do not bypass certificate errors.
+
+**Maintain or retire the setup.** Renew the leaf before 90 days, signing a new CSR with the protected CA and the same IP SAN, then update the server fingerprint and restart Manual HTTPS. Do not rerun the initial block over existing files. An IP change also requires a new CA with the matching constraint in this recipe, a new leaf and client CA installation. Replace the CA before its expiry. When retiring this setup or switching back to Tailscale, stop the download helper, remove its firewall rule and the matching 8789 rule, and remove this CA from each client's user trust store. Switching modes turns WEB off; enable it again in the selected mode. When returning to Tailscale, reconnect both devices to your tailnet and use that mode’s **COPY URL** or **SHOW QR**; the Manual HTTPS IP address is a different endpoint. Viewer tokens survive the switch.
+
 ### Open the page and manage viewers
 
 Once settings shows **WEB ON**, select a token in **TOKENS**, then use **COPY URL** to open it in a browser or **SHOW QR** to scan it on your phone. The Infomarchy QR opens the authenticated dashboard; it does not install Tailscale or authorize a device. This is separate from Tailscale's enrollment QR. Hide the QR when finished; closing settings or changing tokens clears it too.
@@ -133,7 +228,7 @@ omarchy-shell infomarchy copyWebUrl
 
 To stop sharing, turn **WEB ON** off. Tokens survive stopping, restarting the shell, and switching modes. After changing modes, copy a fresh address because the hostname/protocol changes even though the token remains valid.
 
-Settings persist in `$XDG_STATE_HOME/infomarchy/` (normally `~/.local/state/infomarchy/`): `dashboard.json` holds desktop privacy and web layout/access preferences, `web.json` holds private viewer credentials with mode 0600, and `web-status.json` holds noncredential runtime status. Do not publish credential files or hand-edit them to recover a failed setup; use the reported guidance and **RETRY SETUP**.
+Settings persist in `$XDG_STATE_HOME/infomarchy/` (normally `~/.local/state/infomarchy/`): `dashboard.json` holds desktop privacy, web layout/access preferences and Manual HTTPS file references/fingerprint, `web.json` holds private viewer credentials with mode 0600, and `web-status.json` holds noncredential runtime status. Preference changes and viewer-token updates are serialized so overlapping edits preserve desktop privacy and token revocation. Empty `dashboard.lock` and `web-config.lock` files also remain in the state directory. A failed desktop settings save displays an error and reloads the saved settings; retry the change once the problem is resolved. Do not publish credential files or hand-edit them to recover a failed setup; use the reported guidance and **RETRY SETUP**.
 
 ## Remove
 
@@ -142,7 +237,7 @@ omarchy plugin remove techluddite.luddite-infomarchy --yes
 omarchy restart shell
 ```
 
-State under `$XDG_STATE_HOME/infomarchy/` (`dashboard.json`, `github-activity.json`, `grok-billing.json`, `grok-limits.json`, `web.json`, `web-status.json`, `web-snapshot.json`, collector baselines) is left in place. A running Web Mode listener and its owned foreground Tailscale Serve mapping stop with the plugin. Tailscale, its installation/login, unrelated Serve mappings, and manually configured firewall rules remain. Toggle WEB off first if you want dashboard access stopped before removal.
+State under `$XDG_STATE_HOME/infomarchy/` (`dashboard.json`, `github-activity.json`, `grok-billing.json`, `grok-limits.json`, `web.json`, `web-status.json`, `web-snapshot.json`, collector baselines) is left in place. A running Web Mode listener and its owned foreground Tailscale Serve mapping stop with the plugin. Tailscale, its installation/login, unrelated Serve mappings, manually configured firewall rules, your Manual HTTPS certificate/key files and any client CA trust you installed remain. Toggle WEB off first if you want dashboard access stopped before removal.
 
 ## Contributors
 

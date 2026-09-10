@@ -5,6 +5,7 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 ## [Unreleased]
 
 ### Security
+- **Concurrent settings changes preserve privacy and revocation.** Desktop and browser preferences merge field/per-key patches under one lock. Token, CIDR, and listener-state mutations reread credentials under a separate shared lock, preventing stale updates from restoring revoked tokens. QML queues rapid edits through helper startup and shows failed saves before reloading persisted settings.
 - **Web privacy is enforced server-side.** HTML and JSON follow desktop privacy, default on for invalid settings, and omit private values before transmission. Browser privacy mutation and hidden full-value spans are removed. JSON projects only web-facing fields; credential reads and revocation fail closed. LAN no longer default-allows CGNAT.
 - USAGE shows local Grok and OpenCode token totals from session files (`updates.jsonl`, `opencode.db`) when Omarchy has no collector for them. Rows are labelled `local` with no 5-hour/weekly meters. Omarchy cache records are never overwritten, and nothing is written into `omarchy/agents/usage`.
 - Observational git in an agent working tree pins `core.fsmonitor=false`, `core.hooksPath=/dev/null`, empty `diff.external` and `credential.helper`, and ignores global/system git config. `git diff` also passes `--no-ext-diff --no-textconv`.
@@ -17,6 +18,8 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 - Default-route interface names are shape-checked before sysfs reads. `0.0.0.0` is no longer treated as loopback Ollama.
 
 ### Added
+- **Private LAN HTTPS setup guide.** README includes operator-run OpenSSL CA/IP certificate creation, Android trust, scoped firewall rules, renewal and cleanup for users without DNS or Tailscale. Android Manual HTTPS and return to Tailscale were verified by the user.
+- **Manual HTTPS with an existing certificate.** Third access mode with hostname, private/loopback bind, port, certificate/key paths and SHA-256 leaf fingerprint. Startup validates file safety, SAN/key/fingerprint/validity and supplied chain signatures. Read-only certificate checks, saved setup, retry, exact HTTPS Host/Origin and existing viewer/privacy boundaries; operators retain DNS, client trust and renewal ownership.
 - **Private HTTPS through Tailscale Serve.** Guided prerequisites and an owned foreground mapping on 8788, with a loopback-only backend, exact Host/Origin checks, viewer tokens, conflict refusal, and crash cleanup. LAN HTTP remains a separate mode. README now separates the Web Mode overview from detailed HTTP/HTTPS setup and viewer management.
 - **Hermes sessions in Recent Tasks.** Hermes/TARS stores history in SQLite (`$HERMES_HOME/state.db` or `~/.hermes/state.db`), not a prompt jsonl. The collector reads each user prompt (280-character `safePrompt` excerpt), skips `cron`/archived/hidden sessions, colours Hermes on the activity heatmap, and resumes with `hermes --resume <id>`. Pi stays. A Hermes card click raises the Hermes app (descendant window, class-gated) and takes the live session id from the lease file.
 - **Per-model breakdown for every provider.** Built from `todayTokensByModel`, `modelUsage`, and `modelSessions`. Weighted by today's tokens, then lifetime share, then sessions. No model names in the collector or the view.

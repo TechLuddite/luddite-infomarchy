@@ -646,7 +646,7 @@ describe("web mode settings", () => {
     expect(overlay).toContain("if (infoView.settingsOpen) infoView.settingsOpen = false");
     expect(settings).toContain("property var webSections");
     expect(settings).toContain("function toggleWebSection(id)");
-    expect(settings).toContain("webNarrowOrder: normalizedWebNarrowOrder(webNarrowOrder)");
+    expect(settings).toContain("webNarrowOrder = normalizedWebNarrowOrder(parsed ? parsed.webNarrowOrder : null)");
     expect(body).toContain("textFormat: Text.PlainText");
     expect(body).toContain("maximumLength: 32");
     expect(body).toContain("maximumLength: 18");
