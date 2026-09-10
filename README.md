@@ -63,6 +63,15 @@ omarchy restart shell
 
 State under `$XDG_STATE_HOME/infomarchy/` (`dashboard.json`, `github-activity.json`, `grok-billing.json`, `grok-limits.json`, `web.json`, `web-snapshot.json`, collector baselines) is left in place. A running Web Mode listener is stopped with the plugin; toggle WEB off first if you want the listener gone before remove.
 
+## Contributors
+
+With thanks to everyone who helped build Infomarchy and this fork:
+
+- [Fred Nix](https://github.com/nixfred) — creator of the original Infomarchy.
+- Claude — AI development assistance.
+- Grok — AI development assistance.
+- [TechLuddite](https://github.com/TechLuddite) — maintainer and contributor to this fork.
+
 ## License
 
 [MIT](LICENSE). Copyright (c) 2026 Fred Nix.
