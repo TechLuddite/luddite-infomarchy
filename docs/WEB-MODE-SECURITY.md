@@ -24,6 +24,8 @@ Privacy off permits connected viewers to receive the allowed full values. Change
 
 ### LAN HTTP
 
+An unknown explicit persisted mode keeps WEB off until a supported mode is chosen. Only an absent legacy mode defaults to LAN. Advertised LAN addresses follow default-route metrics, excluding non-default virtual bridges; source authorization is still checked separately.
+
 The backend binds IPv4 `0.0.0.0`, default port 8787. Source defaults are loopback and RFC1918, with explicit extra CIDRs available. `100.64.0.0/10` is not default-allowed and never proves tailnet membership. CIDRs are reachability filters. The user manages firewall rules; loading settings or enabling WEB does not change them. Data and bearer credentials travel unencrypted.
 
 ### Private HTTPS

@@ -83,6 +83,7 @@ ColumnLayout {
   function hideQr() { qrRevealed = false; if (qrProc) qrProc.running = false; qrRows = []; qrSize = 0 }
   function refreshQr() {
     if (!settings.webEnabled || !settings.webReady) return
+    statusText = ""
     qrRevealed = true
     qrProc.running = false
     qrProc.running = true
@@ -114,6 +115,8 @@ ColumnLayout {
     visible: !!root.settings.settingsError; text: root.settings.settingsError
     color: root.red; font.family: root.mono; font.pixelSize: Style.font.caption
   }
+
+  Text { textFormat: Text.PlainText; visible: !!root.statusText; text: root.statusText; Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.yellow; font.family: root.mono; font.pixelSize: Style.font.caption }
 
   Component.onCompleted: { refreshMeta(); checkTailscale(); resetManualDraft() }
   onVisibleChanged: if (!visible) hideQr()
@@ -183,20 +186,17 @@ ColumnLayout {
   Process {
     id: urlProc
     property string pendingId: ""
-    command: ["bun", root.webServerPath, "url", pendingId]
+    command: ["bun", root.webServerPath, "copy-url", pendingId]
     stdout: SplitParser {
       splitMarker: "\n"
       onRead: function(line) {
-        var raw = String(line || "")
-        if (raw.length > 512) return
-        try {
-          var parsed = JSON.parse(raw)
-          if (parsed && parsed.ok === true && typeof parsed.url === "string" && /^https?:\/\//.test(parsed.url))
-            root.copyValue(parsed.url.slice(0, 512))
-        } catch (e) {}
+        if (line.length > 512) return
+        try { var parsed = JSON.parse(line); root.statusText = root.plain(parsed.message || "Listener is not ready. Check WEB status.", 200) }
+        catch (e) { root.statusText = "Could not copy the viewer link." }
       }
     }
   }
+
   Process {
     id: qrProc
     command: ["bun", root.webServerPath, "qr", root.selectedTokenId]
@@ -207,7 +207,7 @@ ColumnLayout {
         if (raw.length > 8192 || !root.qrRevealed || !root.settings.webEnabled) return
         try {
           var parsed = JSON.parse(raw)
-          if (!parsed || parsed.ok !== true || !Array.isArray(parsed.rows)) { root.qrRows = []; root.qrSize = 0; return }
+          if (!parsed || parsed.ok !== true || !Array.isArray(parsed.rows)) { root.qrRows = []; root.qrSize = 0; root.statusText = "Cannot create QR. Install qrencode and check WEB status."; return }
           root.qrRows = parsed.rows.slice(0, 80)
           root.qrSize = root.qrRows.length
         } catch (e) { root.qrRows = []; root.qrSize = 0 }
@@ -395,7 +395,7 @@ ColumnLayout {
   }
   Text { textFormat: Text.PlainText; visible: !root.settings.webEnabled; wrapMode: Text.Wrap; Layout.fillWidth: true; text: "Turning Web Mode off stops the listener and keeps tokens. Revoke a token to rotate it."; color: root.faint; font.family: root.mono; font.pixelSize: Style.font.caption }
 
-  Text { textFormat: Text.PlainText; visible: root.settings.webEnabled && !root.settings.webReady; Layout.fillWidth: true; wrapMode: Text.Wrap; text: root.settings.webStatusText || "Starting listener…"; color: root.yellow; font.family: root.mono; font.pixelSize: Style.font.caption }
+  Text { textFormat: Text.PlainText; visible: root.settings.webModeInvalid || (root.settings.webEnabled && !root.settings.webReady); Layout.fillWidth: true; wrapMode: Text.Wrap; text: root.settings.webStatusText || "Starting listener…"; color: root.yellow; font.family: root.mono; font.pixelSize: Style.font.caption }
   Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; text: "Privacy changes apply on the next successful five-second refresh. Previously received or saved data cannot be retracted."; color: root.faint; font.family: root.mono; font.pixelSize: Style.font.caption }
   Column {
     visible: root.qrSize > 0 && root.settings.webEnabled
