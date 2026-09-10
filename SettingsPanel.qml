@@ -18,7 +18,7 @@ Panel {
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
-  readonly property string webLabel: dashboardSettings.webEnabled ? "WEB ON" : "WEB"
+  readonly property string webLabel: dashboardSettings.webReady ? "WEB ON" : (dashboardSettings.webEnabled ? (dashboardSettings.webStarting ? "WEB …" : "WEB FAILED") : "WEB")
 
   function injectPanel() {}
 
@@ -47,8 +47,8 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(420))
-    contentHeight: panel.fittedContentHeight(body.implicitHeight + Style.space(24), Style.space(640))
+    contentWidth: panel.fittedContentWidth(Style.space(520))
+    contentHeight: panel.fittedContentHeight(body.implicitHeight + Style.space(24), Style.space(760))
 
     PanelKeyCatcher {
       id: keyCatcher

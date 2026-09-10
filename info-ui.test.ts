@@ -457,7 +457,7 @@ describe("hard refresh", () => {
 
 describe("stream privacy mode", () => {
   test("persists a toggle that masks identity and leaves OSS project names", () => {
-    expect(settings).toContain("property bool privacyMode: false");
+    expect(settings).toContain("property bool privacyMode: true");
     expect(settings).toContain("function togglePrivacyMode()");
     expect(settings).toContain("privacyMode: privacyMode");
     expect(settings).toContain("readonly property int privacyUnlockNeeded: 3");
@@ -465,11 +465,11 @@ describe("stream privacy mode", () => {
     expect(overlay).toContain("if (!event.isAutoRepeat) dashboardSettings.togglePrivacyMode()");
     expect(service).toContain("function getPrivacy(): string");
     expect(service).toContain("function toggleWeb(): void { dashboardSettings.toggleWebEnabled() }");
-    expect(view).toContain('text: view.settings.webEnabled ? (view.settings.webUrl ? "WEB ON" : "WEB …") : "WEB"');
+    expect(view).toContain('text: view.settings.webEnabled ? (view.settings.webReady ? "WEB ON" : (view.settings.webStarting ? "WEB …" : "WEB FAILED")) : "WEB"');
     expect(view).toContain('text: "SETTINGS"');
     expect(view).not.toContain("PHONE");
-    expect(settings).toContain('command: ["bun", root.webServerPath, "url"]');
-    expect(settings).toContain("function refreshWebUrl()");
+    expect(settings).toContain('command: ["bun", root.webServerPath, "status"]');
+    expect(settings).toContain("function refreshWebStatus()");
     expect(settings).toContain("function webSectionEnabled(id)");
     expect(view).toContain("SettingsBody");
     expect(view).not.toContain("visible: view.keyboardAvailable && view.settings.webEnabled && !!view.settings.webUrl");

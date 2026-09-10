@@ -16,7 +16,7 @@ The wallpaper desk, the collector, and the design are theirs. Use [the original]
 
 **Git and GitHub CI.** Observational git in an agent working tree pins `core.fsmonitor=false`, `core.hooksPath=/dev/null`, empty `diff.external` and `credential.helper`, and ignores global/system git config. `git diff` also passes `--no-ext-diff --no-textconv`. `gh run list` uses `--repo owner/name` after parsing `origin` as github.com. Non-github remotes are skipped. The agent's cwd is not the `gh` process cwd.
 
-**Stream privacy.** SUPER+SHIFT+I (or `omarchy-shell infomarchy togglePrivacy`) hides WAN, LAN, Wi-Fi SSID, `user@host`, GitHub login, `/home/<user>` mounts, and window previews. One press turns it on. Three presses within two seconds turn it off (the chip shows 1/3, then 2/3). Overlay ignores key-repeat. `omarchy-shell infomarchy setPrivacy false` still clears it in one shot. Recent-task prompts keep the first four words and mask the rest, including the inspect drawer. COPY EXCERPT still copies the full text. OSS project names stay. Web Mode PRIVACY is a separate CSS toggle and stays one click.
+**Stream privacy.** SUPER+SHIFT+I (or `omarchy-shell infomarchy togglePrivacy`) hides WAN, LAN, Wi-Fi SSID, `user@host`, GitHub login, `/home/<user>` mounts, and window previews. One press turns it on. Three presses within two seconds turn it off (the chip shows 1/3, then 2/3). Overlay ignores key-repeat. `omarchy-shell infomarchy setPrivacy false` still clears it in one shot. Recent-task prompts keep the first four words and mask the rest, including the inspect drawer. COPY EXCERPT still copies the full text. OSS project names stay. Web Mode follows this persisted desktop setting; its privacy status cannot be changed in the browser. Missing or invalid settings default to privacy on.
 
 **Pi.** Live sessions and recent prompts come from the Pi agent (`~/.pi/agent/sessions`). The default recent-task window keeps each provider's newest prompts, including OpenCode.
 
@@ -28,7 +28,7 @@ The wallpaper desk, the collector, and the design are theirs. Use [the original]
 
 **MEDIA CONTROLS.** Last right-column card. Live MPRIS (`Quickshell.Services.Mpris`): title, artist, album, player identity, PREV / PLAY or PAUSE / NEXT. Prefers a playing player over `playerctld`. No album art fetch. Stream privacy leaves those fields in the clear. Not on Web Mode. Hide or reorder it from the module strip like the other right-column cards.
 
-**Web Mode.** Tap **WEB** on the strip, or use **SETTINGS** / the Infomarchy bar widget. Overlay **COPY URL** (or `omarchy-shell infomarchy getWebUrl`) gives the LAN token URL. Never print that URL in logs, commits, or chat. The page matches the SUPER+D desk: two columns at desktop width, Omarchy theme colors from the live `colors.toml` (named `green`/`yellow`/`red` plus `colorN`), opaque theme fill, wallpaper as an `img` at 0.32 (`cover`, center, `bg?v=<mtime>-<size>` so a theme swap does not keep the previous file), cards at 0.62. Same stack as Overlay.qml. No backdrop blur. A theme change lands on the next 5s swap, or F5. RECENT TASKS shows age, provider, and folder (last path segment) in one aligned grid. `-` / `%` / `+` zoom the page (kept in the tab). Strip chips show and hide sections. On a narrow viewport the cards stack and each card has UP/DOWN. Those layout choices POST to `dashboard.json`. USAGE shows the TOKENS · 7 days graph only. The desk still has the $ VALUE toggle. Per-model share and session counts use the same meters as the desk. A provider with no token data does not show `0 tok`. PRIVACY is on by default and hides WAN, LAN, SSID, `user@host`, home mounts, and recent-task prompts after the first four words, same as the desk. Those fields remain in the HTML source when PRIVACY is on. Session topics stay. GitHub login is never shown. MEDIA is never on the page. Source IPs must be loopback, RFC1918, or Tailscale CGNAT (`100.64.0.0/10`). Extra CIDRs from SETTINGS or `omarchy-shell infomarchy setWebCidrs 10.x.x.x/24`. Tokens live in `$XDG_STATE_HOME/infomarchy/web.json` (0600), not in argv. Turning WEB off stops the listener and keeps tokens. Revoke a token to rotate it. Incoming TCP 8787 must be allowed on the LAN firewall (UFW defaults to deny). The git checkout and the live plugin under `~/.config/omarchy/plugins/techluddite.luddite-infomarchy` are separate trees. Copy changed files into the live plugin, then `omarchy restart shell`, if the desk is what you run.
+**Web Mode.** A live browser version of the desk for your phone or another computer, with LAN HTTP or guided private HTTPS through Tailscale. See [Web Mode](#web-mode) for behavior and privacy, and [Set up Web Mode](#set-up-web-mode) for both setup paths.
 
 **Grok weekly meter.** The collector reads the same billing route Grok `/usage` uses (`GET https://cli-chat-proxy.grok.com/v1/billing?format=credits` with the local CLI login), at most every 60 seconds, and caches it in `$XDG_STATE_HOME/infomarchy/grok-billing.json`. Wallpaper and overlay share that file and serialize requests with `flock`. Failed attempts also back off for 60 seconds. The overlay no longer skips the fetch. If that fetch is down it uses the latest `billing: fetched credits config` line in `~/.grok/logs/unified.jsonl`, then `$XDG_STATE_HOME/infomarchy/grok-limits.json`. Local session tokens still feed today/lifetime totals. No 5-hour Grok window is invented.
 
@@ -52,7 +52,88 @@ o.bind("SUPER + I", "Infomarchy: toggle wallpaper dashboard", "omarchy-shell inf
 o.bind("SUPER + SHIFT + I", "Infomarchy: stream privacy", "omarchy-shell infomarchy togglePrivacy")
 ```
 
-**SUPER+SHIFT+I** hides WAN, LAN, Wi-Fi SSID, `user@host`, GitHub login, `/home/<user>` mounts, and window previews. One press turns it on. Three presses within two seconds turn it off (the chip shows 1/3, then 2/3). Overlay ignores key-repeat so holding the chord cannot unmask. `omarchy-shell infomarchy setPrivacy false` still clears it in one shot. Recent-task prompts keep the first four words and mask the rest, including the inspect drawer. COPY EXCERPT still copies the full text. OSS project names, repos, and session topics stay. It persists in `dashboard.json`. The module strip shows **PRIVACY ON** in yellow while it is active. Web Mode PRIVACY is a separate CSS toggle and stays one click.
+**SUPER+SHIFT+I** hides WAN, LAN, Wi-Fi SSID, `user@host`, GitHub login, `/home/<user>` mounts, and window previews. One press turns it on. Three presses within two seconds turn it off (the chip shows 1/3, then 2/3). Overlay ignores key-repeat so holding the chord cannot unmask. `omarchy-shell infomarchy setPrivacy false` still clears it in one shot. Recent-task prompts keep the first four words and mask the rest, including the inspect drawer. COPY EXCERPT still copies the full text. OSS project names, repos, and session topics stay. It persists in `dashboard.json`. The module strip shows **PRIVACY ON** in yellow while it is active. Web Mode follows this persisted desktop setting; its privacy status cannot be changed in the browser. Missing or invalid settings default to privacy on.
+
+## Web Mode
+
+Web Mode makes the Infomarchy desk available in a browser on your phone, tablet, or another computer. It runs with the desktop plugin, so the computer and Omarchy shell must stay running. Open **SETTINGS** from the desk's module strip or the Infomarchy bar widget to manage access.
+
+The page follows the live Omarchy theme and wallpaper. Wide screens use two columns; narrow screens stack cards and offer **UP/DOWN** ordering. Module chips show or hide sections, and zoom is remembered for the current browser tab. Web section visibility and narrow-screen order are independent of the desktop layout but shared by web viewers. A successful refresh updates the page and theme every five seconds while preserving scroll position.
+
+Web Mode displays sessions, recent tasks, activity, usage, local AI status, machine telemetry, and containers. USAGE includes per-model meters and **TOKENS · 7 days**, with unavailable token counts omitted. MEDIA CONTROLS and the $ VALUE chart are absent. Browser controls change presentation; desktop actions such as focusing sessions, loading models, and starting containers remain on the desktop.
+
+### Access and viewer credentials
+
+| Mode | Reachability | Transport | Default port |
+| --- | --- | --- | --- |
+| **LAN HTTP** | Trusted local IPv4 network; loopback/RFC1918 sources or explicitly allowed CIDRs | Dashboard data and viewer credentials travel unencrypted | 8787 |
+| **PRIVATE HTTPS** | Connected Tailscale devices permitted by your tailnet policy | HTTPS through Tailscale Serve to a loopback backend | 8788 |
+
+The modes are mutually exclusive. Selecting a different mode turns WEB off; enable it again after reviewing the new setup. Private HTTPS supports viewing away from home through Tailscale. Public internet exposure and Funnel are outside the supported setup.
+
+Each viewer link contains a bearer token: someone with the link and network access can use it. **COPY URL** and **SHOW QR** deliberately reveal the selected token's address only after the listener is ready. Routine startup and status checks do not print token links. Keep links and QR images out of public screenshots, logs, commits, and chat. Tokens are individually revocable; turning WEB off stops access but keeps them for the next start.
+
+### Privacy follows the desktop
+
+The browser shows **PRIVACY ON/OFF · controlled on desktop**. Use the desktop privacy chip or **SUPER+SHIFT+I** to change it: one press enables privacy; three presses within two seconds disable it. Missing, unreadable, or malformed settings default to privacy on.
+
+With privacy on, the server omits WAN/LAN addresses, Wi-Fi SSID, and user/host identity, shortens home mounts, and sends recent prompts only through their first four words plus the mask. Full values are absent from the HTML and JSON, including hidden elements. Session topics, project names, and prompts of four words or fewer stay visible. GitHub login and media remain excluded at either setting. The JSON view also excludes desktop action arguments, session working directories, previews, and extra provider fields.
+
+Turning desktop privacy off lets connected viewers receive the permitted full values. Changes apply to subsequent responses, normally at the next successful five-second refresh; previously received or saved data cannot be retracted, and a disconnected page can retain its old content. Privacy does not encrypt LAN HTTP traffic. Desktop source data and full-text **COPY EXCERPT** are preserved.
+
+## Set up Web Mode
+
+Install and enable Infomarchy first using [Install](#install). Open the desk with **SUPER+D**, then **SETTINGS**, or open settings from the Infomarchy bar widget. Choose the desktop privacy setting you want before sharing a viewer link.
+
+### LAN HTTP: on your trusted local network
+
+1. Connect the desktop and viewing device to a local network you control and trust. Guest Wi-Fi or client isolation can prevent devices from reaching one another.
+2. Select **LAN HTTP** in settings. Click **WEB OFF** to start the listener and wait for **WEB ON**.
+3. If your desktop firewall blocks incoming connections, allow TCP port **8787** from your actual trusted subnet. Infomarchy does not edit firewall rules. For example, if you use UFW and your subnet is `192.168.1.0/24`, run:
+
+   ```bash
+   sudo ufw allow from 192.168.1.0/24 to any port 8787 proto tcp
+   ```
+
+   Substitute your own subnet; do not use a broad internet-facing rule or router port forwarding. The firewall and Infomarchy's source allow list are separate checks. Loopback and RFC1918 private IPv4 sources are allowed by default. Add another CIDR in settings only when you intend to allow that network, then restart WEB. The Tailscale CGNAT range is not allowed by default, and an allowed source range is not proof of identity.
+4. Follow [Open the page and manage viewers](#open-the-page-and-manage-viewers). The address is HTTP, so a browser may label the connection insecure; this mode does not provide TLS.
+
+If the page cannot connect, confirm **WEB ON**, the current copied address, the desktop firewall, and Wi-Fi isolation. If access is denied, check the viewer's source network against the allow list and use a current, unrevoked viewer link.
+
+### Private HTTPS: through Tailscale
+
+1. **Install and connect Tailscale on the desktop.** On Omarchy versions that ship it, the built-in installer can be run with:
+
+   ```bash
+   omarchy-install-service-tailscale
+   ```
+
+   Follow its sign-in prompts. The installed Omarchy script starts the service, grants your local user Tailscale operator access, and adds a Tailscale admin-console web app and bar integration. If that installer is unavailable, use the [official Tailscale installation guide](https://tailscale.com/docs/install). Infomarchy detects Tailscale but does not install it or sign in for you.
+2. **Enable the tailnet prerequisites.** In the Tailscale admin console's **DNS** page, enable **MagicDNS**, then enable **HTTPS Certificates**. Review the certificate-name disclosure shown there: certificate hostnames appear in the public Certificate Transparency ledger. See [Tailscale's HTTPS setup](https://tailscale.com/docs/how-to/set-up-https-certificates). Infomarchy uses Serve to manage HTTPS; you do not need to create certificate files yourself.
+3. **Connect the viewing device.** Install the Tailscale app on your phone or other device, sign in to the intended tailnet, and connect it. The Tailscale web app's device-enrollment QR flow can help with phone setup. Complete any device approval and ensure tailnet policy permits this device to reach the desktop on TCP **8788**.
+4. **Configure Infomarchy.** Select **PRIVATE HTTPS**. **CHECK PREREQUISITES** inspects the installed CLI, connection, DNS name, and existing Serve configuration. Follow any message it displays, then click **CONFIGURE & ENABLE**. Wait for **STARTING…** to become **WEB ON**. The first real setup attempt may discover a missing certificate or permission prerequisite that the inspection could not confirm.
+5. **Recover directly if setup fails.** Read the message beside **WEB FAILED**, fix the reported prerequisite, and click **RETRY SETUP**. For example, if HTTPS certificates were disabled, enable them in the admin console and retry. **CHECK PREREQUISITES** only checks; it does not restart failed setup. There is no need to flip WEB off and on.
+6. **Open the page** using the selected viewer's **COPY URL** or **SHOW QR**, as described below. Keep Tailscale connected on both devices. Use the copied HTTPS hostname and port, including the viewer credential; a bare hostname or IP address is not the dashboard link.
+
+Infomarchy owns a foreground Serve mapping on **8788**, forwarding to its backend on **127.0.0.1:8787**. There is no need to open backend port 8787 on the LAN for this mode or manually create a background Serve mapping. If 8788 already belongs to another Serve or Funnel mapping, setup refuses to overwrite it. Resolve that specific conflict yourself; unrelated services are preserved. Turning WEB off, stopping the listener, or removing the plugin removes its owned mapping while leaving Tailscale and unrelated services running.
+
+If setup reports local permissions, make sure the user running Omarchy is allowed to manage Serve; the Omarchy installer configures operator access. If it reports a missing/stopped/signed-out client or an unsupported CLI, correct that condition and retry. For more detail, **SETUP GUIDE** opens [Tailscale Serve documentation](https://tailscale.com/docs/features/tailscale-serve). Failed HTTPS setup never falls back to LAN HTTP or public access.
+
+### Open the page and manage viewers
+
+Once settings shows **WEB ON**, select a token in **TOKENS**, then use **COPY URL** to open it in a browser or **SHOW QR** to scan it on your phone. The Infomarchy QR opens the authenticated dashboard; it does not install Tailscale or authorize a device. This is separate from Tailscale's enrollment QR. Hide the QR when finished; closing settings or changing tokens clears it too.
+
+For independent revocation, enter a descriptive label and click **ADD** for each viewer/device, then select that token before copying or showing its QR. Labels help you remember the intended viewer; the link itself is the credential and is not bound to that device. **REVOKE** invalidates that token for subsequent requests. Add a replacement before revoking the last token. Existing pages may retain already displayed data, but their next authenticated request will fail.
+
+You can also deliberately copy the default viewer's address from the desktop without printing it:
+
+```bash
+omarchy-shell infomarchy copyWebUrl
+```
+
+To stop sharing, turn **WEB ON** off. Tokens survive stopping, restarting the shell, and switching modes. After changing modes, copy a fresh address because the hostname/protocol changes even though the token remains valid.
+
+Settings persist in `$XDG_STATE_HOME/infomarchy/` (normally `~/.local/state/infomarchy/`): `dashboard.json` holds desktop privacy and web layout/access preferences, `web.json` holds private viewer credentials with mode 0600, and `web-status.json` holds noncredential runtime status. Do not publish credential files or hand-edit them to recover a failed setup; use the reported guidance and **RETRY SETUP**.
 
 ## Remove
 
@@ -61,7 +142,7 @@ omarchy plugin remove techluddite.luddite-infomarchy --yes
 omarchy restart shell
 ```
 
-State under `$XDG_STATE_HOME/infomarchy/` (`dashboard.json`, `github-activity.json`, `grok-billing.json`, `grok-limits.json`, `web.json`, `web-snapshot.json`, collector baselines) is left in place. A running Web Mode listener is stopped with the plugin; toggle WEB off first if you want the listener gone before remove.
+State under `$XDG_STATE_HOME/infomarchy/` (`dashboard.json`, `github-activity.json`, `grok-billing.json`, `grok-limits.json`, `web.json`, `web-status.json`, `web-snapshot.json`, collector baselines) is left in place. A running Web Mode listener and its owned foreground Tailscale Serve mapping stop with the plugin. Tailscale, its installation/login, unrelated Serve mappings, and manually configured firewall rules remain. Toggle WEB off first if you want dashboard access stopped before removal.
 
 ## Contributors
 

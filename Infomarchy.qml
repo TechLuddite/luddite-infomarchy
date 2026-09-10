@@ -54,10 +54,19 @@ Scope {
   }
   InfoSettings { id: dashboardSettings }
   readonly property string webServerPath: Qt.resolvedUrl("web-server.ts").toString().replace(/^file:\/\//, "")
+  property bool webRetryPause: false
+  function retryWebSetup() {
+    if (!dashboardSettings.webEnabled || webServer.running || webRetryPause) return
+    dashboardSettings.webStarting = true
+    dashboardSettings.webStatusText = "Retrying setup…"
+    // Pulse the existing running binding, preserving WEB off and cleanup guards.
+    webRetryPause = true
+    Qt.callLater(function() { root.webRetryPause = false })
+  }
   Process {
     id: webServer
-    command: ["bun", root.webServerPath]
-    running: dashboardSettings.ready && dashboardSettings.webEnabled
+    command: ["bun", root.webServerPath, "serve", dashboardSettings.webAccessMode]
+    running: dashboardSettings.ready && dashboardSettings.webEnabled && !webDisable.running && !root.webRetryPause
     stdout: SplitParser {
       splitMarker: "\n"
       onRead: function(line) {
@@ -65,12 +74,22 @@ Scope {
         if (raw.length > 512) return
         try {
           var parsed = JSON.parse(raw)
-          if (parsed && parsed.ok === true && typeof parsed.url === "string" && parsed.url.indexOf("http://") === 0)
-            dashboardSettings.webUrl = parsed.url.slice(0, 256)
+          dashboardSettings.webReady = parsed && parsed.ready === true
+          dashboardSettings.webStarting = false
+          dashboardSettings.webStatusText = String(parsed.message || "").slice(0, 400)
         } catch (e) {}
       }
     }
-    onRunningChanged: if (!running) dashboardSettings.webUrl = ""
+    onRunningChanged: {
+      dashboardSettings.webStarting = running
+      if (!running) dashboardSettings.webReady = false
+    }
+    onExited: {
+      dashboardSettings.webStarting = false
+      dashboardSettings.webReady = false
+      if (dashboardSettings.webEnabled && !dashboardSettings.webStatusText)
+        dashboardSettings.webStatusText = "Web setup stopped. Choose RETRY SETUP to try again."
+    }
   }
   Process {
     id: webDisable
@@ -196,8 +215,9 @@ Scope {
     function setPrivacy(v: string): void { dashboardSettings.setPrivacyMode(["1", "true", "on", "yes"].indexOf(String(v).toLowerCase()) >= 0) }
     function togglePrivacy(): void { dashboardSettings.togglePrivacyMode() }
     function getPrivacy(): string { return dashboardSettings.privacyMode ? "true" : "false" }
+    function retryWeb(): void { root.retryWebSetup() }
     function toggleWeb(): void { dashboardSettings.toggleWebEnabled() }
-    function getWebUrl(): string { return dashboardSettings.webEnabled ? String(dashboardSettings.webUrl || "") : "" }
+    function copyWebUrl(): void { if (dashboardSettings.webEnabled) Quickshell.execDetached(["bun", root.webServerPath, "copy-url"]) }
     function setOllamaHost(v: string): void { dashboardSettings.setOllamaHost(v) }
     function getOllamaHost(): string { return String(dashboardSettings.ollamaHost || "") }
     function setWebCidrs(v: string): void {
