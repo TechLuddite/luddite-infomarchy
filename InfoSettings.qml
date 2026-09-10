@@ -3,7 +3,8 @@ import Quickshell
 import Quickshell.Io
 
 // Shared-on-disk dashboard preferences. Wallpaper and overlay each instantiate
-// this lightweight object; FileView propagation keeps both views in sync.
+// this lightweight object; field patches merge under a shared process lock.
+// FileView propagation keeps readers in sync; it never writes stale snapshots.
 Item {
   id: root
 
@@ -51,6 +52,7 @@ Item {
   property bool webStarting: false
   readonly property bool webFailed: webEnabled && !webReady && !webStarting
   property string webAccessMode: "lan"
+  property var manualHttps: ({})
   property string webStatusText: ""
   property var webSections: ({})
   property var webNarrowOrder: ["sessions", "changes", "needs", "projects", "activity", "github", "recent", "usage", "localAi", "machine", "containers"]
@@ -78,6 +80,7 @@ Item {
   }
 
   function applyConfig(raw) {
+    if (settingsWriting) return
     try {
       var parsed = JSON.parse(String(raw || "{}"))
       sections = parsed && parsed.sections && typeof parsed.sections === "object" ? parsed.sections : ({})
@@ -95,7 +98,8 @@ Item {
       dashboardVisible = parsed && typeof parsed.dashboardVisible === "boolean" ? parsed.dashboardVisible : true
       privacyMode = !(parsed && parsed.privacyMode === false)
       privacyUnlockCount = 0
-      webAccessMode = parsed && parsed.webAccessMode === "tailscale" ? "tailscale" : "lan"
+      webAccessMode = parsed && (parsed.webAccessMode === "tailscale" || parsed.webAccessMode === "manual") ? parsed.webAccessMode : "lan"
+      manualHttps = parsed && parsed.manualHttps && typeof parsed.manualHttps === "object" ? parsed.manualHttps : ({})
       webEnabled = !!(parsed && parsed.webEnabled === true)
       webSections = parsed && parsed.webSections && typeof parsed.webSections === "object" ? parsed.webSections : ({})
       if (webEnabled) Qt.callLater(refreshWebStatus)
@@ -120,6 +124,7 @@ Item {
       privacyMode = true
       privacyUnlockCount = 0
       webAccessMode = "lan"
+      manualHttps = ({})
       webEnabled = false
       webReady = false
       webSections = ({})
@@ -129,68 +134,53 @@ Item {
     }
     ready = true
   }
-  // Both maps are keyed by values that age out of the snapshot (pid, prompt
-  // timestamp) and nothing ever removed them, so dashboard.json grew forever.
-  readonly property int maxPins: 200
-  function prunedMuted(muted, now) {
-    var next = {}, stamp = Number(now || Date.now())
-    for (var key in muted) {
-      var until = Number(muted[key])
-      // A lapsed snooze is already visible again; only keep live snoozes and
-      // explicit dismissals (-1).
-      if (until < 0 || until > stamp) next[key] = until
+  property var pendingPatch: ({})
+  property string settingsError: ""
+  property bool settingsWriteInFlight: false
+  readonly property bool settingsWriting: settingsWriteInFlight || Object.keys(pendingPatch).length > 0
+  function persist(patch) {
+    var next = JSON.parse(JSON.stringify(pendingPatch))
+    for (var key in patch) {
+      if (patch[key] && typeof patch[key] === "object" && !Array.isArray(patch[key])) {
+        var merged = next[key] || {}
+        for (var entry in patch[key]) merged[entry] = patch[key][entry]
+        next[key] = merged
+      } else next[key] = patch[key]
     }
-    return next
+    pendingPatch = next
+    startSettingsWrite()
   }
-  function prunedPins(pins) {
-    var keys = []
-    for (var key in pins) if (pins[key] === true) keys.push(key)
-    if (keys.length <= maxPins) {
-      var same = {}
-      for (var k = 0; k < keys.length; k++) same[keys[k]] = true
-      return same
+  function persistEntry(field, key, value) {
+    var entries = {}, patch = {}
+    entries[key] = value
+    patch[field] = entries
+    persist(patch)
+  }
+  function startSettingsWrite() {
+    if (settingsWriteInFlight || !Object.keys(pendingPatch).length) return
+    settingsWriteInFlight = true
+    settingsWriter.frame = JSON.stringify(pendingPatch)
+    pendingPatch = ({})
+    settingsError = ""
+    settingsWriter.running = true
+  }
+  Process {
+    id: settingsWriter
+    property string frame: ""
+    command: ["/usr/bin/bun", Qt.resolvedUrl("dashboard-state.ts").toString().replace(/^file:\/\//, "")]
+    stdinEnabled: true
+    onStarted: { write(frame + "\n"); frame = "" }
+    onExited: function(code) {
+      root.settingsWriteInFlight = false
+      if (code !== 0) {
+        root.pendingPatch = ({})
+        root.settingsError = "Settings could not be saved. Try again."
+      }
+      Qt.callLater(function() {
+        if (Object.keys(root.pendingPatch).length) root.startSettingsWrite()
+        else configFile.reload()
+      })
     }
-    // Key is provider:session:ts — keep the most recent pins.
-    keys.sort(function(a, b) { return Number(b.split(":").pop()) - Number(a.split(":").pop()) })
-    var next = {}
-    for (var i = 0; i < maxPins; i++) next[keys[i]] = true
-    return next
-  }
-  // seenChanges is keyed by repository path and was never pruned; every repo
-  // an agent ever touched stayed forever. Keep a bounded, most-recent set.
-  readonly property int maxSeenChanges: 64
-  function prunedSeen(seen) {
-    var keys = []
-    for (var key in seen) if (typeof seen[key] === "string" && seen[key]) keys.push(key)
-    var next = {}
-    // Insertion order is preserved by JS engines for string keys; newest last.
-    for (var i = Math.max(0, keys.length - maxSeenChanges); i < keys.length; i++) next[keys[i]] = seen[keys[i]]
-    return next
-  }
-  function persist() {
-    configFile.setText(JSON.stringify({
-      version: 4,
-      sections: sections,
-      attentionMuted: prunedMuted(attentionMuted),
-      pinnedPrompts: prunedPins(pinnedPrompts),
-      seenChanges: prunedSeen(seenChanges),
-      notificationEvents: notificationEvents,
-      notificationProviders: notificationProviders,
-      notificationsEnabled: notificationsEnabled,
-      quietHoursEnabled: quietHoursEnabled,
-      quietStartHour: quietStartHour,
-      quietEndHour: quietEndHour,
-      selectedOllamaModel: selectedOllamaModel,
-      ollamaHost: ollamaHost,
-      dashboardVisible: dashboardVisible,
-      privacyMode: privacyMode,
-      webEnabled: webEnabled,
-      webAccessMode: webAccessMode,
-      webSections: webSections,
-      webNarrowOrder: normalizedWebNarrowOrder(webNarrowOrder),
-      rightOrder: normalizedRightOrder(rightOrder),
-      opsOrder: normalizedOpsOrder(opsOrder)
-    }, null, 2) + "\n")
   }
   function sectionEnabled(id) { return sections[id] !== false }
   function webSectionEnabled(id) {
@@ -205,7 +195,7 @@ Item {
     for (var key in webSections) next[key] = webSections[key]
     next[id] = !!enabled
     webSections = next
-    persist()
+    persistEntry("webSections", id, !!enabled)
     return true
   }
   function toggleWebSection(id) { return setWebSection(id, !webSectionEnabled(id)) }
@@ -221,7 +211,7 @@ Item {
     for (var key in sections) next[key] = sections[key]
     next[id] = !!enabled
     sections = next
-    persist()
+    persistEntry("sections", id, !!enabled)
   }
   function toggleSection(id) { setSection(id, !sectionEnabled(id)) }
   function attentionVisible(key, now) {
@@ -233,7 +223,7 @@ Item {
     for (var name in attentionMuted) next[name] = attentionMuted[name]
     next[key] = Number(until)
     attentionMuted = next
-    persist()
+    persistEntry("attentionMuted", key, Number(until))
   }
   function snoozeAttention(key) { muteAttention(key, Date.now() + 10 * 60 * 1000) }
   function dismissAttention(key) { muteAttention(key, -1) }
@@ -248,13 +238,13 @@ Item {
     for (var name in notificationProviders) next[name] = notificationProviders[name]
     next[key] = !!enabled
     notificationProviders = next
-    persist()
+    persistEntry("notificationProviders", key, !!enabled)
     return true
   }
   function toggleNotificationProvider(provider) { return setNotificationProvider(provider, !notificationProviderEnabled(provider)) }
-  function setNotificationsEnabled(enabled) { notificationsEnabled = !!enabled; persist() }
+  function setNotificationsEnabled(enabled) { notificationsEnabled = !!enabled; persist({ notificationsEnabled: notificationsEnabled }) }
   function toggleNotificationsEnabled() { setNotificationsEnabled(!notificationsEnabled) }
-  function setQuietHoursEnabled(enabled) { quietHoursEnabled = !!enabled; persist() }
+  function setQuietHoursEnabled(enabled) { quietHoursEnabled = !!enabled; persist({ quietHoursEnabled: quietHoursEnabled }) }
   function toggleQuietHoursEnabled() { setQuietHoursEnabled(!quietHoursEnabled) }
   function inQuietHours(stamp) {
     if (!quietHoursEnabled) return false
@@ -283,7 +273,7 @@ Item {
     for (var i = 0; i < Math.min(255, recent.length); i++) next[recent[i].key] = recent[i].at
     next[eventKey] = now
     notificationEvents = next
-    persist()
+    persistEntry("notificationEvents", eventKey, now)
     return true
   }
   function normalizeOllamaHost(raw) {
@@ -303,7 +293,7 @@ Item {
     if (trimmed && !next) return false
     if (ollamaHost === next) return true
     ollamaHost = next
-    persist()
+    persist({ ollamaHost: ollamaHost })
     return true
   }
   function setSelectedOllamaModel(model) {
@@ -311,7 +301,7 @@ Item {
     if (name && !/^[A-Za-z0-9][A-Za-z0-9._:\/-]{0,255}$/.test(name)) return false
     if (selectedOllamaModel === name) return true
     selectedOllamaModel = name
-    persist()
+    persist({ selectedOllamaModel: selectedOllamaModel })
     return true
   }
   function promptPinned(key) { return pinnedPrompts[key] === true }
@@ -320,23 +310,23 @@ Item {
     for (var name in pinnedPrompts) next[name] = pinnedPrompts[name]
     if (next[key] === true) delete next[key]; else next[key] = true
     pinnedPrompts = next
-    persist()
+    persistEntry("pinnedPrompts", key, next[key] === true ? true : null)
   }
   function changeSeen(key, fingerprint) { return !!fingerprint && seenChanges[key] === fingerprint }
   function markChangeSeen(key, fingerprint) {
     if (!key || !fingerprint || changeSeen(key, fingerprint)) return false
     var next = {}
     // Copy everything EXCEPT this key, then append it, so the just-updated
-    // repository is newest in insertion order and survives prunedSeen().
+    // repository is newest in insertion order and survives the bounded seen-change map.
     for (var name in seenChanges) if (name !== key) next[name] = seenChanges[name]
     next[key] = fingerprint
     seenChanges = next
-    persist()
+    persistEntry("seenChanges", key, fingerprint)
     return true
   }
   function setDashboardVisible(visible) {
     dashboardVisible = !!visible
-    persist()
+    persist({ dashboardVisible: dashboardVisible })
   }
   function toggleDashboardVisible() { setDashboardVisible(!dashboardVisible) }
   function privacyUnlockStep(on, count, needed) {
@@ -355,7 +345,7 @@ Item {
     privacyUnlockCount = 0
     privacyUnlockReset.stop()
     privacyMode = !!enabled
-    persist()
+    persist({ privacyMode: privacyMode })
   }
   function togglePrivacyMode() {
     var step = privacyUnlockStep(privacyMode, privacyUnlockCount, privacyUnlockNeeded)
@@ -368,13 +358,18 @@ Item {
     if (privacyUnlockCount > 0) privacyUnlockReset.restart()
     else privacyUnlockReset.stop()
   }
+  function setManualHttps(config) {
+    manualHttps = config
+    if (webAccessMode === "manual") { webEnabled = false; webReady = false; webStarting = false }
+    persist({ manualHttps: config })
+  }
   function setWebAccessMode(mode) {
-    if ((mode !== "lan" && mode !== "tailscale") || mode === webAccessMode) return
+    if ((mode !== "lan" && mode !== "tailscale" && mode !== "manual") || mode === webAccessMode) return
     webEnabled = false
     webReady = false
     webStarting = false
     webAccessMode = mode
-    persist()
+    persist({ webAccessMode: webAccessMode, webEnabled: false })
   }
   function setWebEnabled(enabled) {
     webStarting = !!enabled
@@ -382,7 +377,7 @@ Item {
     webEnabled = !!enabled
     if (!webEnabled) webReady = false
     else Qt.callLater(refreshWebStatus)
-    persist()
+    persist({ webEnabled: webEnabled })
   }
   function toggleWebEnabled() { setWebEnabled(!webEnabled) }
   function retryWebSetup() {
@@ -433,7 +428,7 @@ Item {
     if (from < 0 || from === to) return false
     next.splice(from, 1); next.splice(to, 0, id)
     rightOrder = next
-    persist()
+    persist({ rightOrder: rightOrder })
     return true
   }
   function opsIndex(id) { var index = opsOrder.indexOf(id); return index < 0 ? 99 : index }
@@ -455,7 +450,7 @@ Item {
     if (from < 0 || from === to) return false
     next.splice(from, 1); next.splice(to, 0, id)
     opsOrder = next
-    persist()
+    persist({ opsOrder: opsOrder })
     return true
   }
 
@@ -463,7 +458,6 @@ Item {
     id: configFile
     path: root.configPath
     watchChanges: true
-    atomicWrites: true
     printErrors: false
     onLoaded: root.applyConfig(text())
     onLoadFailed: root.applyConfig("{}")

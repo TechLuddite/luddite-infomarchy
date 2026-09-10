@@ -31,6 +31,34 @@ ColumnLayout {
   property string tokenLabelDraft: ""
   property string cidrDraft: ""
   property string statusText: ""
+  property var manualDraft: ({})
+  property bool manualDirty: false
+  property string manualMessage: "Save your certificate settings, then check the certificate before enabling HTTPS."
+  function resetManualDraft() {
+    var c = settings.manualHttps || {}
+    manualDraft = { hostname: c.hostname || "", bind: c.bind || "127.0.0.1", port: String(c.port || 8789), certPath: c.certPath || "", keyPath: c.keyPath || "", fingerprint: c.fingerprint || "" }
+    manualDirty = false
+  }
+  function saveManual() {
+    var d = manualDraft
+    settings.setManualHttps({hostname:d.hostname, bind:d.bind, port:Number(d.port), certPath:d.certPath, keyPath:d.keyPath, fingerprint:d.fingerprint})
+    manualDirty = false
+    manualMessage = "Settings submitted. CHECK CERTIFICATE after saving finishes."
+    hideQr()
+  }
+  function checkManual() { if (!settings.settingsWriting && !manualDirty && !manualCheck.running) manualCheck.running = true }
+  Process {
+    id: manualCheck
+    command: ["/usr/bin/bun", Qt.resolvedUrl("web-manual.ts").toString().replace(/^file:\/\//, "")]
+    stdout: SplitParser {
+      splitMarker: "\n"
+      onRead: function(line) {
+        if (line.length > 1024) return
+        try { var result = JSON.parse(line); root.manualMessage = root.plain(result.message, 400) }
+        catch (e) { root.manualMessage = "Certificate check failed." }
+      }
+    }
+  }
 
   function plain(value, max) {
     return String(value || "").replace(/[<>&]/g, "").replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, max || 64)
@@ -81,7 +109,13 @@ ColumnLayout {
     dropCidrProc.running = true
   }
 
-  Component.onCompleted: { refreshMeta(); checkTailscale() }
+  Text {
+    textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap
+    visible: !!root.settings.settingsError; text: root.settings.settingsError
+    color: root.red; font.family: root.mono; font.pixelSize: Style.font.caption
+  }
+
+  Component.onCompleted: { refreshMeta(); checkTailscale(); resetManualDraft() }
   onVisibleChanged: if (!visible) hideQr()
   property string tailMessage: "Checking Tailscale…"
   property bool tailReady: false
@@ -115,6 +149,8 @@ ColumnLayout {
   }
   Connections {
     target: root.settings
+    function onManualHttpsChanged() { if (!root.manualDirty) root.resetManualDraft() }
+    function onWebAccessModeChanged() { root.hideQr() }
     function onWebEnabledChanged() { root.refreshMeta(); root.hideQr() }
   }
 
@@ -212,7 +248,7 @@ ColumnLayout {
   RowLayout {
     Layout.fillWidth: true; spacing: Style.spacing.md
     Repeater {
-      model: [{ id: "lan", label: "LAN HTTP" }, { id: "tailscale", label: "PRIVATE HTTPS" }]
+      model: [{ id: "lan", label: "LAN HTTP" }, { id: "tailscale", label: "PRIVATE HTTPS" }, { id: "manual", label: "MANUAL HTTPS" }]
       delegate: Text {
         required property var modelData
         textFormat: Text.PlainText; text: (root.settings.webAccessMode === modelData.id ? "● " : "○ ") + modelData.label
@@ -226,8 +262,65 @@ ColumnLayout {
     textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap
     text: root.settings.webAccessMode === "lan"
       ? "LAN HTTP sends dashboard data and access credentials unencrypted. Use a network you control and trust. Privacy does not encrypt traffic. Switching access mode turns WEB off."
+      : root.settings.webAccessMode === "manual" ? "Use an existing certificate. You manage client trust, renewal and DNS when using a hostname. Bind to a private LAN/VPN address or loopback; public exposure is unsupported. Saving certificate settings turns Manual HTTPS off."
       : "Private HTTPS lets your connected Tailscale devices view the dashboard securely on port 8788. CONFIGURE & ENABLE sets up access; WEB off closes it. Tailscale and other services keep running."
     color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption
+  }
+  ColumnLayout {
+    visible: root.settings.webAccessMode === "manual"
+    Layout.fillWidth: true
+    spacing: Style.spacing.sm
+    Repeater {
+      model: [
+        {key:"hostname", label:"HOSTNAME / IPv4", hint:"desk.home.arpa or your private IPv4 address"},
+        {key:"bind", label:"BIND IPv4", hint:"127.0.0.1 or private interface address"},
+        {key:"port", label:"PORT", hint:"8789"},
+        {key:"certPath", label:"CERTIFICATE CHAIN", hint:"/absolute/path/to/server-chain.pem"},
+        {key:"keyPath", label:"PRIVATE KEY FILE", hint:"/absolute/path/to/server-key.pem"},
+        {key:"fingerprint", label:"SHA-256 FINGERPRINT", hint:"Leaf certificate fingerprint, with or without colons"}
+      ]
+      delegate: ColumnLayout {
+        required property var modelData
+        Layout.fillWidth: true
+        Text { textFormat: Text.PlainText; text: modelData.label; color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption }
+        Rectangle {
+          Layout.fillWidth: true
+          implicitHeight: Style.font.body + Style.spacing.md * 2
+          color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.04)
+          border.color: manualInput.activeFocus ? root.cyan : root.faint
+          radius: Style.cornerRadius
+          TextInput {
+            id: manualInput
+            anchors.fill: parent; anchors.margins: Style.spacing.sm
+            text: String(root.manualDraft[modelData.key] || "")
+            color: root.fg; font.family: root.mono; font.pixelSize: Style.font.caption
+            maximumLength: modelData.key === "fingerprint" ? 95 : 2048
+            clip: true; selectByMouse: true
+            onTextEdited: {
+              var next = Object.assign({}, root.manualDraft)
+              next[modelData.key] = text
+              root.manualDraft = next
+              root.manualDirty = true
+            }
+          }
+          Text { anchors.fill: manualInput; textFormat: Text.PlainText; visible: !manualInput.text && !manualInput.activeFocus; text: modelData.hint; color: root.faint; font.family: root.mono; font.pixelSize: Style.font.caption; elide: Text.ElideRight }
+        }
+      }
+    }
+    RowLayout {
+      Text {
+        textFormat: Text.PlainText; text: root.settings.settingsWriting ? "SAVING…" : "SAVE CERTIFICATE SETTINGS"
+        color: root.cyan; font.family: root.mono; font.pixelSize: Style.font.caption
+        MouseArea { anchors.fill: parent; enabled: !root.settings.settingsWriting; cursorShape: Qt.PointingHandCursor; onClicked: root.saveManual() }
+      }
+      Text {
+        textFormat: Text.PlainText; text: manualCheck.running ? "CHECKING…" : "CHECK CERTIFICATE"
+        color: root.cyan; font.family: root.mono; font.pixelSize: Style.font.caption
+        MouseArea { anchors.fill: parent; enabled: !root.settings.settingsWriting && !root.manualDirty && !manualCheck.running; cursorShape: Qt.PointingHandCursor; onClicked: root.checkManual() }
+      }
+    }
+    Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; text: root.manualMessage; color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption }
+    Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; text: "The fingerprint confirms the certificate loaded here; it does not install trust on a viewing device. A renewed certificate needs an updated fingerprint. Certificate and key files must be regular files without symlinks; key permissions must be 0600 or 0400."; color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption }
   }
   Text {
     visible: root.settings.webAccessMode === "tailscale" && !root.settings.webReady && !root.settings.webStarting
@@ -264,8 +357,8 @@ ColumnLayout {
       color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, root.settings.webReady ? 0.16 : 0.06)
       border.color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, root.settings.webReady ? 0.55 : 0.18)
       border.width: 1
-      Text { id: webToggle; anchors.centerIn: parent; textFormat: Text.PlainText; text: root.settings.webEnabled ? (root.settings.webReady ? "WEB ON" : (root.settings.webStarting ? "STARTING…" : "WEB FAILED")) : (root.settings.webAccessMode === "tailscale" ? "CONFIGURE & ENABLE" : "WEB OFF"); color: root.settings.webReady ? root.green : (root.settings.webFailed ? root.yellow : root.faint); font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true }
-      MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; enabled: root.settings.webEnabled || root.settings.webAccessMode === "lan" || root.tailReady; onClicked: root.settings.toggleWebEnabled() }
+      Text { id: webToggle; anchors.centerIn: parent; textFormat: Text.PlainText; text: root.settings.webEnabled ? (root.settings.webReady ? "WEB ON" : (root.settings.webStarting ? "STARTING…" : "WEB FAILED")) : (root.settings.webAccessMode === "lan" ? "WEB OFF" : "CONFIGURE & ENABLE"); color: root.settings.webReady ? root.green : (root.settings.webFailed ? root.yellow : root.faint); font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true }
+      MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; enabled: root.settings.webEnabled || (!root.settings.settingsWriting && (root.settings.webAccessMode === "lan" || (root.settings.webAccessMode === "manual" ? !root.manualDirty : root.tailReady))); onClicked: root.settings.toggleWebEnabled() }
     }
     Rectangle {
       visible: root.settings.webFailed
@@ -380,7 +473,7 @@ ColumnLayout {
   }
 
   ColumnLayout {
-    visible: root.settings.webAccessMode === "lan"
+    visible: root.settings.webAccessMode === "lan" || root.settings.webAccessMode === "manual"
     Layout.fillWidth: true
     spacing: Style.spacing.md
   Text { textFormat: Text.PlainText; text: "ALLOW LIST"; color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true; font.letterSpacing: 1.4 }

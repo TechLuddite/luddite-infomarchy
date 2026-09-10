@@ -170,7 +170,7 @@ function readJson(p: string): any {
 }
 function ls(p: string): string[] { try { return readdirSync(p); } catch { return []; } }
 
-function ensurePrivateStateDir(path: string): boolean {
+export function ensurePrivateStateDir(path: string): boolean {
   try {
     mkdirSync(path, { recursive: true, mode: 0o700 });
     let state = lstatSync(path);
