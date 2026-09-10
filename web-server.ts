@@ -10,8 +10,9 @@ import { isIP } from "net";
 import { dirname, join } from "path";
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readlinkSync, readSync, unlinkSync } from "fs";
 import { parseJsonBounded, readRegularFileLimited, writePrivateStateFile } from "./collector";
+import { inspectTailscale, startServe, serveMappingReady, tailOrigin } from "./web-tailscale";
 import {
-  DEFAULT_NARROW_ORDER, FALLBACK_THEME, WEB_SECTION_IDS, normalizeOrder, parseDashPrefs, parseThemeColors, renderPage,
+  DEFAULT_NARROW_ORDER, FALLBACK_THEME, WEB_SECTION_IDS, filterWebSnapshot, normalizeOrder, parseDashPrefs, parseThemeColors, renderPage,
   type DashPrefs, type ThemeColors,
 } from "./web-page";
 
@@ -37,7 +38,6 @@ export const DEFAULT_CIDRS = [
   "10.0.0.0/8",
   "172.16.0.0/12",
   "192.168.0.0/16",
-  "100.64.0.0/10",
 ];
 
 export type Cidr = { network: number; mask: number; text: string };
@@ -204,7 +204,23 @@ export function tokenAllowed(got: string, tokens: WebToken[]): boolean {
 }
 
 export function loadConfig(): WebConfig | null {
-  const raw = readRegularFileLimited(join(STATE_DIR, CONFIG_NAME), CONFIG_MAX_BYTES);
+  let raw = "";
+  let fd = -1;
+  try {
+    fd = openSync(join(STATE_DIR, CONFIG_NAME), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const st = fstatSync(fd);
+    if (!st.isFile() || st.uid !== process.getuid!() || st.nlink !== 1 || (st.mode & 0o077) !== 0 || st.size > CONFIG_MAX_BYTES) return null;
+    const bytes = Buffer.alloc(CONFIG_MAX_BYTES + 1);
+    let count = 0;
+    while (count < bytes.length) {
+      const n = readSync(fd, bytes, count, bytes.length - count, null);
+      if (!n) break;
+      count += n;
+    }
+    if (count > CONFIG_MAX_BYTES) return null;
+    raw = bytes.subarray(0, count).toString("utf8");
+  } catch { return null; }
+  finally { if (fd >= 0) closeSync(fd); }
   if (!raw) return null;
   const parsed = parseJsonBounded(raw, CONFIG_MAX_BYTES, 12);
   if (!parsed || typeof parsed !== "object") return null;
@@ -240,16 +256,19 @@ export function ensureConfig(extraCidrs: string[] = [], listening?: boolean): We
       existing.listening = listening;
       changed = true;
     }
-    if (changed) saveConfig(existing);
+    if (changed && !saveConfig(existing)) throw new Error("Cannot save Web Mode settings");
     return existing;
   }
+  // A rejected credential file is not permission to overwrite/rotate it.
+  try { lstatSync(join(STATE_DIR, CONFIG_NAME)); throw new Error("Cannot read Web Mode credentials"); }
+  catch (error: any) { if (error.code !== "ENOENT") throw error; }
   const created: WebConfig = {
     tokens: [makeToken("default")],
     port: DEFAULT_PORT,
     extraCidrs: extraCidrs.filter(item => !!parseCidr(item)).slice(0, MAX_EXTRA_CIDRS),
     listening: listening !== false,
   };
-  saveConfig(created);
+  if (!saveConfig(created)) throw new Error("Cannot save Web Mode settings");
   return created;
 }
 
@@ -258,8 +277,7 @@ export function addWebToken(label: string): WebToken | null {
   if (config.tokens.length >= MAX_TOKENS) return null;
   const token = makeToken(label);
   config.tokens.push(token);
-  saveConfig(config);
-  return token;
+  return saveConfig(config) ? token : null;
 }
 
 export function revokeWebToken(id: string): boolean {
@@ -269,8 +287,7 @@ export function revokeWebToken(id: string): boolean {
   if (next.length === config.tokens.length) return false;
   if (!next.length) return false;
   config.tokens = next;
-  saveConfig(config);
-  return true;
+  return saveConfig(config);
 }
 
 export function addExtraCidr(text: string): boolean {
@@ -280,8 +297,7 @@ export function addExtraCidr(text: string): boolean {
   if (config.extraCidrs.includes(cidr.text)) return true;
   if (config.extraCidrs.length >= MAX_EXTRA_CIDRS) return false;
   config.extraCidrs.push(cidr.text);
-  saveConfig(config);
-  return true;
+  return saveConfig(config);
 }
 
 export function removeExtraCidr(text: string): boolean {
@@ -292,23 +308,10 @@ export function removeExtraCidr(text: string): boolean {
   const next = config.extraCidrs.filter(item => item !== cidr.text);
   if (next.length === config.extraCidrs.length) return false;
   config.extraCidrs = next;
-  saveConfig(config);
-  return true;
+  return saveConfig(config);
 }
 
-export function maskSnapshot(snap: any): any {
-  if (!snap || typeof snap !== "object") return {};
-  const machine = snap.machine && typeof snap.machine === "object" ? { ...snap.machine } : {};
-  const net = machine.net && typeof machine.net === "object" ? { ...machine.net } : {};
-  net.ssid = null;
-  net.addr = null;
-  machine.net = net;
-  machine.externalIp = null;
-  const ai = snap.ai && typeof snap.ai === "object" ? { ...snap.ai } : {};
-  const github = ai.github && typeof ai.github === "object" ? { ...ai.github, login: "" } : ai.github;
-  ai.github = github;
-  return { ...snap, user: null, host: null, machine, ai };
-}
+export const maskSnapshot = filterWebSnapshot;
 
 function take(list: unknown, n: number): any[] {
   return Array.isArray(list) ? list.slice(0, n) : [];
@@ -416,15 +419,21 @@ export function parseAsciiQr(text: string): string[] {
 }
 
 export async function qrMatrixForUrl(url: string): Promise<string[]> {
-  if (!/^http:\/\/[0-9a-zA-Z.:[\]]+\/t\/[0-9a-f]{48}\/$/.test(url)) return [];
-  const proc = Bun.spawn(["/usr/bin/qrencode", "-t", "ASCII", "-m", "0", "-o", "-"], {
-    stdin: new Blob([url]),
-    stdout: "pipe",
-    stderr: "ignore",
+  if (!/^https?:\/\/[0-9a-zA-Z.:[\]-]+\/t\/[0-9a-f]{48}\/$/.test(url)) return [];
+  const proc = Bun.spawn(["/usr/bin/qrencode", "-t", "ASCII", "-m", "2", "-o", "-"], {
+    stdin: new Blob([url]), stdout: "pipe", stderr: "ignore",
   });
-  const raw = await new Response(proc.stdout).text();
-  await proc.exited;
-  return parseAsciiQr(raw);
+  const timer = setTimeout(() => proc.kill("SIGKILL"), 3000);
+  let bytes = 0;
+  const chunks: Uint8Array[] = [];
+  try {
+    for await (const chunk of proc.stdout) {
+      bytes += chunk.length;
+      if (bytes > 16384) return [];
+      chunks.push(chunk);
+    }
+    return await proc.exited === 0 ? parseAsciiQr(Buffer.concat(chunks).toString("utf8")) : [];
+  } finally { clearTimeout(timer); proc.kill("SIGKILL"); await proc.exited; }
 }
 
 export const SECURITY_HEADERS: Record<string, string> = {
@@ -448,7 +457,7 @@ export function hostAllowed(hostHeader: string, allowedHosts: string[], port: nu
   const host = raw.replace(/:\d+$/, "");
   if (!allowedHosts.includes(host)) return false;
   const portMatch = raw.match(/:(\d+)$/);
-  if (portMatch && Number(portMatch[1]) !== port) return false;
+  if ((portMatch ? Number(portMatch[1]) : 80) !== port) return false;
   return true;
 }
 
@@ -457,7 +466,7 @@ export function originAllowed(origin: string | null, allowedHosts: string[], por
   try {
     const url = new URL(origin);
     if (url.protocol !== "http:") return false;
-    if (url.username || url.password || url.search || url.hash) return false;
+    if (url.username || url.password || url.search || url.hash || url.pathname !== "/") return false;
     const host = url.hostname.toLowerCase();
     if (!allowedHosts.includes(host)) return false;
     const originPort = url.port ? Number(url.port) : 80;
@@ -474,6 +483,7 @@ export function jsonContentType(value: string): boolean {
 export function parsePrefsPatch(raw: string): { webSections?: Record<string, boolean>; webNarrowOrder?: string[] } | null {
   const parsed = parseJsonBounded(raw, 4096, 6);
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  if (Object.keys(parsed).some(key => key !== "webSections" && key !== "webNarrowOrder")) return null;
   const out: { webSections?: Record<string, boolean>; webNarrowOrder?: string[] } = {};
   if (parsed.webSections && typeof parsed.webSections === "object" && !Array.isArray(parsed.webSections)) {
     const sections: Record<string, boolean> = Object.create(null);
@@ -490,6 +500,10 @@ export function parsePrefsPatch(raw: string): { webSections?: Record<string, boo
 export function patchDashboardPrefs(patch: { webSections?: Record<string, boolean>; webNarrowOrder?: string[] }): boolean {
   const raw = readRegularFileLimited(join(STATE_DIR, "dashboard.json"), 256 * 1024);
   let parsed: Record<string, unknown> = {};
+  if (raw === null) {
+    try { lstatSync(join(STATE_DIR, "dashboard.json")); return false; }
+    catch (error: any) { if (error.code !== "ENOENT") return false; }
+  }
   if (raw) {
     const current = parseJsonBounded(raw, 256 * 1024, 16);
     if (!current || typeof current !== "object" || Array.isArray(current)) return false;
@@ -529,12 +543,22 @@ export function handleRequest(input: {
   background?: { type: string; bytes: Buffer } | null;
   body?: string;
   contentType?: string;
+  externalOrigin?: string;
 }): Reply {
   const method = String(input.method || "").toUpperCase();
   if (input.contentLength > MAX_REQUEST_BYTES) return reply(413, "too large");
-  if (!ipAllowed(input.sourceIp, input.cidrs)) return reply(403, "forbidden");
-  if (!hostAllowed(input.host, input.allowedHosts, input.port)) return reply(403, "forbidden");
-  if (!originAllowed(input.origin, input.allowedHosts, input.port)) return reply(403, "forbidden");
+  if (input.externalOrigin) {
+    // The actual TCP peer must be loopback. Forwarded/identity headers confer
+    // no authority; the external origin is discovered locally, never from HTTP.
+    let external: URL;
+    try { external = new URL(input.externalOrigin); } catch { return reply(403, "forbidden"); }
+    if (tailOrigin(external.hostname) !== input.externalOrigin || canonicalIp(input.sourceIp) !== "127.0.0.1" ||
+        input.host.toLowerCase() !== external.host || (input.origin !== null && input.origin !== input.externalOrigin)) return reply(403, "forbidden");
+  } else {
+    if (!ipAllowed(input.sourceIp, input.cidrs)) return reply(403, "forbidden");
+    if (!hostAllowed(input.host, input.allowedHosts, input.port)) return reply(403, "forbidden");
+    if (!originAllowed(input.origin, input.allowedHosts, input.port)) return reply(403, "forbidden");
+  }
   if (method !== "GET" && method !== "HEAD" && method !== "POST") return reply(405, "method not allowed");
 
   const path = String(input.pathname || "");
@@ -562,7 +586,8 @@ export function handleRequest(input: {
     return result;
   }
   if (!input.snapshot) return reply(503, "collecting");
-  const masked = maskSnapshot(input.snapshot);
+  const prefs = input.prefs || loadDashPrefs();
+  const masked = filterWebSnapshot(input.snapshot, prefs.privacyMode);
   if (match[2] === "snapshot.json") {
     const body = JSON.stringify({ ts: masked.ts || 0, ai: { sessions: take(masked.ai?.sessions, 12), attention: take(masked.ai?.attention, 8), usage: masked.ai?.usage || {} } });
     const result = reply(200, body, "application/json; charset=utf-8");
@@ -570,11 +595,10 @@ export function handleRequest(input: {
     return result;
   }
   const nonce = newNonce();
-  const prefs = input.prefs || loadDashPrefs();
   const theme = input.theme || loadTheme();
   const hasBackground = input.background === undefined ? !!resolveBackgroundPath() : !!input.background;
   const bgRev = input.background === undefined ? backgroundRevision() : (hasBackground ? "1-1" : "");
-  const html = renderPage(input.snapshot, pagePath, nonce, prefs, theme, hasBackground, bgRev);
+  const html = renderPage(masked, pagePath, nonce, prefs, theme, hasBackground, bgRev);
   const result = reply(200, html, "text/html; charset=utf-8", nonce);
   if (method === "HEAD") result.body = "";
   return result;
@@ -621,36 +645,71 @@ function rateOk(ip: string): boolean {
   const now = Date.now();
   const row = hits.get(ip);
   if (!row || now - row.window >= RATE_WINDOW_MS) {
+    if (!row && hits.size >= 256) hits.delete(hits.keys().next().value!);
     hits.set(ip, { window: now, count: 1 });
-    if (hits.size > 256) {
-      for (const key of hits.keys()) {
-        const item = hits.get(key);
-        if (!item || now - item.window >= RATE_WINDOW_MS) hits.delete(key);
-      }
-    }
     return true;
   }
   row.count++;
   return row.count <= RATE_MAX;
 }
 
-async function serve() {
+function processStart(pid: number): string {
+  const raw = readRegularFileLimited(`/proc/${pid}/stat`, 4096);
+  return raw ? raw.slice(raw.lastIndexOf(")") + 2).split(" ")[19] || "" : "";
+}
+
+function writeWebStatus(ready: boolean, mode: string, origin: string, message: string): void {
+  writePrivateStateFile(STATE_DIR, "web-status.json", JSON.stringify({ ready, mode, origin, message, pid: process.pid, start: processStart(process.pid) }));
+}
+
+export function webStatus(): { running: boolean; ready: boolean; mode: string; origin: string; message: string } {
+  const raw = readRegularFileLimited(join(STATE_DIR, "web-status.json"), 4096);
+  const s = raw ? parseJsonBounded(raw, 100, 3) : null;
+  const running = s && Number.isInteger(s.pid) && s.pid > 1 && s.start && processStart(s.pid) === s.start;
+  const ready = !!(running && s.ready === true && loadConfig()?.listening);
+  const origin = String(s?.origin || "");
+  const valid = /^http:\/\/(?:[0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]{4,5}$/.test(origin) || (() => {
+    try { return tailOrigin(new URL(origin).hostname) === origin; } catch { return false; }
+  })();
+  return { running: !!running, ready: ready && valid, mode: s?.mode === "tailscale" ? "tailscale" : "lan", origin: ready && valid ? origin : "",
+    message: String(s?.message || (ready ? "" : "Listener is not running. Choose RETRY SETUP to try again.")).replace(/[<>\u0000-\u001f]/g, " ").slice(0, 400) };
+}
+
+export async function serve(mode = process.argv[3], integration = { inspectTailscale, startServe, serveMappingReady }) {
   const extra = process.argv.filter(arg => parseCidr(arg)).slice(0, MAX_EXTRA_CIDRS);
   const config = ensureConfig(extra, true);
   const bind = advertisedBind(localPrivateIPv4());
-  const cidrs = parseCidrList(config.extraCidrs);
   const allowedHosts = [...localPrivateIPv4(), "127.0.0.1"];
   const requestedPort = process.env.INFOMARCHY_WEB_PORT === "0" ? 0 : (validPort(process.env.INFOMARCHY_WEB_PORT) || config.port);
+  const tailscale = mode === "tailscale";
+  writeWebStatus(false, tailscale ? "tailscale" : "lan", "", "Starting listener…");
+  let externalOrigin = "";
+  let proxy: ReturnType<typeof startServe> | null = null;
+  let ready = !tailscale;
+  if (tailscale) {
+    const status = await integration.inspectTailscale();
+    if (!status.ok) {
+      writeWebStatus(false, "tailscale", "", status.message);
+      console.log(JSON.stringify({ ok: false, message: status.message }));
+      return;
+    }
+    externalOrigin = status.origin;
+  }
   const server = Bun.serve({
-    hostname: "0.0.0.0",
+    hostname: tailscale ? "127.0.0.1" : "0.0.0.0",
     port: requestedPort,
     maxRequestBodySize: MAX_REQUEST_BYTES,
     idleTimeout: 10,
     async fetch(req, srv) {
       const sourceIp = canonicalIp(srv.requestIP(req)?.address || "");
-      if (!rateOk(sourceIp)) return new Response("rate", { status: 429, headers: SECURITY_HEADERS });
       const url = new URL(req.url);
-      const live = loadConfig() || config;
+      const live = loadConfig();
+      const candidate = url.pathname.match(/^\/t\/([0-9a-f]{48})\//)?.[1] || "";
+      const viewer = live?.tokens.find(row => tokensEqual(candidate, row.token));
+      // Serve connects every viewer from loopback. Give authenticated viewers
+      // separate budgets; invalid credentials still share the peer IP bucket.
+      if (!rateOk(sourceIp + (viewer ? ":" + viewer.id : ""))) return new Response("rate", { status: 429, headers: SECURITY_HEADERS });
+      if (!ready || !live || !live.listening) return new Response("unavailable", { status: 503, headers: SECURITY_HEADERS });
       const path = url.pathname;
       const pathname = path.endsWith("/") || path.endsWith("snapshot.json") || path.endsWith("/bg") || path.endsWith("/prefs") ? path : path + "/";
       const result = handleRequest({
@@ -663,6 +722,7 @@ async function serve() {
         tokens: live.tokens,
         port: srv.port,
         allowedHosts,
+        externalOrigin,
         cidrs: parseCidrList(live.extraCidrs),
         snapshot: loadSnapshot(),
         body: req.method.toUpperCase() === "POST" ? await req.text() : "",
@@ -671,7 +731,36 @@ async function serve() {
       return new Response(result.body, { status: result.status, headers: result.headers });
     },
   });
-  await Bun.write(Bun.stdout, JSON.stringify({ ok: true, url: publicUrl({ ...config, port: server.port }, bind), port: server.port, bind }) + "\n");
+  const stop = () => {
+    ready = false;
+    server.stop(true);
+    proxy?.kill("SIGKILL");
+  };
+  process.on("SIGTERM", () => { stop(); process.exit(0); });
+  process.on("SIGINT", () => { stop(); process.exit(0); });
+  process.on("exit", stop);
+  if (tailscale) {
+    writeWebStatus(false, "tailscale", "", "Configuring private HTTPS…");
+    proxy = integration.startServe(server.port);
+    const deadline = Date.now() + 12000;
+    while (Date.now() < deadline && proxy.exitCode === null) {
+      if (await integration.serveMappingReady(externalOrigin, server.port)) { ready = true; break; }
+      await Bun.sleep(400);
+    }
+    if (!ready) {
+      stop();
+      const message = "Serve setup failed. Enable MagicDNS and HTTPS certificates in the Tailscale admin console; check local Serve permissions, then retry. No LAN fallback was started.";
+      writeWebStatus(false, "tailscale", "", message);
+      console.log(JSON.stringify({ ok: false, message }));
+      return;
+    }
+    proxy.exited.then(() => {
+      stop();
+      writeWebStatus(false, "tailscale", "", "Tailscale Serve stopped. Check the connection and choose RETRY SETUP.");
+    });
+  }
+  writeWebStatus(true, tailscale ? "tailscale" : "lan", externalOrigin || `http://${bind}:${server.port}`, "");
+  console.log(JSON.stringify({ ok: true, ready: true, port: server.port, mode: tailscale ? "tailscale" : "lan" }));
 }
 
 if (import.meta.main) {
@@ -680,10 +769,15 @@ if (import.meta.main) {
     disableWebFiles();
     process.exit(0);
   }
-  if (cmd === "url") {
+  if (cmd === "status") {
+    const { origin, ...status } = webStatus();
+    console.log(JSON.stringify({ ok: true, ...status }));
+    process.exit(0);
+  }
+  if (cmd === "url" || cmd === "copy-url") {
     const config = loadConfig();
-    const bind = advertisedBind(localPrivateIPv4());
-    if (!config) {
+    const status = webStatus();
+    if (!config || !status.ready) {
       await Bun.write(Bun.stdout, JSON.stringify({ ok: false }) + "\n");
       process.exit(0);
     }
@@ -692,7 +786,13 @@ if (import.meta.main) {
       await Bun.write(Bun.stdout, JSON.stringify({ ok: false }) + "\n");
       process.exit(0);
     }
-    await Bun.write(Bun.stdout, JSON.stringify({ ok: true, url: publicUrl(config, bind, row.token), port: config.port, bind, id: row.id, label: row.label }) + "\n");
+    const url = `${status.origin}/t/${row.token}/`;
+    if (cmd === "copy-url") {
+      const proc = Bun.spawn(["/usr/bin/wl-copy"], { stdin: new Blob([url]), stdout: "ignore", stderr: "ignore" });
+      const timer = setTimeout(() => proc.kill("SIGKILL"), 3000);
+      await proc.exited;
+      clearTimeout(timer);
+    } else console.log(JSON.stringify({ ok: true, url, id: row.id, label: row.label }));
     process.exit(0);
   }
   if (cmd === "tokens") {
@@ -731,8 +831,8 @@ if (import.meta.main) {
   }
   if (cmd === "qr") {
     const config = loadConfig();
-    const bind = advertisedBind(localPrivateIPv4());
-    if (!config) {
+    const status = webStatus();
+    if (!config || !status.ready) {
       await Bun.write(Bun.stdout, JSON.stringify({ ok: false }) + "\n");
       process.exit(0);
     }
@@ -741,9 +841,14 @@ if (import.meta.main) {
       await Bun.write(Bun.stdout, JSON.stringify({ ok: false }) + "\n");
       process.exit(0);
     }
-    const rows = await qrMatrixForUrl(publicUrl(config, bind, row.token));
+    const rows = await qrMatrixForUrl(`${status.origin}/t/${row.token}/`);
     await Bun.write(Bun.stdout, JSON.stringify({ ok: rows.length > 0, size: rows.length, rows }) + "\n");
     process.exit(rows.length ? 0 : 1);
   }
-  await serve();
+  try { await serve(); }
+  catch {
+    writeWebStatus(false, process.argv[3] === "tailscale" ? "tailscale" : "lan", "", "Listener setup failed. Check port availability and state-file permissions, then retry.");
+    console.log(JSON.stringify({ ok: false, message: "Listener setup failed. Check port availability and state-file permissions, then retry." }));
+    process.exit(1);
+  }
 }

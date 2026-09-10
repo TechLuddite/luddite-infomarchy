@@ -41,7 +41,8 @@ describe("web mode access control", () => {
     expect(ipAllowed("127.0.0.1", cidrs)).toBe(true);
     expect(ipAllowed("8.8.8.8", cidrs)).toBe(false);
     expect(ipAllowed("::1", cidrs)).toBe(false);
-    expect(DEFAULT_CIDRS).toContain("100.64.0.0/10");
+    expect(DEFAULT_CIDRS).not.toContain("100.64.0.0/10");
+    expect(ipAllowed("100.100.1.2", cidrs)).toBe(false);
   });
 
   test("compares tokens in constant time and rejects the wrong one as 404", () => {
@@ -90,14 +91,14 @@ describe("web mode rendering", () => {
     expect(body).not.toContain("<script>alert");
     expect(body.match(/<script/g)?.length).toBe(1);
     expect(body).not.toContain("TechLuddite");
-    expect(body).toContain('class="privacy"');
+    expect(body).toContain("controlled on desktop");
     expect(body).toContain('id="privacy"');
     expect(body).toContain("PRIVACY ON");
     expect(body).toContain("WAN/LAN/SSID hidden");
-    expect(body).toContain("WAN 203.0.113.9");
-    expect(body).toContain("WIFI secret");
+    expect(body).not.toContain("WAN 203.0.113.9");
+    expect(body).not.toContain("WIFI secret");
     expect(body).toContain("DISK ~");
-    expect(body).toContain("DISK /home/larry");
+    expect(body).not.toContain("DISK /home/larry");
     expect(body).toContain("LIVE AI SESSIONS");
     expect(body).toContain("RECENT TASKS");
     expect(body).toContain('class="recent-ago"');
@@ -259,8 +260,8 @@ describe("web mode rendering", () => {
     };
     const html = renderPage(snap, "/t/" + token + "/", "", parseDashPrefs({}), parseThemeColors(""), false);
     expect(html).toContain("please review the secret ···");
-    expect(html).toContain("please review the secret token dump now");
-    expect(html).toContain('class="shut"');
+    expect(html).not.toContain("please review the secret token dump now");
+    expect(html).not.toContain('class="shut"');
     expect(html).toContain(">1m<");
     expect(html).toContain(">luddite-infomarchy<");
     expect(html).not.toContain("~/Projects/luddite-infomarchy");
@@ -317,34 +318,57 @@ describe("web mode rendering", () => {
 });
 
 describe("live listen", () => {
-  test("serves the page on loopback with the token path", async () => {
-    mkdirSync(join(root, ".local", "state"), { recursive: true });
+  test("refresh follows desktop privacy, prefs cannot unmask, revocation fails closed", async () => {
+    const state = join(root, "state");
+    const dir = join(state, "infomarchy");
+    mkdirSync(dir, { recursive: true });
+    const fixture = structuredClone(base.snapshot);
+    fixture.ai.recent[0].text = "one two three four PRIVATE_PROMPT_SENTINEL";
+    fixture.ai.sessions[0] = { ...fixture.ai.sessions[0], cwd: "/home/PRIVATE_CWD", prompt: "PRIVATE_PROMPT_SENTINEL" } as any;
+    writeFileSync(join(dir, "web-snapshot.json"), JSON.stringify(fixture));
+    writeFileSync(join(dir, "dashboard.json"), JSON.stringify({ privacyMode: true }));
     const proc = Bun.spawn([process.execPath, join(import.meta.dir, "web-server.ts")], {
-      env: { HOME: root, USER: "tester", XDG_STATE_HOME: join(root, ".local", "state"), PATH: "/usr/bin:/bin", INFOMARCHY_WEB_PORT: "0" },
-      stdout: "pipe",
-      stderr: "pipe",
+      env: { HOME: root, USER: "tester", XDG_STATE_HOME: state, PATH: "/usr/bin:/bin", INFOMARCHY_WEB_PORT: "0" },
+      stdout: "pipe", stderr: "ignore",
     });
-    const reader = proc.stdout.getReader();
-    const first = await reader.read();
-    const line = new TextDecoder().decode(first.value || new Uint8Array());
-    const status = JSON.parse(line.trim().split("\n")[0]);
-    expect(status.ok).toBe(true);
-    expect(status.url).toContain("/t/");
-    writeFileSync(join(root, ".local", "state", "infomarchy", "web-snapshot.json"), JSON.stringify(base.snapshot));
-    const page = await fetch(status.url, { headers: { Host: `127.0.0.1:${status.port}` } });
-    const text = await page.text();
-    const prefs = await fetch(status.url + "prefs", {
-      method: "POST",
-      headers: { Host: `127.0.0.1:${status.port}`, "content-type": "application/json", Origin: `http://127.0.0.1:${status.port}` },
-      body: JSON.stringify({ webSections: { recent: false }, webNarrowOrder: ["machine", "sessions"] }),
-    });
-    proc.kill("SIGTERM");
-    await proc.exited;
-    expect([200, 403]).toContain(page.status);
-    if (page.status === 200) {
-      expect(text).toContain("Infomarchy");
-      expect(text).not.toContain("<script>alert");
-      expect(prefs.status).toBe(200);
-    }
+    try {
+      const first = await proc.stdout.getReader().read();
+      const status = JSON.parse(new TextDecoder().decode(first.value).trim());
+      expect(status.ok).toBe(true);
+      expect(status.url).toBeUndefined();
+      const config = JSON.parse(readFileSync(join(dir, "web.json"), "utf8"));
+      const url = `http://127.0.0.1:${status.port}/t/${config.tokens[0].token}/`;
+      const request = (path = "", init: RequestInit = {}) => fetch(url + path, init);
+      const page = await request();
+      expect(page.status).toBe(200);
+      const html = await page.text();
+      expect(html).toContain("one two three four ···");
+      expect(html.includes("PRIVATE_PROMPT_SENTINEL")).toBe(false);
+      expect(html.includes("203.0.113.9")).toBe(false);
+      const json = await (await request("snapshot.json")).text();
+      expect(json.includes("PRIVATE_CWD")).toBe(false);
+      expect(json.includes("PRIVATE_PROMPT_SENTINEL")).toBe(false);
+      const post = (body: unknown) => request("prefs", { method: "POST", headers: {
+        "content-type": "application/json", Origin: `http://127.0.0.1:${status.port}`,
+      }, body: JSON.stringify(body) });
+      expect((await post({ privacyMode: false, webSections: { recent: false } })).status).toBe(400);
+      expect(JSON.parse(readFileSync(join(dir, "dashboard.json"), "utf8")).privacyMode).toBe(true);
+      expect((await post({ webSections: { recent: false } })).status).toBe(200);
+      expect(JSON.parse(readFileSync(join(dir, "dashboard.json"), "utf8")).privacyMode).toBe(true);
+      writeFileSync(join(dir, "dashboard.json"), JSON.stringify({ privacyMode: false }));
+      const open = await (await request()).text();
+      expect(open.includes("PRIVATE_PROMPT_SENTINEL")).toBe(true);
+      expect(open.includes("203.0.113.9")).toBe(true);
+      expect(open).toContain("PRIVACY OFF");
+      for (const raw of ['{}', '{"privacyMode":"false"}', '{malformed', '{"privacyMode":true}']) {
+        writeFileSync(join(dir, "dashboard.json"), raw);
+        expect((await (await request()).text()).includes("PRIVATE_PROMPT_SENTINEL")).toBe(false);
+      }
+      config.tokens = [{ ...config.tokens[0], token: "b".repeat(48) }];
+      writeFileSync(join(dir, "web.json"), JSON.stringify(config));
+      for (const path of ["", "snapshot.json", "bg", "prefs"]) expect((await request(path)).status).toBe(404);
+      writeFileSync(join(dir, "web.json"), "{malformed");
+      expect((await request()).status).toBe(503);
+    } finally { proc.kill("SIGTERM"); await proc.exited; }
   });
 });

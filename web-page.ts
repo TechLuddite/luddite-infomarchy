@@ -85,6 +85,47 @@ export function wifiLabel(net: any): string {
   return "WIFI";
 }
 
+// A separate disclosure view: never mutate the collector's desktop snapshot.
+// Session records also contain cwd, prompts, previews and action arguments;
+// only the fields used on the web may cross the JSON boundary.
+export function filterWebSnapshot(snapshot: any, privacy = true): any {
+  const snap = snapshot && typeof snapshot === "object" ? snapshot : {};
+  const pick = (row: any, keys: string[]) => Object.fromEntries(keys
+    .filter(key => row && Object.hasOwn(row, key)).map(key => [key, row[key]]));
+  const ai = snap.ai || {};
+  const machine = { ...snap.machine, net: { ...snap.machine?.net } };
+  machine.disks = take(machine.disks, 2).map(d => ({ ...d, mount: privacy ? displayMount(d.mount) : d.mount }));
+  if (privacy) {
+    machine.externalIp = null;
+    machine.net.ssid = null;
+    machine.net.addr = null;
+  }
+  const session = (row: any) => ({
+    ...pick(row, ["provider", "project", "topic", "uptimeSec", "attention", "attentionReason"]),
+    git: pick(row?.git, ["branch"]),
+  });
+  const usage = Object.fromEntries(Object.entries(ai.usage || {}).slice(0, 8).map(([key, row]: [string, any]) => [key, {
+    ...pick(row, ["name", "ready", "tierLabel", "todayPrompts", "todaySessions", "todayTotalTokens", "hasTokenData", "totalSessions", "authHelpText", "usageStatusText"]),
+    dailyTokens: take(row?.dailyTokens, 7),
+    models: take(row?.models, 8).map(m => pick(m, ["id", "share", "todayTokens", "sessions"])),
+    limits: take(row?.limits, 8).map(l => pick(l, ["label", "title", "percent", "resetsAt"])),
+    value: { ...pick(row?.value, ["lifetime", "today"]), totals: pick(row?.value?.totals, ["inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens"]) },
+  }]));
+  return {
+    ...snap, media: undefined,
+    user: privacy ? null : snap.user, host: privacy ? null : snap.host, machine,
+    ai: {
+      ...ai, github: { ...ai.github, login: "" }, usage,
+      sessions: take(ai.sessions, 12).map(session),
+      attention: take(ai.attention, 8).map(session),
+      recent: take(ai.recent, 24).map(row => ({
+        ...pick(row, ["provider", "ts"]), project: folderName(row?.project),
+        text: privacy ? obfuscatePrompt(row?.text) : String(row?.text || ""),
+      })),
+    },
+  };
+}
+
 function usageKeysOf(usage: any): string[] {
   return Object.keys(usage || {}).filter(key => usage[key] && usage[key].ready !== false).slice(0, 8);
 }
@@ -162,6 +203,7 @@ export const WEB_SECTION_LABELS: Record<string, string> = {
 };
 
 export type DashPrefs = {
+  privacyMode: boolean;
   sections: Record<string, boolean>;
   webSections: Record<string, boolean>;
   rightOrder: string[];
@@ -264,6 +306,7 @@ export function parseDashPrefs(raw: unknown): DashPrefs {
   const sections = parsed.sections && typeof parsed.sections === "object" ? parsed.sections as Record<string, boolean> : {};
   const webSections = parsed.webSections && typeof parsed.webSections === "object" ? parsed.webSections as Record<string, boolean> : {};
   return {
+    privacyMode: parsed.privacyMode !== false,
     sections,
     webSections,
     rightOrder: normalizeOrder(parsed.rightOrder, DEFAULT_RIGHT_ORDER),
@@ -473,10 +516,7 @@ export function renderMachineSection(snap: any, prefs: DashPrefs = parseDashPref
     const d = disk && typeof disk === "object" ? disk : {};
     const pct = Number(d.pct);
     const rawMount = String(d.mount || "/").slice(0, 24);
-    const hiddenMount = displayMount(d.mount || "/") || "/";
-    const labelHtml = hiddenMount === rawMount
-      ? escapeHtml("DISK " + rawMount, 32)
-      : `<span class="shut">${escapeHtml("DISK " + hiddenMount, 32)}</span><span class="open">${escapeHtml("DISK " + rawMount, 32)}</span>`;
+    const labelHtml = escapeHtml("DISK " + rawMount, 32);
     const value = (d.used && d.size ? fmtBytes(d.used) + "/" + fmtBytes(d.size) + " · " : "") + fmtPct(d.pct);
     parts.push(renderMeterBar(labelHtml, value, (Number.isFinite(pct) ? pct : 0) / 100, pct > 90 ? themeRole(theme, "red") : themeRole(theme, "yellow"), true, theme));
   }
@@ -486,11 +526,7 @@ export function renderMachineSection(snap: any, prefs: DashPrefs = parseDashPref
   const wifiVal = Number.isFinite(signal) ? signal + " dBm" : (net.dev ? "up" : "—");
   const wifiFill = Number.isFinite(signal) && signal < -75 ? themeRole(theme, "yellow") : themeRole(theme, "green");
   const ssid = String(net.ssid || "").slice(0, 32);
-  const wifiShut = wifiLabel(net);
-  const wifiOpen = net.wireless ? ("WIFI" + (ssid ? " " + ssid : "")) : wifiShut;
-  const wifiLabelHtml = wifiShut === wifiOpen
-    ? wifiShut
-    : `<span class="shut">${escapeHtml(wifiShut, 20)}</span><span class="open">${escapeHtml(wifiOpen, 40)}</span>`;
+  const wifiLabelHtml = escapeHtml(net.wireless ? "WIFI" + (ssid ? " " + ssid : "") : wifiLabel(net), 40);
   parts.push(renderMeterBar(wifiLabelHtml, wifiVal, wifiFrac, wifiFill, true, theme));
   const pingOk = !!ping.ok;
   const pingMs = Number(ping.ms);
@@ -504,7 +540,7 @@ export function renderMachineSection(snap: any, prefs: DashPrefs = parseDashPref
   const who = [snap.user, snap.host].filter(Boolean).join("@");
   const openBits = [up, who, wan ? "WAN " + wan : "", lan ? "LAN " + lan : ""].filter(Boolean);
   parts.push(`<div class="span foot"><span class="ok">${escapeHtml("↓" + fmtRate(net.rxRate) + " ↑" + fmtRate(net.txRate), 40)}</span><span class="${pingClass}">${escapeHtml("⇄ " + pingText, 24)}</span>${batText ? `<span class="${batHot ? "bad" : "meta"}">${escapeHtml(batText, 40)}</span>` : ""}</div>`);
-  parts.push(`<div class="span meta"><span class="shut">${escapeHtml([up, "WAN/LAN/SSID hidden"].filter(Boolean).join(" · "), 80)}</span><span class="open">${escapeHtml(openBits.join(" · ") || "up", 120)}</span></div>`);
+  parts.push(`<div class="span meta">${escapeHtml(prefs.privacyMode ? [up, "WAN/LAN/SSID hidden"].filter(Boolean).join(" · ") : openBits.join(" · ") || "up", 120)}</div>`);
   parts.push(`</div>`);
   const machineMeta = meta("machine", prefs);
   return card("MACHINE", parts.join(""), "", "machine", machineMeta.on, machineMeta.order);
@@ -621,10 +657,7 @@ function renderRecent(snap: any, prefs: DashPrefs = parseDashPrefs({}), theme: T
   const rows = recent.map((item: any) => {
     const tone = providerColorHex(item.provider, theme);
     const full = String(item.text || "");
-    const shut = obfuscatePrompt(full);
-    const textHtml = shut === full
-      ? escapeHtml(full, 200)
-      : `<span class="shut">${escapeHtml(shut, 80)}</span><span class="open">${escapeHtml(full, 200)}</span>`;
+    const textHtml = escapeHtml(full, 200);
     const project = folderName(item.project);
     return `<div class="recent-row"><span class="recent-ago">${escapeHtml(fmtAgo(item.ts), 8)}</span><span class="tag" style="color:${tone}">${escapeHtml(item.provider, 16)}</span><span class="recent-project">${escapeHtml(project, 80)}</span><span class="recent-text">${textHtml}</span></div>`;
   }).join("");
@@ -661,7 +694,7 @@ function renderContainers(snap: any, prefs: DashPrefs = parseDashPrefs({}), them
   return card("CONTAINERS", rows, String(pack.engine || "docker") + " · " + Number(pack.up || 0) + " up", "containers", m.on, m.order);
 }
 
-export const LIVE_SCRIPT = '(function(){function privacyOn(){try{return sessionStorage.getItem("im-privacy")!=="0"}catch(e){return true}}function scale(){try{var n=Number(sessionStorage.getItem("im-scale"));return isFinite(n)&&n>=0.6&&n<=1.6?Math.round(n*10)/10:1}catch(e){return 1}}function setScale(n){n=Math.min(1.6,Math.max(0.6,Math.round(Number(n)*10)/10));try{sessionStorage.setItem("im-scale",String(n))}catch(e){}apply()}function apply(){var p=privacyOn();document.body.classList.toggle("privacy",p);var b=document.getElementById("privacy");if(b){b.textContent=p?"PRIVACY ON":"PRIVACY";b.classList.toggle("on",p)}var s=scale();document.documentElement.style.setProperty("--scale",String(s));var lab=document.getElementById("zoom-label");if(lab)lab.textContent=Math.round(s*100)+"%"}function prefsUrl(){var path=location.pathname;if(path.charAt(path.length-1)!=="/")path+="/";return path+"prefs"}function collect(){var sections={},order=[],chips=document.querySelectorAll("[data-toggle-section]");for(var i=0;i<chips.length;i++){var id=chips[i].getAttribute("data-toggle-section");if(id)sections[id]=!chips[i].classList.contains("off")}var blocks=document.querySelectorAll(".block[data-section]"),items=[];for(var j=0;j<blocks.length;j++)items.push({id:blocks[j].getAttribute("data-section"),order:Number((blocks[j].style.getPropertyValue("--stack-order")||j))});items.sort(function(a,b){return a.order-b.order});for(var k=0;k<items.length;k++)if(items[k].id)order.push(items[k].id);return{webSections:sections,webNarrowOrder:order}}function save(){fetch(prefsUrl(),{method:"POST",cache:"no-store",credentials:"omit",headers:{"content-type":"application/json"},body:JSON.stringify(collect())}).catch(function(){})}document.addEventListener("click",function(e){var t=e.target;if(!t||!t.closest)return;if(t.id==="privacy"){try{sessionStorage.setItem("im-privacy",privacyOn()?"0":"1")}catch(x){}apply();return}if(t.id==="zoom-in"){setScale(scale()+0.1);return}if(t.id==="zoom-out"){setScale(scale()-0.1);return}if(t.id==="zoom-label"){setScale(1);return}var chip=t.closest("[data-toggle-section]");if(chip){var sid=chip.getAttribute("data-toggle-section"),on=chip.classList.contains("off"),label=chip.getAttribute("data-label")||"";chip.classList.toggle("off",!on);chip.textContent=(on?"\\u25cf ":"\\u25cb ")+label;var block=document.querySelector(\'.block[data-section="\'+sid+\'"]\');if(block)block.classList.toggle("off",!on);save();return}var mv=t.closest("[data-move]");if(!mv)return;var dir=Number(mv.getAttribute("data-move")),msid=mv.getAttribute("data-section"),list=Array.prototype.slice.call(document.querySelectorAll(".block[data-section]"));list.sort(function(a,b){return Number(a.style.getPropertyValue("--stack-order"))-Number(b.style.getPropertyValue("--stack-order"))});var idx=-1;for(var n=0;n<list.length;n++)if(list[n].getAttribute("data-section")===msid)idx=n;var swap=idx+dir;if(idx<0||swap<0||swap>=list.length)return;var ao=list[idx].style.getPropertyValue("--stack-order"),bo=list[swap].style.getPropertyValue("--stack-order");list[idx].style.setProperty("--stack-order",bo);list[swap].style.setProperty("--stack-order",ao);save()});apply();var busy=0;function g(){if(busy)return;busy=1;fetch(location.pathname,{cache:"no-store",credentials:"omit"}).then(function(r){return r.ok?r.text():Promise.reject()}).then(function(h){var d=new DOMParser().parseFromString(h,"text/html");var n=d.getElementById("view"),c=document.getElementById("view");if(!n||!c)return;var ns=d.querySelector("style"),cs=document.querySelector("style");if(ns&&cs)cs.replaceWith(document.importNode(ns,true));var y=scrollY;c.replaceWith(document.importNode(n,true));scrollTo(0,y);apply()}).catch(function(){}).then(function(){busy=0})}setInterval(g,5000)})();';
+export const LIVE_SCRIPT = '(function(){function scale(){try{var n=Number(sessionStorage.getItem("im-scale"));return isFinite(n)&&n>=0.6&&n<=1.6?Math.round(n*10)/10:1}catch(e){return 1}}function setScale(n){n=Math.min(1.6,Math.max(0.6,Math.round(Number(n)*10)/10));try{sessionStorage.setItem("im-scale",String(n))}catch(e){}apply()}function apply(){var s=scale();document.documentElement.style.setProperty("--scale",String(s));var lab=document.getElementById("zoom-label");if(lab)lab.textContent=Math.round(s*100)+"%"}function prefsUrl(){var path=location.pathname;if(path.charAt(path.length-1)!=="/")path+="/";return path+"prefs"}function collect(){var sections={},order=[],chips=document.querySelectorAll("[data-toggle-section]");for(var i=0;i<chips.length;i++){var id=chips[i].getAttribute("data-toggle-section");if(id)sections[id]=!chips[i].classList.contains("off")}var blocks=document.querySelectorAll(".block[data-section]"),items=[];for(var j=0;j<blocks.length;j++)items.push({id:blocks[j].getAttribute("data-section"),order:Number((blocks[j].style.getPropertyValue("--stack-order")||j))});items.sort(function(a,b){return a.order-b.order});for(var k=0;k<items.length;k++)if(items[k].id)order.push(items[k].id);return{webSections:sections,webNarrowOrder:order}}function save(){fetch(prefsUrl(),{method:"POST",cache:"no-store",credentials:"omit",headers:{"content-type":"application/json"},body:JSON.stringify(collect())}).catch(function(){})}document.addEventListener("click",function(e){var t=e.target;if(!t||!t.closest)return;if(t.id==="zoom-in"){setScale(scale()+0.1);return}if(t.id==="zoom-out"){setScale(scale()-0.1);return}if(t.id==="zoom-label"){setScale(1);return}var chip=t.closest("[data-toggle-section]");if(chip){var sid=chip.getAttribute("data-toggle-section"),on=chip.classList.contains("off"),label=chip.getAttribute("data-label")||"";chip.classList.toggle("off",!on);chip.textContent=(on?"\\u25cf ":"\\u25cb ")+label;var block=document.querySelector(\'.block[data-section="\'+sid+\'"]\');if(block)block.classList.toggle("off",!on);save();return}var mv=t.closest("[data-move]");if(!mv)return;var dir=Number(mv.getAttribute("data-move")),msid=mv.getAttribute("data-section"),list=Array.prototype.slice.call(document.querySelectorAll(".block[data-section]"));list.sort(function(a,b){return Number(a.style.getPropertyValue("--stack-order"))-Number(b.style.getPropertyValue("--stack-order"))});var idx=-1;for(var n=0;n<list.length;n++)if(list[n].getAttribute("data-section")===msid)idx=n;var swap=idx+dir;if(idx<0||swap<0||swap>=list.length)return;var ao=list[idx].style.getPropertyValue("--stack-order"),bo=list[swap].style.getPropertyValue("--stack-order");list[idx].style.setProperty("--stack-order",bo);list[swap].style.setProperty("--stack-order",ao);save()});apply();var busy=0;function g(){if(busy)return;busy=1;fetch(location.pathname,{cache:"no-store",credentials:"omit"}).then(function(r){return r.ok?r.text():Promise.reject()}).then(function(h){var d=new DOMParser().parseFromString(h,"text/html");var n=d.getElementById("view"),c=document.getElementById("view");if(!n||!c)return;var ns=d.querySelector("style"),cs=document.querySelector("style");if(ns&&cs)cs.replaceWith(document.importNode(ns,true));var y=scrollY;c.replaceWith(document.importNode(n,true));scrollTo(0,y);apply()}).catch(function(){}).then(function(){busy=0})}setInterval(g,5000)})();';
 
 function backgroundImg(hasBackground: boolean, revision = ""): string {
   if (!hasBackground) return "";
@@ -741,10 +774,9 @@ html, body { margin:0; min-height:100%; background:var(--bg); color:var(--fg); f
 .chart-x { grid-column:2; display:flex; justify-content:space-between; font-size:12px; line-height:1; color:var(--faint); }
 .chart svg { display:block; width:100%; height:72px; }
 .chart-label { font-size:12px; color:var(--dim); letter-spacing:0.06em; margin-bottom:4px; }
-a.refresh, button.privacy-btn { color:var(--blue); font-size:11px; font-weight:700; letter-spacing:0.06em; text-decoration:none; background:none; border:0; padding:2px 7px; font-family:inherit; cursor:pointer; }
-button.privacy-btn.on { color:var(--yellow); }
-body.privacy .open { display:none; }
-body:not(.privacy) .shut { display:none; }
+a.refresh, span.privacy-status { color:var(--blue); font-size:11px; font-weight:700; letter-spacing:0.06em; text-decoration:none; background:none; border:0; padding:2px 7px; font-family:inherit; cursor:pointer; }
+span.privacy-status.on { color:var(--yellow); }
+
 @media (max-width:1100px) {
   .stage { padding:8px; }
   .board { display:flex; flex-direction:column; gap:var(--gap); }
@@ -761,6 +793,7 @@ body:not(.privacy) .shut { display:none; }
 }
 
 export function renderPage(snap: any, refreshPath: string, nonce = "", prefs: DashPrefs = parseDashPrefs({}), theme: ThemeColors = FALLBACK_THEME, hasBackground = false, bgRev = ""): string {
+  snap = filterWebSnapshot(snap, prefs.privacyMode);
   const n = /^[0-9a-f]{32}$/.test(nonce) ? nonce : "";
   const strip: string[] = [];
   for (const id of WEB_SECTION_IDS) {
@@ -787,9 +820,9 @@ export function renderPage(snap: any, refreshPath: string, nonce = "", prefs: Da
   rows.push(`<!doctype html><html lang="en"><head><meta charset="utf-8">`);
   rows.push(`<meta name="viewport" content="width=device-width,initial-scale=1">`);
   rows.push(`<title>Infomarchy</title><style>${pageCss(theme, hasBackground, bgRev)}</style></head>`);
-  rows.push(`<body class="privacy">`);
+  rows.push(`<body>`);
   rows.push(`<div id="view" class="stage">${backgroundImg(hasBackground, bgRev)}<div class="desk">`);
-  rows.push(`<div class="strip">${strip.join("")}<button type="button" id="privacy" class="privacy-btn on">PRIVACY ON</button><a class="refresh" href="${escapeHtml(refreshPath, 200)}">Refresh</a></div>`);
+  rows.push(`<div class="strip">${strip.join("")}<span id="privacy" class="privacy-status${prefs.privacyMode ? " on" : ""}">PRIVACY ${prefs.privacyMode ? "ON" : "OFF"} · controlled on desktop</span><a class="refresh" href="${escapeHtml(refreshPath, 200)}">Refresh</a></div>`);
   rows.push(`<div class="board"><div class="columns"><div class="left">`);
   rows.push(renderSessions(snap, prefs, theme));
   rows.push(`<div class="ops">${opsHtml}</div>`);

@@ -24,8 +24,10 @@ ColumnLayout {
   property var extraCidrs: []
   property var defaultCidrs: []
   property string selectedTokenId: ""
+  onSelectedTokenIdChanged: hideQr()
   property var qrRows: []
   property int qrSize: 0
+  property bool qrRevealed: false
   property string tokenLabelDraft: ""
   property string cidrDraft: ""
   property string statusText: ""
@@ -50,7 +52,10 @@ ColumnLayout {
     urlProc.running = false
     urlProc.running = true
   }
+  function hideQr() { qrRevealed = false; if (qrProc) qrProc.running = false; qrRows = []; qrSize = 0 }
   function refreshQr() {
+    if (!settings.webEnabled || !settings.webReady) return
+    qrRevealed = true
     qrProc.running = false
     qrProc.running = true
   }
@@ -76,10 +81,41 @@ ColumnLayout {
     dropCidrProc.running = true
   }
 
-  Component.onCompleted: refreshMeta()
+  Component.onCompleted: { refreshMeta(); checkTailscale() }
+  onVisibleChanged: if (!visible) hideQr()
+  property string tailMessage: "Checking Tailscale…"
+  property bool tailReady: false
+  property bool tailBusy: false
+  function checkTailscale() {
+    if (tailProc.running) return
+    tailBusy = true
+    tailProc.output = ""
+    tailProc.running = true
+  }
+  Process {
+    id: tailProc
+    property string output: ""
+    command: ["bun", Qt.resolvedUrl("web-tailscale.ts").toString().replace(/^file:\/\//, "")]
+    stdout: SplitParser {
+      splitMarker: ""
+      onRead: function(chunk) {
+        if (tailProc.output.length + chunk.length > 2048) { tailProc.running = false; return }
+        tailProc.output += chunk
+      }
+    }
+    onExited: {
+      root.tailBusy = false
+      try {
+        var value = JSON.parse(output)
+        root.tailReady = value.ok === true
+        root.tailMessage = root.plain(value.message, 400)
+      } catch (e) { root.tailReady = false; root.tailMessage = "Could not check Tailscale. Try again." }
+      output = ""
+    }
+  }
   Connections {
     target: root.settings
-    function onWebEnabledChanged() { root.refreshMeta(); if (root.settings.webEnabled) root.refreshQr() }
+    function onWebEnabledChanged() { root.refreshMeta(); root.hideQr() }
   }
 
   Process {
@@ -119,8 +155,8 @@ ColumnLayout {
         if (raw.length > 512) return
         try {
           var parsed = JSON.parse(raw)
-          if (parsed && parsed.ok === true && typeof parsed.url === "string" && parsed.url.indexOf("http://") === 0)
-            root.copyValue(parsed.url.slice(0, 256))
+          if (parsed && parsed.ok === true && typeof parsed.url === "string" && /^https?:\/\//.test(parsed.url))
+            root.copyValue(parsed.url.slice(0, 512))
         } catch (e) {}
       }
     }
@@ -132,7 +168,7 @@ ColumnLayout {
       splitMarker: "\n"
       onRead: function(line) {
         var raw = String(line || "")
-        if (raw.length > 8192) return
+        if (raw.length > 8192 || !root.qrRevealed || !root.settings.webEnabled) return
         try {
           var parsed = JSON.parse(raw)
           if (!parsed || parsed.ok !== true || !Array.isArray(parsed.rows)) { root.qrRows = []; root.qrSize = 0; return }
@@ -168,6 +204,56 @@ ColumnLayout {
   }
 
   Text { textFormat: Text.PlainText; text: "WEB MODE"; color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true; font.letterSpacing: 1.4 }
+  Text {
+    textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap
+    text: "Desktop privacy " + (root.settings.privacyMode ? "ON" : "OFF") + ". Turning it off lets connected web viewers receive full values. Recent prompts keep four words and session topics remain visible when privacy is on."
+    color: root.settings.privacyMode ? root.yellow : root.red; font.family: root.mono; font.pixelSize: Style.font.caption
+  }
+  RowLayout {
+    Layout.fillWidth: true; spacing: Style.spacing.md
+    Repeater {
+      model: [{ id: "lan", label: "LAN HTTP" }, { id: "tailscale", label: "PRIVATE HTTPS" }]
+      delegate: Text {
+        required property var modelData
+        textFormat: Text.PlainText; text: (root.settings.webAccessMode === modelData.id ? "● " : "○ ") + modelData.label
+        color: root.settings.webAccessMode === modelData.id ? root.cyan : root.dim
+        font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true
+        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { root.settings.setWebAccessMode(modelData.id); root.hideQr() } }
+      }
+    }
+  }
+  Text {
+    textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap
+    text: root.settings.webAccessMode === "lan"
+      ? "LAN HTTP sends dashboard data and access credentials unencrypted. Use a network you control and trust. Privacy does not encrypt traffic. Switching access mode turns WEB off."
+      : "Private HTTPS lets your connected Tailscale devices view the dashboard securely on port 8788. CONFIGURE & ENABLE sets up access; WEB off closes it. Tailscale and other services keep running."
+    color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption
+  }
+  Text {
+    visible: root.settings.webAccessMode === "tailscale" && !root.settings.webReady && !root.settings.webStarting
+    textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap
+    text: root.tailMessage; color: root.tailReady ? root.green : root.yellow
+    font.family: root.mono; font.pixelSize: Style.font.caption
+  }
+  RowLayout {
+    visible: root.settings.webAccessMode === "tailscale" && !root.settings.webReady && !root.settings.webStarting; spacing: Style.spacing.md
+    Text {
+      textFormat: Text.PlainText; text: root.tailBusy ? "CHECKING…" : "CHECK PREREQUISITES"; color: root.cyan
+      font.family: root.mono; font.pixelSize: Style.font.caption
+      MouseArea { anchors.fill: parent; enabled: !root.tailBusy; cursorShape: Qt.PointingHandCursor; onClicked: root.checkTailscale() }
+    }
+    Text {
+      textFormat: Text.PlainText; text: "SETUP GUIDE"; color: root.cyan
+      font.family: root.mono; font.pixelSize: Style.font.caption
+      MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: Qt.openUrlExternally("https://tailscale.com/docs/features/tailscale-serve") }
+    }
+  }
+  Text {
+    visible: root.settings.webAccessMode === "tailscale"
+    textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap
+    text: "Install and connect Tailscale on the viewing device too. Your tailnet must permit access to this computer on port 8788. Then use Copy URL or Show QR. The dashboard QR opens the page; it does not enroll or authorize a device. Public access is unsupported."
+    color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption
+  }
   RowLayout {
     Layout.fillWidth: true
     spacing: Style.spacing.sm
@@ -175,14 +261,24 @@ ColumnLayout {
       implicitWidth: webToggle.implicitWidth + Style.spacing.md * 2
       implicitHeight: webToggle.implicitHeight + Style.spacing.xs * 2
       radius: Style.cornerRadius
-      color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, root.settings.webEnabled ? 0.16 : 0.06)
-      border.color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, root.settings.webEnabled ? 0.55 : 0.18)
+      color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, root.settings.webReady ? 0.16 : 0.06)
+      border.color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, root.settings.webReady ? 0.55 : 0.18)
       border.width: 1
-      Text { id: webToggle; anchors.centerIn: parent; textFormat: Text.PlainText; text: root.settings.webEnabled ? (root.settings.webUrl ? "WEB ON" : "WEB …") : "WEB OFF"; color: root.settings.webEnabled ? root.green : root.faint; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true }
-      MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.settings.toggleWebEnabled() }
+      Text { id: webToggle; anchors.centerIn: parent; textFormat: Text.PlainText; text: root.settings.webEnabled ? (root.settings.webReady ? "WEB ON" : (root.settings.webStarting ? "STARTING…" : "WEB FAILED")) : (root.settings.webAccessMode === "tailscale" ? "CONFIGURE & ENABLE" : "WEB OFF"); color: root.settings.webReady ? root.green : (root.settings.webFailed ? root.yellow : root.faint); font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true }
+      MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; enabled: root.settings.webEnabled || root.settings.webAccessMode === "lan" || root.tailReady; onClicked: root.settings.toggleWebEnabled() }
     }
     Rectangle {
-      visible: root.settings.webEnabled
+      visible: root.settings.webFailed
+      implicitWidth: retryLabel.implicitWidth + Style.spacing.md * 2
+      implicitHeight: retryLabel.implicitHeight + Style.spacing.xs * 2
+      radius: Style.cornerRadius
+      color: Qt.rgba(root.cyan.r, root.cyan.g, root.cyan.b, 0.12)
+      border.color: root.cyan; border.width: 1
+      Text { id: retryLabel; anchors.centerIn: parent; textFormat: Text.PlainText; text: "RETRY SETUP"; color: root.cyan; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true }
+      MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.settings.retryWebSetup() }
+    }
+    Rectangle {
+      visible: root.settings.webEnabled && root.settings.webReady
       implicitWidth: copyUrl.implicitWidth + Style.spacing.md * 2
       implicitHeight: copyUrl.implicitHeight + Style.spacing.xs * 2
       radius: Style.cornerRadius
@@ -193,19 +289,21 @@ ColumnLayout {
       MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.copySelectedUrl() }
     }
     Rectangle {
-      visible: root.settings.webEnabled
+      visible: root.settings.webEnabled && root.settings.webReady
       implicitWidth: showQr.implicitWidth + Style.spacing.md * 2
       implicitHeight: showQr.implicitHeight + Style.spacing.xs * 2
       radius: Style.cornerRadius
       color: Qt.rgba(root.cyan.r, root.cyan.g, root.cyan.b, 0.12)
       border.color: Qt.rgba(root.cyan.r, root.cyan.g, root.cyan.b, 0.45)
       border.width: 1
-      Text { id: showQr; anchors.centerIn: parent; textFormat: Text.PlainText; text: "QR"; color: root.cyan; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true }
-      MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.refreshQr() }
+      Text { id: showQr; anchors.centerIn: parent; textFormat: Text.PlainText; text: root.qrSize ? "HIDE QR" : "SHOW QR"; color: root.cyan; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true }
+      MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { if (root.qrSize) root.hideQr(); else root.refreshQr() } }
     }
   }
   Text { textFormat: Text.PlainText; visible: !root.settings.webEnabled; wrapMode: Text.Wrap; Layout.fillWidth: true; text: "Turning Web Mode off stops the listener and keeps tokens. Revoke a token to rotate it."; color: root.faint; font.family: root.mono; font.pixelSize: Style.font.caption }
 
+  Text { textFormat: Text.PlainText; visible: root.settings.webEnabled && !root.settings.webReady; Layout.fillWidth: true; wrapMode: Text.Wrap; text: root.settings.webStatusText || "Starting listener…"; color: root.yellow; font.family: root.mono; font.pixelSize: Style.font.caption }
+  Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; text: "Privacy changes apply on the next successful five-second refresh. Previously received or saved data cannot be retracted."; color: root.faint; font.family: root.mono; font.pixelSize: Style.font.caption }
   Column {
     visible: root.qrSize > 0 && root.settings.webEnabled
     Layout.alignment: Qt.AlignHCenter
@@ -240,7 +338,7 @@ ColumnLayout {
         color: root.selectedTokenId === modelData.id ? root.fg : root.dim
         font.family: root.mono
         font.pixelSize: Style.font.caption
-        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { root.selectedTokenId = modelData.id; if (root.settings.webEnabled) root.refreshQr() } }
+        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { root.selectedTokenId = modelData.id; root.hideQr() } }
       }
       Item { Layout.fillWidth: true }
       Text { textFormat: Text.PlainText; visible: root.tokens.length > 1; text: "REVOKE"; color: root.red; font.family: root.mono; font.pixelSize: Style.font.caption; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { root.selectedTokenId = modelData.id; root.revokeSelected() } } }
@@ -281,6 +379,10 @@ ColumnLayout {
     }
   }
 
+  ColumnLayout {
+    visible: root.settings.webAccessMode === "lan"
+    Layout.fillWidth: true
+    spacing: Style.spacing.md
   Text { textFormat: Text.PlainText; text: "ALLOW LIST"; color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true; font.letterSpacing: 1.4 }
   Text { textFormat: Text.PlainText; wrapMode: Text.Wrap; Layout.fillWidth: true; text: "Default: " + root.defaultCidrs.join(", "); color: root.faint; font.family: root.mono; font.pixelSize: Style.font.caption }
   Repeater {
@@ -325,6 +427,8 @@ ColumnLayout {
       Text { id: addCidr; anchors.centerIn: parent; textFormat: Text.PlainText; text: "ADD"; color: root.green; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true }
       MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.addCidr() }
     }
+  }
+
   }
 
   Text { textFormat: Text.PlainText; text: "SECTIONS · DESK / WEB"; color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true; font.letterSpacing: 1.4 }

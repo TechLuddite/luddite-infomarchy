@@ -939,8 +939,8 @@ Item {
           MouseArea { anchors.fill: parent; enabled: view.interactive; cursorShape: Qt.PointingHandCursor; onClicked: view.settings.togglePrivacyMode() }
         }
         Tag {
-          text: view.settings.webEnabled ? (view.settings.webUrl ? "WEB ON" : "WEB …") : "WEB"
-          tone: view.settings.webEnabled ? view.desk.green : view.textFaint
+          text: view.settings.webEnabled ? (view.settings.webReady ? "WEB ON" : (view.settings.webStarting ? "WEB …" : "WEB FAILED")) : "WEB"
+          tone: view.settings.webReady ? view.desk.green : (view.settings.webFailed ? view.desk.yellow : view.textFaint)
           MouseArea { anchors.fill: parent; enabled: view.interactive; cursorShape: Qt.PointingHandCursor; onClicked: view.settings.toggleWebEnabled() }
         }
         Tag { text: view.keyboardAvailable ? "SUPER+I HIDE DESK · SUPER+D / ESC CLOSE" : "SUPER+I HIDE DESK · SUPER+D SHOW OVER WINDOWS"; tone: view.textFaint }

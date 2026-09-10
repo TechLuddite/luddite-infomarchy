@@ -41,13 +41,17 @@ Item {
   property bool ready: false
   property bool dashboardVisible: false
   // Stream/screenshot mask: hide WAN, LAN, SSID, user@host, GitHub login.
-  // OSS project names stay. Default off; persists until three *+I presses.
-  property bool privacyMode: false
+  // OSS project names stay. Missing or invalid settings default to privacy on.
+  property bool privacyMode: true
   property int privacyUnlockCount: 0
   readonly property int privacyUnlockNeeded: 3
   readonly property int privacyUnlockMs: 2000
   property bool webEnabled: false
-  property string webUrl: ""
+  property bool webReady: false
+  property bool webStarting: false
+  readonly property bool webFailed: webEnabled && !webReady && !webStarting
+  property string webAccessMode: "lan"
+  property string webStatusText: ""
   property var webSections: ({})
   property var webNarrowOrder: ["sessions", "changes", "needs", "projects", "activity", "github", "recent", "usage", "localAi", "machine", "containers"]
   readonly property string webServerPath: Qt.resolvedUrl("web-server.ts").toString().replace(/^file:\/\//, "")
@@ -89,12 +93,13 @@ Item {
       selectedOllamaModel = parsed && /^[A-Za-z0-9][A-Za-z0-9._:\/-]{0,255}$/.test(String(parsed.selectedOllamaModel || "")) ? String(parsed.selectedOllamaModel) : ""
       ollamaHost = parsed ? normalizeOllamaHost(parsed.ollamaHost) : ""
       dashboardVisible = parsed && typeof parsed.dashboardVisible === "boolean" ? parsed.dashboardVisible : true
-      privacyMode = !!(parsed && parsed.privacyMode === true)
+      privacyMode = !(parsed && parsed.privacyMode === false)
       privacyUnlockCount = 0
+      webAccessMode = parsed && parsed.webAccessMode === "tailscale" ? "tailscale" : "lan"
       webEnabled = !!(parsed && parsed.webEnabled === true)
       webSections = parsed && parsed.webSections && typeof parsed.webSections === "object" ? parsed.webSections : ({})
-      if (webEnabled) Qt.callLater(refreshWebUrl)
-      else webUrl = ""
+      if (webEnabled) Qt.callLater(refreshWebStatus)
+      else { webReady = false; webStarting = false }
       rightOrder = normalizedRightOrder(parsed ? parsed.rightOrder : null)
       opsOrder = normalizedOpsOrder(parsed ? parsed.opsOrder : null)
       webNarrowOrder = normalizedWebNarrowOrder(parsed ? parsed.webNarrowOrder : null)
@@ -112,10 +117,11 @@ Item {
       selectedOllamaModel = ""
       ollamaHost = ""
       dashboardVisible = true
-      privacyMode = false
+      privacyMode = true
       privacyUnlockCount = 0
+      webAccessMode = "lan"
       webEnabled = false
-      webUrl = ""
+      webReady = false
       webSections = ({})
       rightOrder = normalizedRightOrder(null)
       opsOrder = normalizedOpsOrder(null)
@@ -179,6 +185,7 @@ Item {
       dashboardVisible: dashboardVisible,
       privacyMode: privacyMode,
       webEnabled: webEnabled,
+      webAccessMode: webAccessMode,
       webSections: webSections,
       webNarrowOrder: normalizedWebNarrowOrder(webNarrowOrder),
       rightOrder: normalizedRightOrder(rightOrder),
@@ -361,39 +368,64 @@ Item {
     if (privacyUnlockCount > 0) privacyUnlockReset.restart()
     else privacyUnlockReset.stop()
   }
+  function setWebAccessMode(mode) {
+    if ((mode !== "lan" && mode !== "tailscale") || mode === webAccessMode) return
+    webEnabled = false
+    webReady = false
+    webStarting = false
+    webAccessMode = mode
+    persist()
+  }
   function setWebEnabled(enabled) {
+    webStarting = !!enabled
+    webStatusText = ""
     webEnabled = !!enabled
-    if (!webEnabled) webUrl = ""
-    else Qt.callLater(refreshWebUrl)
+    if (!webEnabled) webReady = false
+    else Qt.callLater(refreshWebStatus)
     persist()
   }
   function toggleWebEnabled() { setWebEnabled(!webEnabled) }
-  function refreshWebUrl() {
-    if (!webEnabled) { webUrl = ""; return }
-    webUrlReader.running = false
-    webUrlReader.running = true
+  function retryWebSetup() {
+    if (!webFailed || webRetryProc.running) return
+    webStatusReader.running = false
+    webStarting = true
+    webStatusText = "Retrying setup…"
+    webRetryProc.running = true
   }
   Process {
-    id: webUrlReader
-    command: ["bun", root.webServerPath, "url"]
+    id: webRetryProc
+    command: ["omarchy-shell", "infomarchy", "retryWeb"]
+    onExited: function(code) { if (code !== 0) { root.webStarting = false; root.webStatusText = "Could not retry setup. Check that the shell is running." } }
+  }
+  function refreshWebStatus() {
+    if (!webEnabled) { webReady = false; return }
+    webStatusReader.running = false
+    webStatusReader.running = true
+  }
+  Process {
+    id: webStatusReader
+    command: ["bun", root.webServerPath, "status"]
     stdout: SplitParser {
       splitMarker: "\n"
       onRead: function(line) {
         var raw = String(line || "")
-        if (raw.length > 512) return
+        if (raw.length > 1024) return
         try {
           var parsed = JSON.parse(raw)
-          if (parsed && parsed.ok === true && typeof parsed.url === "string" && parsed.url.indexOf("http://") === 0)
-            root.webUrl = parsed.url.slice(0, 256)
+          if (parsed && parsed.ok === true) {
+            root.webReady = parsed.ready === true
+            root.webStarting = parsed.running === true && !root.webReady
+            root.webStatusText = String(parsed.message || "").slice(0, 400)
+          }
         } catch (e) {}
       }
     }
   }
   Timer {
-    interval: 400
-    running: root.ready && root.webEnabled && root.webUrl === ""
+    interval: 3000
+    running: root.ready && root.webEnabled
     repeat: true
-    onTriggered: root.refreshWebUrl()
+    onTriggered: root.refreshWebStatus()
   }
   function rightIndex(id) { var index = rightOrder.indexOf(id); return index < 0 ? 99 : index }
   function moveRight(id, direction) {
