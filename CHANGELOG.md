@@ -4,6 +4,11 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 
 ## [Unreleased]
 
+### Upstream sync — 1.4.1
+- Integrated upstream `9726812`, including Muse and Antigravity / `agy` live-session detection, labels and colors. Antigravity background services are excluded; neither provider invents history or usage data.
+- Added QML syntax and real-import resolution gates, with fork baselines covering the dashboard settings drawer and experimental bar panel.
+- Preserved fork privacy, Web Mode, state locking, USAGE/billing, containers, media controls, layout and plugin identity while reconciling previously contributed features.
+
 ### Security
 - Unknown saved Web modes keep sharing off; failed settings-helper launches restore persisted UI state and allow retry. LAN address selection follows route metrics instead of local subnet preferences; missing QR/clipboard tools have setup guidance.
 - **Concurrent settings changes preserve privacy and revocation.** Desktop and browser preferences merge field/per-key patches under one lock. Token, CIDR, and listener-state mutations reread credentials under a separate shared lock, preventing stale updates from restoring revoked tokens. QML queues rapid edits through helper startup and shows failed saves before reloading persisted settings.

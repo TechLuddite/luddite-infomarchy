@@ -78,6 +78,26 @@ describe("providerOf", () => {
     expect(providerOf(["/home/user/.hermes/bin/hermes"])).toBe("hermes");
   });
 
+  test("recognizes Muse however mise resolved it", () => {
+    // Muse installs as a shell launcher on PATH that execs the real CLI out of
+    // a mise install directory, so the process can present either path.
+    expect(providerOf(["muse"])).toBe("muse");
+    expect(providerOf(["/home/user/.local/bin/muse"])).toBe("muse");
+    expect(providerOf(["/home/user/.local/share/mise/installs/http-muse/latest/muse"])).toBe("muse");
+    // "muse" is a short, ordinary word: reading or editing a file named for it
+    // must not put a card on the desk.
+    expect(providerOf(["cat", "/usr/bin/muse"])).toBeNull();
+    expect(providerOf(["vim", "notes/muse"])).toBeNull();
+    expect(providerOf(["amuse"])).toBeNull();
+  });
+
+  test("recognizes Antigravity and agy, ignoring background services", () => {
+    expect(providerOf(["/usr/bin/antigravity"])).toBe("antigravity");
+    expect(providerOf(["agy"])).toBe("antigravity");
+    expect(providerOf(["agy", "remote-control", "start"])).toBeNull();
+    expect(providerOf(["agy", "mic-serve"])).toBeNull();
+  });
+
   test("recognizes the Pi coding agent and ignores a path that merely contains pi", () => {
     expect(providerOf(["pi"])).toBe("pi");
     expect(providerOf(["/home/u/.local/share/mise/installs/pi/0.85.1/pi/pi"])).toBe("pi");
@@ -623,7 +643,10 @@ describe("history collection", () => {
     const root = join(testRoot, "grok-usage");
     const session = join(root, ".grok", "sessions", "proj", "session-aaaa");
     mkdirSync(session, { recursive: true });
-    const t1 = Date.now() - 3600_000, t2 = Date.now();
+    // Pin fixture and child to UTC: other tests change the parent timezone.
+    // Both cumulative samples must stay today, even just after midnight.
+    const t2 = Date.now();
+    const t1 = new Date(t2).setUTCHours(0, 0, 0, 0);
     const line = (ts: number, input: number, output: number) => JSON.stringify({
       timestamp: ts,
       params: { update: { usage: {
@@ -634,7 +657,7 @@ describe("history collection", () => {
     writeFileSync(join(session, "updates.jsonl"), [line(t1, 100, 10), line(t2, 250, 40)].join("\n") + "\n");
     writeFileSync(join(session, "..", "prompt_history.jsonl"), JSON.stringify({ timestamp: new Date(t2).toISOString(), session_id: "session-aaaa", prompt: "hello" }) + "\n");
     const proc = Bun.spawn([process.execPath, join(import.meta.dir, "collector.ts")], {
-      env: { HOME: root, USER: "tester", GROK_HOME: join(root, ".grok"), XDG_STATE_HOME: join(root, "state"), PATH: process.env.PATH || "", INFOMARCHY_SKIP_EXTERNAL_IP: "1", INFOMARCHY_SKIP_CONTAINERS: "1" },
+      env: { TZ: "UTC", HOME: root, USER: "tester", GROK_HOME: join(root, ".grok"), XDG_STATE_HOME: join(root, "state"), PATH: process.env.PATH || "", INFOMARCHY_SKIP_EXTERNAL_IP: "1", INFOMARCHY_SKIP_CONTAINERS: "1" },
       stdout: "pipe", stderr: "pipe",
     });
     const snap = decodeFrames(await new Response(proc.stdout).text());

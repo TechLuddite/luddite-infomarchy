@@ -135,6 +135,8 @@ Item {
       case "grok-bot": return root.magenta
       case "gemini": return root.blue
       case "hermes": return root.green
+      case "muse": return root.cyan
+      case "antigravity": return root.blue
       case "ollama": return root.green
       case "opencode": return root.blue
       case "pi": return root.green
@@ -164,6 +166,8 @@ Item {
       case "grok-bot": return "Grok Bot"
       case "gemini": return "Gemini"
       case "hermes": return "Hermes"
+      case "muse": return "Muse"
+      case "antigravity": return "Antigravity"
       case "ollama": return "Ollama"
       case "opencode": return "opencode"
       case "pi": return "Pi"
