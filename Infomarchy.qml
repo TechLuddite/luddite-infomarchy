@@ -49,6 +49,7 @@ Scope {
     id: infoModel
     refreshMs: dashboardSettings.dashboardVisible ? 4000 : 16000
     demoMode: root.demoMode
+    ollamaHost: dashboardSettings.ollamaHost
     active: dashboardSettings.ready && (dashboardSettings.dashboardVisible || dashboardSettings.notificationsEnabled)
   }
   InfoSettings { id: dashboardSettings }
@@ -159,6 +160,8 @@ Scope {
     function setDashboardVisible(v: string): void { dashboardSettings.setDashboardVisible(["1", "true", "on", "yes"].indexOf(String(v).toLowerCase()) >= 0) }
     function toggleDashboard(): void { dashboardSettings.toggleDashboardVisible() }
     function getDashboardVisible(): string { return dashboardSettings.dashboardVisible ? "true" : "false" }
+    function setOllamaHost(v: string): void { dashboardSettings.setOllamaHost(v) }
+    function getOllamaHost(): string { return String(dashboardSettings.ollamaHost || "") }
     function geometry(): string { return root.deskView ? root.deskView.geometryReport() : "{}" }
     function setSection(id: string, v: string): void { dashboardSettings.setSection(id, ["1", "true", "on", "yes"].indexOf(String(v).toLowerCase()) >= 0) }
     function toggleSection(id: string): void { dashboardSettings.toggleSection(id) }

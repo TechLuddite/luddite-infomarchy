@@ -1720,7 +1720,7 @@ Item {
           }
           onOlChanged: ensureSelection()
           Component.onCompleted: ensureSelection()
-          hint: ol.up ? "ollama up · " + (ol.modelCount || 0) + " models" : "ollama down"
+          hint: ol.up ? "ollama up · " + (ol.modelCount || 0) + " models" + (view.settings.ollamaHost ? " · " + String(view.settings.ollamaHost).replace(/^https?:\/\//, "") : "") : "ollama down"
           ColumnLayout {
             id: localAiColumn
             // Anchors, not a width binding: the rows must be handed exactly the

@@ -47,6 +47,8 @@ Item {
   // Wallpaper and overlay each run a collector; --id keeps their rate
   // baselines apart (see collector.ts prev-${id}.json).
   property string instance: "bg"
+  // Origin only, e.g. http://127.0.0.1:11435. Empty inherits OLLAMA_HOST.
+  property string ollamaHost: ""
 
   // --- theme ---------------------------------------------------------------
   // Omarchy's Color singleton gives fg/bg/accent/urgent/muted. The ANSI roles
@@ -175,6 +177,7 @@ Item {
     readonly property int maxOutputBytes: 2 * 1024 * 1024
     readonly property int maxStderrBytes: 4096
     command: root.demoMode ? ["bun", root.collectorPath, "--id", root.instance, "--demo"] : ["bun", root.collectorPath, "--id", root.instance]
+    environment: root.ollamaHost !== "" ? ({ OLLAMA_HOST: root.ollamaHost }) : ({})
 
     function fail(message) {
       protocolFailed = true
@@ -491,6 +494,7 @@ Item {
     property var pendingFrame: ({})
     property bool responded: false
     command: ["bun", root.ollamaControlPath]
+    environment: root.ollamaHost !== "" ? ({ OLLAMA_HOST: root.ollamaHost }) : ({})
     stdinEnabled: true
     onRunningChanged: if (running) responded = false
     onStarted: {
