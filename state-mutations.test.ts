@@ -150,6 +150,7 @@ for (const failWrite of [false, true]) test.skipIf(!existsSync("/usr/bin/quicksh
             b.setSection("usage", false)
             b.setWebSection("machine", false)
             b.setNotificationsEnabled(false)
+            b.setOllamaHost("http://127.0.0.1:11435")
           } else if (stage === 1 && !a.settingsWriting && !b.settingsWriting) {
             if (a.settingsError || b.settingsError) {
               if (!${failWrite} || (!a.privacyMode && a.webEnabled && !b.privacyMode && b.webEnabled)) { console.log("MUTATION_FAILED"); Qt.quit() }
@@ -182,5 +183,6 @@ for (const failWrite of [false, true]) test.skipIf(!existsSync("/usr/bin/quicksh
     expect(saved.sections).toEqual({ recent: false, usage: false });
     expect(saved.webSections).toEqual({ machine: false });
     expect(saved.notificationsEnabled).toBe(false);
+    expect(saved.ollamaHost).toBe("http://127.0.0.1:11435");
   } finally { clearTimeout(timer); p.kill("SIGKILL"); await p.exited; }
 }, 12000);

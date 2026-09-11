@@ -115,7 +115,7 @@ export function filterWebSnapshot(snapshot: any, privacy = true): any {
     ...snap, media: undefined, containers: undefined,
     user: privacy ? null : snap.user, host: privacy ? null : snap.host, machine,
     ai: {
-      ...ai, github: { ...ai.github, login: "" }, usage,
+      ...ai, github: { ...ai.github, login: "" }, gitea: undefined, usage,
       sessions: take(ai.sessions, 12).map(session),
       attention: take(ai.attention, 8).map(session),
       recent: take(ai.recent, 24).map(row => ({
