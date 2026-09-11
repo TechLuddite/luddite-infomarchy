@@ -4,6 +4,11 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 
 ## [Unreleased]
 
+## [1.3.3] — 2026-09-10
+
+### Added
+- **Muse sessions appear on the desk** (#26). Muse installs as a shell launcher on `PATH` that execs the real CLI out of a mise install directory, so the process can present either path; both are recognised. Detection only: Muse keeps no session history on this machine yet — it had never been run when this was written — so it contributes no Recent Tasks, no activity and no USAGE row, and it is deliberately absent from the heatmap legend rather than shown as a chip that can never light up. Those follow once the on-disk format can be observed instead of guessed.
+
 ## [1.3.2] — 2026-09-09
 
 ### Changed

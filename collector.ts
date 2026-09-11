@@ -521,6 +521,9 @@ const PROVIDERS: [string, RegExp][] = [
   ["grok-bot", /(^|\/)grok-bot(\s|$)/],
   ["gemini", /(^|\/)gemini(\.js|\.mjs)?$/],
   ["hermes", /(^|\/)hermes(\.js|\.mjs|\.py)?$/],
+  // Muse ships as a mise-managed launcher (~/.local/bin/muse) that execs the
+  // real CLI, so the process on the desk answers to plain "muse" either way.
+  ["muse", /(^|\/)muse$/],
   ["opencode", /(^|\/)opencode$/],
   ["aider", /(^|\/)aider$/],
   ["copilot", /(^|\/)copilot$/],

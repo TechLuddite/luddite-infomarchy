@@ -76,6 +76,19 @@ describe("providerOf", () => {
   test("recognizes Hermes as an interactive agent provider", () => {
     expect(providerOf(["/home/user/.hermes/bin/hermes"])).toBe("hermes");
   });
+
+  test("recognizes Muse however mise resolved it", () => {
+    // Muse installs as a shell launcher on PATH that execs the real CLI out of
+    // a mise install directory, so the process can present either path.
+    expect(providerOf(["muse"])).toBe("muse");
+    expect(providerOf(["/home/user/.local/bin/muse"])).toBe("muse");
+    expect(providerOf(["/home/user/.local/share/mise/installs/http-muse/latest/muse"])).toBe("muse");
+    // "muse" is a short, ordinary word: reading or editing a file named for it
+    // must not put a card on the desk.
+    expect(providerOf(["cat", "/usr/bin/muse"])).toBeNull();
+    expect(providerOf(["vim", "notes/muse"])).toBeNull();
+    expect(providerOf(["amuse"])).toBeNull();
+  });
 });
 
 describe("multiplexer session identity", () => {
