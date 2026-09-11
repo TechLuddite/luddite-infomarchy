@@ -217,13 +217,14 @@ Scope {
         // An Image cannot decode a video, and handing it one only logs
         // "Unsupported image format" and leaves the desk on the theme colour.
         // Each surface is given a source only for its own kind of file.
-        Image {
+        WaveWallpaper {
           anchors.fill: parent
           visible: !root.videoBackground
           source: root.videoBackground ? "" : root.imageUrl(root.background)
           fillMode: Image.PreserveAspectCrop
           asynchronous: true
           cache: true
+          playing: !panel.fullscreenHere
         }
 
         Loader {
