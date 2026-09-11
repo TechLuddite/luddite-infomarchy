@@ -262,6 +262,7 @@ Still and animated image wallpapers share one image surface. Supported animated 
 ### Media controls
 
 A hideable, reorderable MEDIA CONTROLS card uses the local MPRIS service for title, artist, album, player identity, and previous/play-pause/next actions. A playing player is preferred, and playerctld is used only when no other player exists. Metadata is bounded plain text; album art is never fetched. Demo mode shows sample metadata and disables actions.
+Pi sessions are detected from the `pi` process and `~/.pi/agent/sessions` JSONL history. Recent Tasks includes Pi prompts, activity, and resume via `pi --session <id>`. The recent-task window reserves space for quieter providers while retaining pinned-first and newest-first display order.
 
 ## FAQ
 

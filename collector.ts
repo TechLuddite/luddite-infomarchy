@@ -558,6 +558,7 @@ const PROVIDERS: [string, RegExp][] = [
   // "agy" is the CLI's own short name (its mise shim resolves to the same
   // binary as "antigravity"); both launch the identical program.
   ["antigravity", /(^|\/)(antigravity|agy)$/],
+  ["pi", /(^|\/)pi$/],
   ["opencode", /(^|\/)opencode$/],
   ["aider", /(^|\/)aider$/],
   ["copilot", /(^|\/)copilot$/],
@@ -755,6 +756,7 @@ export function sessionIdFrom(provider: string, cmd: string[], environ = ""): st
     grok: ["GROK_SESSION_ID"],
     gemini: ["GEMINI_SESSION_ID"],
     opencode: ["OPENCODE_SESSION_ID"],
+    pi: ["PI_SESSION_ID"],
   };
   for (const key of keys[provider] || []) {
     const id = cleanSessionId(envValue(environ, key));
@@ -815,6 +817,8 @@ function openSessionIds(pid: number, provider: string): string[] {
       // sessions/<encoded-cwd>/<session-id>/. The directory name IS the id, so
       // this is the exact session, not a guess from history.
       match = target.match(/\/sessions\/[^/]+\/([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\/[^/]+$/i);
+    else if (provider === "pi")
+      match = target.match(/\/\.pi\/agent\/sessions\/[^/]+\/[^/]*_([0-9A-Za-z][0-9A-Za-z_-]{7,127})\.jsonl$/);
     const id = cleanSessionId(match?.[1]);
     if (id) ids.add(id);
   }
@@ -1896,6 +1900,70 @@ export function attachGrokBotRoster(sessions: any[], grokBot: any): void {
   }
 }
 
+export function piUserText(message: any): string {
+  const content = message?.content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const block of content) {
+    if (block && typeof block === "object" && block.type === "text" && typeof block.text === "string") parts.push(block.text);
+  }
+  return parts.join(" ");
+}
+export function piSessionIdFromName(fileName: string): string {
+  const match = String(fileName || "").match(/_([0-9A-Za-z][0-9A-Za-z_-]{7,127})\.jsonl$/);
+  return cleanSessionId(match?.[1]);
+}
+function piHistory() {
+  const root = join(HOME, ".pi", "agent", "sessions");
+  if (!existsSync(root)) return { present: false };
+  let prompts = 0;
+  const sessionIds = new Set<string>();
+  let filesSeen = 0;
+  for (const group of ls(root).slice(0, MAX_COLLECTION_ITEMS)) {
+    const groupPath = join(root, group);
+    try { const state = lstatSync(groupPath); if (state.isSymbolicLink() || !state.isDirectory()) continue; } catch { continue; }
+    const names = ls(groupPath).filter(name => name.endsWith(".jsonl")).sort().reverse().slice(0, MAX_COLLECTION_ITEMS);
+    for (const name of names) {
+      if (filesSeen >= MAX_COLLECTION_ITEMS) break;
+      const full = join(groupPath, name);
+      try { const state = lstatSync(full); if (state.isSymbolicLink() || !state.isFile()) continue; } catch { continue; }
+      filesSeen++;
+      let cwd = "";
+      let session = piSessionIdFromName(name);
+      const head = (readRegularFileHead(full, 4096) || "").split("\n")[0] || "";
+      try {
+        const header = parseJsonBounded(head, 2048, 8);
+        if (header && header.type === "session") {
+          if (typeof header.cwd === "string") cwd = header.cwd;
+          const id = cleanSessionId(header.id);
+          if (id) session = id;
+        }
+      } catch {}
+      const text = readHistoryTail(full);
+      if (!text) continue;
+      for (const line of text.split("\n")) {
+        if (!line) continue;
+        let entry: any;
+        try { entry = parseJsonBounded(line, 4096, 12); } catch { continue; }
+        if (!entry || typeof entry !== "object" || entry.type !== "message") continue;
+        const message = entry.message && typeof entry.message === "object" ? entry.message : entry;
+        if (message.role !== "user") continue;
+        const raw = piUserText(message);
+        if (!raw) continue;
+        const ts = Number(message.timestamp) || Date.parse(String(entry.timestamp || ""));
+        if (!Number.isFinite(ts)) continue;
+        prompts++;
+        if (session) sessionIds.add(session);
+        bump(ts, "pi"); cnt("pi", ts);
+        if (plausibleTimestamp(ts)) recent.push({ provider: "pi", ts, project: shortPath(cwd), text: safePrompt(raw), session });
+      }
+    }
+    if (filesSeen >= MAX_COLLECTION_ITEMS) break;
+  }
+  return { present: true, prompts, sessions: sessionIds.size };
+}
+
 function opencodeHistory() {
   const dataRoot = process.env.XDG_DATA_HOME || join(HOME, ".local/share");
   const path = join(dataRoot, "opencode/opencode.db");
@@ -2390,7 +2458,7 @@ async function runCollector() {
   const [cpuS, memS, diskS, netS, pingS, gpuS, sessions, ollama, externalIpS, github] = await Promise.all([
     Promise.resolve(cpu()), Promise.resolve(mem()), disk(), net(), ping(), gpu(), liveSessions(pids), ollamaState(), externalIp(), githubActivity(),
   ]);
-  const claude = claudeHistory(), codex = codexHistory(), grok = grokHistory(), grokBot = grokBotHistory(), opencode = opencodeHistory(), hermes = hermesHistory();
+  const claude = claudeHistory(), codex = codexHistory(), grok = grokHistory(), grokBot = grokBotHistory(), opencode = opencodeHistory(), pi = piHistory(), hermes = hermesHistory();
   recent.sort((a, b) => b.ts - a.ts);
   for (const entry of recent) entry.activityCell = activityCellIndex(entry.ts, heatDays);
   inferSessionIdsFromRecent(sessions, recent);
@@ -2423,7 +2491,7 @@ async function runCollector() {
       attention: sessions.filter((s: any) => s.attention),
       events: notificationState.events,
       collisions: repoCollisions(sessions),
-      counts, providers: { claude, codex, grok, grokBot, opencode, hermes, ollama }, usage: agentsUsage(),
+      counts, providers: { claude, codex, grok, grokBot, opencode, pi, hermes, ollama }, usage: agentsUsage(),
       usageDays: heatDays.map(localDayKey),
       heatmap: { start: start7, days: heatDays, cells: heat.map(c => [c.n, c.p]) },
       github,

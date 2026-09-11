@@ -129,6 +129,7 @@ Item {
       case "antigravity": return root.blue
       case "ollama": return root.green
       case "opencode": return root.blue
+      case "pi": return root.green
       case "aider": return root.yellow
       case "copilot": return root.magenta
       default: return Color.accent
@@ -159,6 +160,7 @@ Item {
       case "antigravity": return "Antigravity"
       case "ollama": return "Ollama"
       case "opencode": return "opencode"
+      case "pi": return "Pi"
       case "aider": return "Aider"
       case "copilot": return "Copilot"
       default: return plainText(p, 64)
