@@ -4,6 +4,24 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-09-10
+
+Six community pull requests, integrated and verified together rather than one at a time. Thank you to everyone who sent these.
+
+### Added
+- **Antigravity and `agy` are recognised agents** (#24, @alinuxfan, closes #23). Background services — `remote-control start` and `mic-serve` — are excluded the same way Codex's `app-server` is, so only real conversations become cards.
+- **Pi sessions, and Recent Tasks that does not bury quiet agents** (#15, @TechLuddite). Pi joins the session and history pipeline, and the recent window now reserves room per provider so a busy Claude week cannot hide OpenCode or Pi, while keeping pinned-first and newest-first order.
+- **Optional MEDIA CONTROLS card** (#20, @TechLuddite) over Quickshell's local MPRIS service. Album art is never fetched. A playing player wins; `playerctld` is only a fallback.
+- **The LOCAL AI server origin persists** (#18, @TechLuddite) through `setOllamaHost` / `getOllamaHost`. Origins carrying credentials, paths, queries or fragments are rejected, and automatic topic refinement keeps its loopback-only default.
+- **Animated image wallpapers** (#22, @TechLuddite). One surface serves stills and animation; the overlay pauses playback while closed.
+- **Muse is a recognised agent** (#26, @TRIBUSeric). Detection only — Muse keeps no history on disk yet, so it is deliberately absent from the heatmap legend rather than shown as a chip that can never light up.
+
+### Fixed
+- **Observational collection and redaction hardened** (#14, @TechLuddite). Git commands run with filesystem monitors, hooks, external diffs and credential helpers disabled and global configuration ignored — a scanned repository controls all of those, so this closes a real code-execution path. `INFOMARCHY_SKIP_GITHUB=1` now covers CI as well as the activity feed, Herdr focus requires the matching socket, and six more token prefixes are redacted. It also stops treating `0.0.0.0` as loopback, which had let automatic refinement post prompt text to it.
+
+### Changed
+- **Every QML file is gated on `qmllint`.** Every other QML check here matches strings against the file text, which cannot tell a valid document from a broken one. Integrating this queue produced an `InfoSettings.qml` with a duplicated property block and a missing comma that passed the whole suite and would have failed to load. Only `[syntax]` findings are gated, so the check holds without the Quickshell type registry.
+
 ## [1.3.3] — 2026-09-10
 
 ### Added
