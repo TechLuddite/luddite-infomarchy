@@ -391,7 +391,8 @@ describe("github activity heatmap", () => {
   test("registers GITHUB as a removable module beside ACTIVITY and reaches it from the keyboard", () => {
     const ids = [...settings.matchAll(/\{ id: "([a-zA-Z]+)", label: "[^"]+" \}/g)].map(match => match[1]);
     expect(ids.indexOf("github")).toBe(ids.indexOf("activity") + 1);
-    expect(ids).toHaveLength(10);
+    expect(ids).toHaveLength(11);
+    expect(ids[10]).toBe("media");
     expect(overlay).toContain("event.key >= Qt.Key_0 && event.key <= Qt.Key_9");
     expect(overlay).toContain("event.key === Qt.Key_0 ? 9 : event.key - Qt.Key_1");
     // Key n toggles definitions[n-1]; 0 is the tenth. Documented as 4 = GITHUB, 0 = PROJECTS.
@@ -433,4 +434,41 @@ test("persisted Ollama origins reject credentials and request paths", () => {
   expect(normalize("https://ollama.example/")).toBe("https://ollama.example");
   expect(normalize("http://[::1]:11434")).toBe("http://[::1]:11434");
   for (const invalid of ["http://u:password@host", "http://host/api", "http://host?q=x", "http://host#x", "http://host:65536"]) expect(normalize(invalid)).toBe("");
+});
+
+describe("media controls card", () => {
+  test("registers a reorderable lower-right MPRIS card with prev/play/next and a title line", () => {
+    expect(settings).toContain('{ id: "media", label: "MEDIA" }');
+    expect(settings).toContain('property var rightOrder: ["usage", "localAi", "machine", "media"]');
+    expect(view).toContain('title: "MEDIA CONTROLS"');
+    expect(view).toContain('moveId: "media"');
+    expect(view).toContain("import Quickshell.Services.Mpris");
+    expect(view).toContain('text: "PREV"');
+    expect(view).toContain('text: mediaCard.playing ? "PAUSE" : "PLAY"');
+    expect(view).toContain('text: "NEXT"');
+    expect(view).toContain('onClicked: mediaCard.run("previous")');
+    expect(view).toContain('onClicked: mediaCard.run("playPause")');
+    expect(view).toContain('onClicked: mediaCard.run("next")');
+    expect(view).toContain("mediaCard.displayTitle");
+    expect(view).toContain("readonly property string displayTitle: rawTitle || (player || demo ? \"no title\" : \"no media player\")");
+    expect(view).not.toContain("trackArtUrl");
+    const mediaBlock = view.slice(view.indexOf('id: mediaCard'), view.indexOf("Legend"));
+    expect(mediaBlock).not.toContain("Image {");
+    expect(mediaBlock).not.toContain("privacyMode");
+  });
+});
+
+
+test("media selection prefers playback and skips playerctld when another player exists", () => {
+  const proxySource = view.match(/function mediaIsProxy\([\s\S]*?\n  \}/)?.[0];
+  const mediaIsProxy = Function(`return (${proxySource})`)();
+  const body = view.match(/readonly property var mediaPlayer: \{([\s\S]*?)\n  \}/)?.[1];
+  const choose = Function("view", body || "");
+  const proxy = { dbusName: "org.mpris.MediaPlayer2.playerctld", isPlaying: true };
+  const paused = { dbusName: "org.mpris.MediaPlayer2.test", isPlaying: false };
+  const playing = { dbusName: "org.mpris.MediaPlayer2.music", isPlaying: true };
+  expect(choose({ mprisPlayers: [proxy, paused, playing], mediaIsProxy })).toBe(playing);
+  expect(choose({ mprisPlayers: [proxy, paused], mediaIsProxy })).toBe(paused);
+  expect(choose({ mprisPlayers: [proxy], mediaIsProxy })).toBe(proxy);
+  expect(choose({ mprisPlayers: [], mediaIsProxy })).toBeNull();
 });

@@ -259,6 +259,9 @@ Prompt and session data stays on the machine. Prompt text is stored as a 140-cha
 Observational Git commands disable filesystem monitors, hooks, external diffs, text conversion, and credential helpers, and ignore global/system Git configuration. GitHub CI polling resolves a github.com origin to `owner/repo` and calls `gh --repo` outside the agent working directory; `INFOMARCHY_SKIP_GITHUB=1` skips both CI and activity fetching. Herdr focus requires the matching socket. Recent-task redaction also recognizes GitHub fine-grained, xAI, GitLab, Hugging Face, Stripe, and npm token prefixes, including Grok Bot text before markdown flattening. Resume uses the same project-directory guard as Open Project.
 LOCAL AI can persist a server origin with `omarchy-shell infomarchy setOllamaHost http://127.0.0.1:11434`; `getOllamaHost` reads it and an empty value restores environment/default behavior. Both the model inventory and explicit load/unload actions use the selected origin. URLs containing credentials, paths, queries, or fragments are rejected. Topic refinement retains its loopback-only default unless `INFOMARCHY_ALLOW_REMOTE_OLLAMA=1` is explicitly set.
 Still and animated image wallpapers share one image surface. Supported animated GIF/WebP files play their own frames; still files remain still. The overlay pauses playback and rendering while closed. Existing video wallpaper handling is unchanged.
+### Media controls
+
+A hideable, reorderable MEDIA CONTROLS card uses the local MPRIS service for title, artist, album, player identity, and previous/play-pause/next actions. A playing player is preferred, and playerctld is used only when no other player exists. Metadata is bounded plain text; album art is never fetched. Demo mode shows sample metadata and disables actions.
 
 ## FAQ
 
