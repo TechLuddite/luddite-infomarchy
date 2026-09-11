@@ -4,6 +4,11 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 
 ## [Unreleased]
 
+## [1.4.1] — 2026-09-11
+
+### Changed
+- **QML is now checked at two layers, because parsing is not loading.** `qml-syntax.test.ts` proves each file parses; that is a weaker guarantee than it looks, since a property bound to an id that does not exist is valid syntax and still fails on the desk. `qml-resolve.test.ts` resolves the real imports (`qs.Commons`, `qs.Ui`, the Quickshell modules) so qmllint can tell whether a name exists at all. It gates a per-file ceiling rather than zero, because the codebase carries findings that are idiomatic or unmodellable rather than wrong: `[unqualified]` is how QML reads its own root properties, `PanelWindow` is created by the Quickshell runtime so qmllint calls it uncreatable, and `BackgroundWallpaper.qml` deliberately names `BackgroundMedia`, which exists only on an Omarchy with video wallpaper support. A ceiling still catches the case that matters, since one new unresolvable reference moves the count. Verified both ways: injecting `nonexistentThing.value` into `InfoSettings.qml` passes the syntax gate and fails this one. The gate announces a skip when Omarchy or qmllint is absent rather than passing silently.
+
 ## [1.4.0] — 2026-09-10
 
 Six community pull requests, integrated and verified together rather than one at a time. Thank you to everyone who sent these.
