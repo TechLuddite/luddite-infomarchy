@@ -89,6 +89,13 @@ describe("providerOf", () => {
     expect(providerOf(["vim", "notes/muse"])).toBeNull();
     expect(providerOf(["amuse"])).toBeNull();
   });
+
+  test("recognizes Antigravity and agy, ignoring background services", () => {
+    expect(providerOf(["/usr/bin/antigravity"])).toBe("antigravity");
+    expect(providerOf(["agy"])).toBe("antigravity");
+    expect(providerOf(["agy", "remote-control", "start"])).toBeNull();
+    expect(providerOf(["agy", "mic-serve"])).toBeNull();
+  });
 });
 
 describe("multiplexer session identity", () => {

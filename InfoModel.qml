@@ -124,6 +124,7 @@ Item {
       case "gemini": return root.blue
       case "hermes": return root.green
       case "muse": return root.cyan
+      case "antigravity": return root.blue
       case "ollama": return root.green
       case "opencode": return root.blue
       case "aider": return root.yellow
@@ -153,6 +154,7 @@ Item {
       case "gemini": return "Gemini"
       case "hermes": return "Hermes"
       case "muse": return "Muse"
+      case "antigravity": return "Antigravity"
       case "ollama": return "Ollama"
       case "opencode": return "opencode"
       case "aider": return "Aider"
