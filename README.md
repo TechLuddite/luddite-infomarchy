@@ -148,7 +148,7 @@ Web Mode makes the Infomarchy desk available in a browser on your phone, tablet,
 
 The page follows the live Omarchy theme and wallpaper. Wide screens use two columns; narrow screens stack cards and offer **UP/DOWN** ordering. Module chips show or hide sections, and zoom is remembered for the current browser tab. Web section visibility and narrow-screen order are independent of the desktop layout but shared by web viewers. A successful refresh updates the page and theme every five seconds while preserving scroll position.
 
-Web Mode displays sessions, recent tasks, activity, usage, local AI status, and machine telemetry. USAGE includes per-model meters and **TOKENS · 7 days**, with unavailable token counts omitted. The $ VALUE chart is absent. Browser controls change presentation; desktop actions such as focusing sessions and loading models remain on the desktop.
+Web Mode displays sessions, recent tasks, activity, usage, local AI status, and machine telemetry. USAGE includes per-model meters and **TOKENS · 7 days**, with unavailable token counts omitted. MEDIA CONTROLS and the $ VALUE chart are absent. Browser controls change presentation; desktop actions such as focusing sessions and loading models remain on the desktop.
 
 ### Access and viewer credentials
 

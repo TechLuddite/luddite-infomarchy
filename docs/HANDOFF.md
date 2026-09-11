@@ -1,6 +1,6 @@
 # Web Mode maintenance handoff
 
-README owns user-facing setup instructions; WEB-MODE-SECURITY.md owns implemented boundaries and rationale. This proposal is based on upstream `f8447af` and preserves `nixfred.infomarchy`, upstream installation instructions, desktop modules and provider collectors. It adds Web Mode, desktop privacy controls and the state transactions they require. It does not add containers, media controls, provider billing changes, a new LOCAL AI endpoint setting or a bar widget. Web Mode setup is accessed through the dashboard SETTINGS drawer.
+README owns user-facing setup instructions; WEB-MODE-SECURITY.md owns implemented boundaries and rationale. This proposal is rebased onto upstream `9726812` (1.4.1) and preserves `nixfred.infomarchy`, upstream installation instructions, desktop modules and provider collectors. It adds Web Mode, desktop privacy controls and the state transactions they require. It does not add containers, provider billing changes or a bar widget. Upstream media controls, Pi and the persisted LOCAL AI origin remain available on the desktop; media is excluded from Web Mode. The Ollama origin now saves through the shared settings transaction. Web Mode setup is accessed through the dashboard SETTINGS drawer.
 
 ## Source map
 
@@ -31,3 +31,9 @@ Serve owns only its foreground mapping on 8788 and a loopback backend; never res
 - README's OpenSSL recipe was executed in isolated storage during source preparation and verified the generated IP certificate. Prior real-device evidence for the source implementation: the user verified Android Manual HTTPS after CA installation and a scoped firewall correction, then verified restored Tailscale. This is separate from validation of the extracted branch.
 - Desktop-local probes do not exercise inbound firewall rules. Bun's live probe rejected the name-constrained test CA with `UNSPECIFIED`; independent OpenSSL/curl/Chromium verification and the Android test succeeded. Client trust compatibility remains a client responsibility.
 - `git diff --check` passed. No public exposure, live desktop replacement, local PKI or credential-bearing artifacts are part of this contribution.
+
+## Rebase verification — 2026-09-11
+
+Rebased onto upstream `9726812` (1.4.1). Preserved upstream media, Pi, provider recognition, animated wallpapers and the persisted Ollama origin. The origin setter now submits a field patch; the real offscreen competing-writer test verifies it saves alongside privacy, WEB-off and layout changes. Media remains desktop-only and the bar widget remains excluded.
+
+`PATH=/usr/bin:$PATH bun test --timeout 30000`: 280 passed, 0 failed across 22 files, including syntax and real-import QML gates, offscreen QML lifecycle/settings tests, and actual TLS/privacy tests. Import-resolution ceilings account for the settings drawer and its Process handlers/dynamic Style properties; they do not claim zero warnings or visual validation. `git diff --check` passed. No live deployment or new phone verification was performed.
