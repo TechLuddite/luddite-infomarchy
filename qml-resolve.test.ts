@@ -23,14 +23,35 @@ import { join } from "path";
 // reference moves the count, which is exactly what a bad merge introduces.
 // Verified — the same injection took InfoModel from 5 to 6.
 const CEILINGS: Record<string, number> = {
-  "BackgroundWallpaper.qml": 2,
+  "BackgroundWallpaper.qml": 0,
   "Infomarchy.qml": 26,
   "InfoModel.qml": 5,
   "InfoSettings.qml": 0,
   "InfoView.qml": 473,
-  "Overlay.qml": 29,
+  "Overlay.qml": 27,
   "WaveWallpaper.qml": 0,
 };
+
+// Findings that exist only because the plugin deliberately survives an Omarchy
+// without video wallpaper support. They appear against Omarchy 4.0.3 and vanish
+// against a tree that has the feature, so counting them made the ceilings
+// depend on which Omarchy ran the test: 4.0.3 measured 28 in Infomarchy.qml
+// against a ceiling of 26 and failed every stock install. Each one is the
+// fallback working as designed, not a defect:
+//   - `Util.isVideoPath` is only called behind `typeof ... === "function"`.
+//   - `BackgroundMedia` is reached through a Loader by URL so its absence
+//     cannot take the plugin down; with it unresolved, that file's `qs.Ui`
+//     import then reads as unused.
+// Matched narrowly (exact member, exact type, one file for the import) so an
+// unrelated missing member or unused import still counts.
+const VERSION_DEPENDENT: [RegExp, string | null][] = [
+  [/Member "isVideoPath" not found on type "Util" \[missing-property\]$/, null],
+  [/BackgroundMedia was not found\..*\[import\]$/, "BackgroundWallpaper.qml"],
+  [/Unused import \[unused-imports\]$/, "BackgroundWallpaper.qml"],
+];
+function versionDependent(file: string, line: string): boolean {
+  return VERSION_DEPENDENT.some(([re, only]) => (only === null || only === file) && re.test(line.trim()));
+}
 
 const QMLLINT = ["/usr/lib/qt6/bin/qmllint", "/usr/bin/qmllint"].find(p => existsSync(p)) || "";
 // `qs.X` resolves to <shell root>/X, so the import root must contain a "qs".
@@ -61,7 +82,9 @@ describe("QML resolves against its real imports", () => {
         symlinkSync(SHELL_ROOT, join(root, "qs"));
         const run = Bun.spawnSync([QMLLINT, "-I", root, "-I", QT_QML, join(import.meta.dir, name)]);
         const output = run.stdout.toString() + run.stderr.toString();
-        const findings = output.split("\n").filter(line => /\[[a-z0-9-]+\]$/.test(line.trim()));
+        const findings = output.split("\n")
+          .filter(line => /\[[a-z0-9-]+\]$/.test(line.trim()))
+          .filter(line => !versionDependent(name, line));
         const ceiling = CEILINGS[name];
         // A file nobody recorded a ceiling for must not slip through unchecked.
         expect(ceiling, `${name} has no recorded ceiling; add one`).toBeDefined();

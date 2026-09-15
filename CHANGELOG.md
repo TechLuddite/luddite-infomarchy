@@ -5,6 +5,8 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 ## [Unreleased]
 
 ### Fixed
+- **Hermes launched as `python -m hermes_cli.main` shows up on the desk** (#11, @reverb256). Installs without a shebang launcher run Hermes as a Python module, which the provider pattern never matched, so those live sessions were invisible. Service subcommands in that form (`gateway`, `proxy`, `cron` and the rest) stay off the desk, the same way Codex's `app-server` does.
+- **The resolved-import QML gate passes on stock Omarchy 4.0.3.** It counted findings produced by the plugin's own video-support fallbacks, `Util.isVideoPath` behind a `typeof` guard and `BackgroundMedia` loaded by URL, which appear only on an Omarchy without video wallpapers. The ceilings therefore depended on which Omarchy ran the test, and 4.0.3 failed at 28 against 26. Those exact findings are now excluded, matched narrowly, and the ceilings tightened to match. Reported by @Tech0001 in #28.
 - **Wallpapers keep their proportions on ultrawide and portrait displays** (#28, @Tech0001). The animated-image surface bound `sourceSize` to the display, so every frame was stretched to the output's shape before `PreserveAspectCrop` ran, and the crop could not undo it. Frames now decode at their natural size and the crop does the fitting, on the desk and the overlay alike. A headless Qt test compares real rendered pixels against a plain aspect-preserving crop at ultrawide, landscape and portrait sizes, including resizing a live instance. Frames larger than the display now use more cache memory, which is the stated tradeoff.
 
 ### Changed
