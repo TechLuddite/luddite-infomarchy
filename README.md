@@ -20,7 +20,7 @@
 
 The public preview is the real plugin rendered on an empty Omarchy desktop using Infomarchy's explicit, transient demo-data mode. It contains no live prompt, hostname, username, network, path, process, or session data.
 
-> **Want to see the plain desktop?** Press **`SUPER + I`** to hide the Infomarchy cards and reveal your wallpaper. Press **`SUPER + I`** again to bring the dashboard back. Add the one-time key binding shown under [Install](#install).
+> **Want to see the plain desktop?** After [configuring the shortcuts](#configure-keyboard-shortcuts), press **`SUPER + I`** to hide the Infomarchy cards and reveal your wallpaper. Press **`SUPER + I`** again to bring the dashboard back.
 
 ---
 
@@ -138,7 +138,7 @@ The three right-column cards—Usage, Local AI, and Machine—also have draggabl
 
 ### ⌨️ Two surfaces, one dashboard
 
-The wallpaper is interactive wherever no window covers it (double-click or right-click the empty desk opens Omarchy's wallpaper switcher, as stock does). Press **`SUPER + I`** to hide the wallpaper dashboard and see the clean desktop; press it again to restore the cards. When you're buried in terminals, **`SUPER + D`** shows the desktop on top of everything — the wallpaper exactly as the desk paints it, with the dashboard when SUPER+I has it visible and the plain photo when it doesn't; `Esc` or a click on the backdrop dismisses it.
+The wallpaper is interactive wherever no window covers it (double-click or right-click the empty desk opens Omarchy's wallpaper switcher, as stock does). After [configuring the shortcuts](#configure-keyboard-shortcuts), press **`SUPER + I`** to hide the wallpaper dashboard and see the clean desktop; press it again to restore the cards. When you're buried in terminals, **`SUPER + D`** shows the desktop on top of everything — the wallpaper exactly as the desk paints it, with the dashboard when SUPER+I has it visible and the plain photo when it doesn't; `Esc` or a click on the backdrop dismisses it.
 
 The module strip doubles as a keyboard command strip in the overlay: **1–9** toggle modules, **J/K** (or arrows) select a live session, **Enter** focuses it, **A** clears activity filters, and **Esc** closes. The selected session gets a bright outline.
 
@@ -154,13 +154,32 @@ If bun is missing the desk says so in red at the top and in the sessions card, a
 
 The plugin declares itself as a clone of `omarchy.background`, so Omarchy hands it the wallpaper role. Your chosen wallpaper is still there — dimmed to 32% behind the glass — and `omarchy theme bg set …` keeps working.
 
-Bind the fullscreen overlay and wallpaper-dashboard toggle in `~/.config/hypr/bindings.lua` (pick any free chords):
+### Configure keyboard shortcuts
+
+Installing or enabling the plugin does **not** create Hyprland keybindings. The dashboard's `SUPER+I` and `SUPER+D` hints assume you have added the bindings below.
+
+Check your existing shortcuts with `omarchy menu keybindings --print`, then add the fullscreen overlay and wallpaper-dashboard toggle to `~/.config/hypr/bindings.lua`. Pick free chords; if you intentionally replace an existing binding, add `hl.unbind("SUPER + I")` or `hl.unbind("SUPER + D")` before its replacement.
 
 ```lua
 o.bind("SUPER + D", "Infomarchy: AI info desk", "omarchy-shell shell toggle nixfred.infomarchy '{}'")
 -- Hide the cards to see the plain desktop; press again to restore them.
 o.bind("SUPER + I", "Infomarchy: toggle wallpaper dashboard", "omarchy-shell infomarchy toggleDashboard")
 ```
+
+Reload and check for configuration errors:
+
+```bash
+hyprctl reload
+hyprctl configerrors
+```
+
+Press `SUPER+I` to hide the dashboard, then press it again to restore it. If nothing happens, try the same action directly:
+
+```bash
+omarchy-shell infomarchy toggleDashboard
+```
+
+If this hides or restores the cards, the plugin is working; check that your binding was added to the loaded Hyprland config and that `hyprctl configerrors` is empty. This command toggles visibility too, so run it again if you want to restore the previous state.
 
 <details>
 <summary>Manual install</summary>
@@ -171,6 +190,8 @@ omarchy-shell shell rescanPlugins
 omarchy plugin enable nixfred.infomarchy
 omarchy restart shell
 ```
+
+Then [configure the keyboard shortcuts](#configure-keyboard-shortcuts) above.
 </details>
 
 ## Remove
