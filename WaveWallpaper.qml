@@ -1,7 +1,7 @@
 import QtQuick
 
 // One image surface for still and animated wallpapers. Overlay playback
-// pauses while it is closed; image dimensions follow the display surface.
+// pauses while it is closed; fillMode handles the display's aspect ratio.
 Item {
   id: root
 
@@ -21,6 +21,8 @@ Item {
     playing: root.playing
     paused: !root.playing
     speed: 1.0
-    sourceSize: Qt.size(Math.max(1, Math.round(root.width)), Math.max(1, Math.round(root.height)))
+    // Keep the decoded frame's natural proportions. AnimatedImage stretches
+    // frames to an explicit sourceSize before fillMode is applied, so using
+    // the display dimensions here distorts wallpapers on mismatched outputs.
   }
 }
