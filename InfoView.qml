@@ -122,6 +122,58 @@ Item {
   readonly property var allSessions: ai.sessions || []
   readonly property var projects: ai.projects || []
   readonly property var sessions: !projectFilter ? allSessions : allSessions.filter(function(item) { return projectMatches(item) })
+  readonly property int sessionQuietMs: Math.max(0, Number(settings.sessionQuietMinutes || 0)) * 60000
+  // Resolved per provider so groupQuietSessions stays a pure function of data.
+  readonly property var sessionGroupState: {
+    var state = {}
+    for (var i = 0; i < sessions.length; i++) {
+      var provider = String(sessions[i].provider || "").toLowerCase()
+      if (provider && state[provider] === undefined) state[provider] = settings.sessionGroupEnabled(provider)
+    }
+    return state
+  }
+  // What the SESSIONS card actually renders: every loud session as its own
+  // card, each provider's quiet ones grouped into one.
+  readonly property var displaySessions: groupQuietSessions(sessions, sessionGroupState, sessionQuietMs, 2, Number(snap.ts || Date.now()))
+  readonly property int groupedSessionCount: {
+    var total = 0
+    for (var i = 0; i < displaySessions.length; i++)
+      if (displaySessions[i].grouped === true) total += (displaySessions[i].members || []).length
+    return total
+  }
+  // Counted whether or not the provider is currently grouped, because this is
+  // what decides that the strip shows a chip to group or ungroup it at all.
+  readonly property var quietProviderCounts: {
+    var counts = {}, now = Number(snap.ts || Date.now())
+    for (var i = 0; i < sessions.length; i++) {
+      var provider = String(sessions[i].provider || "").toLowerCase()
+      if (!provider || !sessionIsQuiet(sessions[i], sessionQuietMs, now)) continue
+      counts[provider] = (counts[provider] || 0) + 1
+    }
+    return counts
+  }
+  // What the group chips are offering to group, grouped or not, so the SESSIONS
+  // hint can report it in either state.
+  readonly property int quietSessionCount: {
+    var total = 0
+    for (var i = 0; i < groupableProviders.length; i++) total += quietProviderCounts[groupableProviders[i]] || 0
+    return total
+  }
+  // Grouping is a property of a provider, and a provider is named on its own
+  // cards — not in the module strip, which is a list of the panes below it.
+  // True where the toggle would do something: a provider with enough quiet
+  // sessions to group. That set does not change when you group it (grouping does
+  // not make a session less quiet), so the control never disappears under the
+  // pointer and there is always a way back.
+  function sessionGroupToggleable(provider) {
+    var key = String(provider || "").toLowerCase()
+    return !!key && groupableProviders.indexOf(key) >= 0
+  }
+  readonly property var groupableProviders: {
+    var result = []
+    for (var key in quietProviderCounts) if (quietProviderCounts[key] >= 2) result.push(key)
+    return result.sort()
+  }
   readonly property var activeNotificationProviders: {
     var result = []
     for (var i = 0; i < allSessions.length; i++) {
@@ -298,12 +350,121 @@ Item {
     if (!duration || !isFinite(remaining) || remaining < 0 || elapsed < duration * 0.03) return null
     return Math.max(0, Number(limit.percent || 0) * duration / elapsed)
   }
+  // ---- grouping quiet sessions ------------------------------------------------
+  // Grok Bot runs a whole roster inside one Electron process and the collector
+  // expands it into one card per bot, so a nine-bot roster costs nine cards and
+  // on its own trips `sessionFlow.dense` (> 8), shrinking every Claude and Codex
+  // card on the desk. These four functions group the quiet ones back into a
+  // single card. They are deliberately provider-agnostic and free of any `view.`
+  // reference: the rule is "this provider fanned out and most of it is idle",
+  // not "this is Grok Bot", and info-ui.test.ts runs them as plain functions.
+  function sessionActivityAt(session) {
+    if (!session) return 0
+    // topicAt is the roster's own updatedAt for a bot and the last prompt for a
+    // terminal agent; idleSince and startedAt are the fallbacks for providers
+    // that report neither.
+    return Number(session.topicAt || session.idleSince || session.startedAt || 0)
+  }
+  function sessionIsQuiet(session, quietMs, now) {
+    if (!session) return false
+    if (session.busy === true) return false
+    // attentionSignal has three states and they are not the same kind of thing.
+    // "waiting" is an agent blocked on your answer and "blocked" is a conflict,
+    // crash or failure: both are requests, and a request does not expire, so
+    // neither ever groups at any age. "done" — ready for review, or a bot
+    // holding replies you have not read — is a notification, and a notification
+    // nobody has looked at for a month has stopped being news, so it falls
+    // through to the age test below like any other idle card. Nothing is lost
+    // either way: ai.attention is built collector-side from the ungrouped list,
+    // so NEXT ACTIONS and the alerts still carry every one of them.
+    var attention = String(session.attention || "")
+    if (attention === "waiting" || attention === "blocked") return false
+    var window = Number(quietMs)
+    if (!isFinite(window) || window <= 0) return true
+    var at = sessionActivityAt(session)
+    // No timestamp at all reads as long-idle rather than brand new.
+    return !at || Number(now) - at >= window
+  }
+  // A group is rendered by the ordinary session delegate, so it has to look
+  // like a session. Resources, pid and window come from the member that owns
+  // them (attachGrokBotRoster gives the real counters to one bot and nulls the
+  // rest), which makes the card report the app's true cost once instead of
+  // nine times.
+  function sessionGroupRow(provider, members) {
+    var owner = null, newest = 0, review = 0
+    for (var i = 0; i < members.length; i++) {
+      var candidate = members[i]
+      if (!owner && candidate.resources && candidate.resources.cpuPct !== null && candidate.resources.cpuPct !== undefined) owner = candidate
+      var at = sessionActivityAt(candidate)
+      if (at > newest) newest = at
+      // Grouped-but-unseen is still counted and shown on the card, so a stale
+      // notification is quieter than a card without being invisible.
+      if (String(candidate.attention || "") === "done") review++
+    }
+    if (!owner) owner = members[0]
+    return {
+      grouped: true,
+      provider: provider,
+      members: members,
+      owner: owner,
+      review: review,
+      name: owner.name || "",
+      pid: owner.pid,
+      window: owner.window || null,
+      hosts: [],
+      // Shaped, not bare: the pid line tests these against null and would
+      // call toFixed on an undefined cpuPct if the owner carried no counters.
+      resources: owner.resources || { cpuPct: null, rss: null, processes: null, gpuMemory: null },
+      uptimeSec: Number(owner.uptimeSec || 0),
+      startedAt: Number(owner.startedAt || 0),
+      topicAt: newest,
+      project: members.length + " quiet",
+      topic: "",
+      cwd: "", repoRoot: "", git: null, changes: null, ci: null,
+      session: owner.session || "",
+      sessionIds: [],
+      attention: "", attentionReason: "", attentionAction: "", attentionDetail: ""
+    }
+  }
+  function groupQuietSessions(list, groupedProviders, quietMs, minimum, now) {
+    var rows = Array.isArray(list) ? list : []
+    // Grouping one card into one card is a pure loss: it costs the reader a
+    // click and saves no space.
+    var floor = Math.max(2, Number(minimum) || 0)
+    var quiet = {}
+    for (var i = 0; i < rows.length; i++) {
+      var provider = String((rows[i] || {}).provider || "").toLowerCase()
+      if (!provider || !groupedProviders || groupedProviders[provider] !== true) continue
+      if (!sessionIsQuiet(rows[i], quietMs, now)) continue
+      if (!quiet[provider]) quiet[provider] = []
+      quiet[provider].push(rows[i])
+    }
+    // A group is a taller card than its neighbours, and a Flow row is as tall as
+    // the tallest card in it. Leave a group among the cards and every short card
+    // sharing its row gets a band of dead space underneath, while the cards
+    // after it wrap into a row that reads as leftovers. Every group therefore
+    // goes at the end, in the order its provider first appears: the live cards
+    // stay one uniform grid and the only overhang is at the bottom edge.
+    var result = [], order = []
+    for (var j = 0; j < rows.length; j++) {
+      var row = rows[j], key = String((row || {}).provider || "").toLowerCase()
+      var members = quiet[key]
+      if (!members || members.length < floor) { result.push(row); continue }
+      if (order.indexOf(key) < 0) order.push(key)
+      if (members.indexOf(row) < 0) result.push(row)
+    }
+    for (var g = 0; g < order.length; g++) result.push(sessionGroupRow(order[g], quiet[order[g]]))
+    return result
+  }
+  // Keyboard navigation walks what is on screen. The delegate compares its own
+  // `index` against keyboardSessionIndex, so stepping through anything other
+  // than the rendered list would put the highlight ring on the wrong card.
   function keyboardStep(delta) {
-    if (!sessions.length) { keyboardSessionIndex = -1; return }
-    keyboardSessionIndex = (keyboardSessionIndex + Number(delta) + sessions.length) % sessions.length
+    if (!displaySessions.length) { keyboardSessionIndex = -1; return }
+    keyboardSessionIndex = (keyboardSessionIndex + Number(delta) + displaySessions.length) % displaySessions.length
   }
   function activateKeyboardSession() {
-    var session = sessions[keyboardSessionIndex]
+    var session = displaySessions[keyboardSessionIndex]
     if (session && session.window && session.window.address) navigateTo(session.window.address)
   }
   // inspectedSession/selectedPrompt hold a copy of the delegate's modelData from
@@ -314,7 +475,7 @@ Item {
   readonly property var liveInspectedSession: {
     var pinnedSession = inspectedSession
     if (!pinnedSession) return null
-    // pid+provider stopped being unique once the Grok Bot roster began sharing
+    // pid+provider stopped being unique when the Grok Bot roster began sharing
     // one process: inspecting the sixth bot re-resolved to the first on the
     // next tick. Match the session id too, and keep pid+provider as the
     // fallback for providers that report no id.
@@ -904,7 +1065,11 @@ Item {
           hint: (view.projectFilter
                   ? view.sessions.length + " of " + view.allSessions.length + " running · filtered by " + view.projectFilter.replace(/^.*\//, "")
                   : view.sessions.length + " running")
-                + " · left focus · right inspect" + (view.desk.error ? " · ⚠ " + view.desk.error : "")
+                + (view.groupedSessionCount ? " · " + view.groupedSessionCount + " quiet grouped"
+                    : view.quietSessionCount ? " · " + view.quietSessionCount + " quiet" : "")
+                + " · left focus · right inspect"
+                + (view.groupableProviders.length ? " · ▴▾ next to an agent name groups it" : "")
+                + (view.desk.error ? " · ⚠ " + view.desk.error : "")
           Flow {
             id: sessionFlow
             width: parent.width
@@ -918,29 +1083,44 @@ Item {
             // ops cards are the reason the desk exists, so the session cards are
             // the ones that give way. Dense mode narrows them and drops the
             // lines a glance does not need — the inspector still has all of it.
-            readonly property bool dense: view.sessions.length > 8
+            readonly property bool dense: view.displaySessions.length > 8
             // Columns are chosen to bound the number of ROWS, since rows are
             // what push the desk off the screen. Fewest columns that keep it to
             // about four, so the cards stay as wide as that allows.
             readonly property int targetColumns: dense
-              ? Math.max(6, Math.min(8, Math.ceil(view.sessions.length / 4)))
-              : Math.max(4, Math.min(6, view.sessions.length))
+              ? Math.max(6, Math.min(8, Math.ceil(view.displaySessions.length / 4)))
+              : Math.max(4, Math.min(6, view.displaySessions.length))
             // Measured, not guessed: this is multiplied by fontScale, and a
             // dense minimum of 138 came out at 184 on a 1.33 desk — wider than
             // the fitted width, so Flow fell back to six per row and the extra
             // columns bought nothing. 112 leaves eight columns reachable.
-            readonly property int minimumCardWidth: Math.round((dense ? 112 : view.sessions.length > 4 ? 150 : 210) * Style.fontScale)
+            readonly property int minimumCardWidth: Math.round((dense ? 112 : view.displaySessions.length > 4 ? 150 : 210) * Style.fontScale)
             readonly property int fittedCardWidth: Math.floor((width - spacing * (targetColumns - 1)) / targetColumns)
             Repeater {
-              model: view.sessions
+              model: view.displaySessions
               delegate: Rectangle {
                 id: sc
                 required property var modelData
                 required property int index
                 readonly property color tone: view.desk.providerColor(modelData.provider)
+                readonly property bool grouped: modelData.grouped === true
+                readonly property var members: modelData.members || []
+                // Deliberately short. A group listing its whole roster is taller
+                // than every card beside it, and a Flow row is as tall as its
+                // tallest card, so the list is a sample and the chip in the
+                // module strip is how you see all of them. Non-dense neighbours
+                // carry cwd, host, title and git lines, so a few more fit free
+                // there. Hiding exactly one is never worth it — the "+ 1 more"
+                // line occupies the same row as the member it replaced.
+                readonly property int memberLimit: {
+                  var cap = sessionFlow.dense ? 2 : 4
+                  return sc.members.length === cap + 1 ? cap + 1 : cap
+                }
                 // Prefer collector.busy (Grok's title sticks on 🧠 after the turn).
                 // Fall back to the title regex for snapshots from an older collector.
-                readonly property bool busy: modelData.busy === true || (modelData.busy !== false && modelData.window && /Processing|🧠|⚙|⏳|…/.test(String(modelData.window.title || "")))
+                // A group only ever holds quiet members, and it borrows the owner's
+                // window, so it must not inherit that window's busy title.
+                readonly property bool busy: !grouped && (modelData.busy === true || (modelData.busy !== false && modelData.window && /Processing|🧠|⚙|⏳|…/.test(String(modelData.window.title || ""))))
                 property string previewSource: view.previewCache[String((sc.modelData.window || {}).address || "")] || ""
                 // Fill four columns when they remain readable; narrower layouts
                 // retain a minimum width and let Flow wrap naturally.
@@ -972,6 +1152,13 @@ Item {
                   id: scol
                   anchors { fill: parent; margins: sessionFlow.dense ? Style.spacing.sm : Style.spacing.lg }
                   spacing: Style.spacing.xs
+                  // The card's own focus/inspect MouseArea is declared after
+                  // this column, which puts it on top of everything in here and
+                  // made the controls inside unclickable. Text items do not
+                  // accept mouse events, so lifting the whole column lets the
+                  // provider name and the grouped rows take their own clicks
+                  // while every other pixel still falls through to the card.
+                  z: 1
                   RowLayout {
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
@@ -980,7 +1167,59 @@ Item {
                         onRunningChanged: if (!running) dot.opacity = 1
                         NumberAnimation { target: dot; property: "opacity"; from: 1; to: 0.2; duration: 700 }
                         NumberAnimation { target: dot; property: "opacity"; from: 0.2; to: 1; duration: 700 } } }
-                    PlainText { text: view.desk.providerLabel(sc.modelData.provider); color: sc.tone; font.family: view.mono; font.bold: true; font.pixelSize: Style.font.body }
+                    // The provider name plus a disclosure caret: grouping
+                    // belongs to a provider, the provider is named here, and
+                    // WHAT CHANGED already spells "this row expands and
+                    // collapses" as a faint caption-sized ▴ / ▾. Same glyphs,
+                    // same meaning — ▴ while the provider's cards are spread
+                    // out (press to collapse them), ▾ once they are grouped
+                    // (press to open them back up). A plain Item wrapper so
+                    // one target covers name and caret without anchoring
+                    // anything that the surrounding layout manages.
+                    Item {
+                      id: providerToggle
+                      readonly property bool toggles: view.sessionGroupToggleable(sc.modelData.provider)
+                      readonly property bool grouped: view.settings.sessionGroupEnabled(sc.modelData.provider)
+                      implicitWidth: providerRow.implicitWidth
+                      implicitHeight: providerRow.implicitHeight
+                      Layout.alignment: Qt.AlignVCenter
+                      Row {
+                        id: providerRow
+                        spacing: Style.spacing.xs
+                        PlainText {
+                          text: view.desk.providerLabel(sc.modelData.provider)
+                          color: sc.tone
+                          font.family: view.mono
+                          font.bold: true
+                          font.pixelSize: Style.font.body
+                          font.underline: providerToggle.toggles && groupToggle.containsMouse
+                        }
+                        PlainText {
+                          anchors.verticalCenter: parent.verticalCenter
+                          visible: providerToggle.toggles
+                          text: providerToggle.grouped ? "▾" : "▴"
+                          // Faint like the one in WHAT CHANGED until the
+                          // pointer arrives, so a glance still reads as cards.
+                          color: groupToggle.containsMouse ? sc.tone : view.textFaint
+                          font.family: view.mono
+                          font.pixelSize: Style.font.caption
+                        }
+                      }
+                      MouseArea {
+                        id: groupToggle
+                        // Slightly larger than the glyphs so the target is
+                        // comfortable, without reaching the topic line below.
+                        anchors { fill: parent; margins: -Style.spacing.xs }
+                        hoverEnabled: true
+                        enabled: view.interactive && providerToggle.toggles
+                        acceptedButtons: Qt.LeftButton
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: function(mouse) {
+                          view.settings.toggleSessionGroup(sc.modelData.provider)
+                          mouse.accepted = true
+                        }
+                      }
+                    }
                     // Unattended and idle for hours: probably a zombie. Right-click → inspector → STOP / END.
                     // Fill-and-cap: a non-fill Tag keeps its implicit width and paints into the next card.
                     Tag {
@@ -993,10 +1232,21 @@ Item {
                       Layout.maximumWidth: implicitWidth
                     }
                     Item { Layout.fillWidth: true; Layout.minimumWidth: 0 }
-                    PlainText { text: view.desk.dur(sc.modelData.uptimeSec); color: view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption }
+                    // A group's uptime is the host app's and every member shares
+                    // it, so the slot is better spent saying how many of the
+                    // grouped cards are still waiting to be looked at.
+                    PlainText {
+                      readonly property bool review: sc.grouped && sc.modelData.review > 0
+                      text: review ? sc.modelData.review + " to review" : view.desk.dur(sc.modelData.uptimeSec)
+                      color: review ? view.desk.yellow : view.textFaint
+                      font.family: view.mono
+                      font.bold: review
+                      font.pixelSize: Style.font.caption
+                    }
                   }
                   PlainText { Layout.fillWidth: true; Layout.minimumWidth: 0; text: sc.modelData.project || "/"; color: view.desk.themeForeground; font.family: view.mono; font.pixelSize: Style.font.subtitle; elide: Text.ElideMiddle }
                   PlainText {
+                    visible: !sc.grouped
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
                     text: sc.modelData.topic ? "↳ " + sc.modelData.topic : "↳ " + ((sc.modelData.window || {}).title || "topic unavailable")
@@ -1006,6 +1256,60 @@ Item {
                     font.bold: !!sc.modelData.topic
                     wrapMode: Text.Wrap
                     maximumLineCount: sessionFlow.dense ? 1 : 2
+                    elide: Text.ElideRight
+                  }
+                  // The grouped roster, one line each. This is the whole point of
+                  // the group: nine bots cost nine lines instead of nine cards,
+                  // and every one of them stays visible, nameable and clickable.
+                  Repeater {
+                    model: sc.grouped ? sc.members.slice(0, sc.memberLimit) : []
+                    delegate: Rectangle {
+                      id: memberRow
+                      required property var modelData
+                      Layout.fillWidth: true
+                      Layout.minimumWidth: 0
+                      implicitHeight: memberLabel.implicitHeight + Style.spacing.xs
+                      radius: view.radius
+                      color: memberHover.containsMouse ? Util.alpha(sc.tone, 0.18) : "transparent"
+                      PlainText {
+                        id: memberLabel
+                        anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; leftMargin: Style.spacing.xs; rightMargin: Style.spacing.xs }
+                        text: {
+                          var at = view.sessionActivityAt(memberRow.modelData)
+                          var label = memberRow.modelData.project || memberRow.modelData.name || "session"
+                          return "· " + label + (at ? "  " + view.desk.dur((Date.now() - at) / 1000) : "")
+                        }
+                        color: view.textDim
+                        font.family: view.mono
+                        font.pixelSize: Style.font.caption
+                        elide: Text.ElideRight
+                      }
+                      MouseArea {
+                        id: memberHover
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        enabled: view.interactive
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: function(mouse) {
+                          // Right-click inspects this member specifically — the
+                          // roster shares one pid, so the drawer is the only place
+                          // an individual bot's detail is reachable once grouped.
+                          if (mouse.button === Qt.RightButton) view.inspectedSession = memberRow.modelData
+                          else if (view.desk.focusSession(memberRow.modelData)) view.navigated()
+                          mouse.accepted = true
+                        }
+                      }
+                    }
+                  }
+                  PlainText {
+                    visible: sc.grouped && sc.members.length > sc.memberLimit
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    text: "+ " + (sc.members.length - sc.memberLimit) + " more"
+                    color: view.textFaint
+                    font.family: view.mono
+                    font.pixelSize: Style.font.caption
                     elide: Text.ElideRight
                   }
                   PlainText { Layout.fillWidth: true; Layout.minimumWidth: 0; visible: !sessionFlow.dense && (!!sc.modelData.cwd); text: sc.modelData.cwd || ""; color: view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption; elide: Text.ElideMiddle }
@@ -1019,7 +1323,7 @@ Item {
                   cursorShape: sc.modelData.window || (sc.modelData.hosts || []).some(function(h) { return h && ((h.kind === "boomux" && h.shellId) || (h.kind === "background" && h.attachId)) }) ? Qt.PointingHandCursor : Qt.ArrowCursor
                   acceptedButtons: Qt.LeftButton | Qt.RightButton
                   onClicked: function(mouse) {
-                    if (mouse.button === Qt.RightButton) view.inspectedSession = sc.modelData
+                    if (mouse.button === Qt.RightButton) view.inspectedSession = sc.grouped ? (sc.modelData.owner || null) : sc.modelData
                     else if (view.desk.focusSession(sc.modelData)) view.navigated()
                   }
                 }

@@ -29,6 +29,16 @@ Item {
   property var notificationEvents: ({})
   property var notificationProviders: ({})
   property bool notificationsEnabled: true
+  // Grouping quiet cards into one is a display rule keyed by provider, not a
+  // Grok Bot special case: any app that fans one process out into a dozen
+  // sessions gets the same treatment. Grok Bot is the only one that does that
+  // today, so it is the only one on by default.
+  readonly property var sessionGroupDefaults: ({ "grok-bot": true })
+  property var sessionGroups: ({})
+  // How long a session must sit untouched before it counts as quiet. 0 groups
+  // every idle session whatever its age; a session that is busy or wants an
+  // answer is never quiet, so the group can never hide something that needs you.
+  property int sessionQuietMinutes: 60
   // Sound for a video wallpaper. Off unless asked for: a wallpaper that
   // starts talking the moment it is set is a bug, not a feature.
   property bool videoAudio: false
@@ -68,6 +78,8 @@ Item {
       notificationEvents = parsed && parsed.notificationEvents && typeof parsed.notificationEvents === "object" ? parsed.notificationEvents : ({})
       notificationProviders = parsed && parsed.notificationProviders && typeof parsed.notificationProviders === "object" ? parsed.notificationProviders : ({})
       notificationsEnabled = !parsed || typeof parsed.notificationsEnabled !== "boolean" ? true : parsed.notificationsEnabled
+      sessionGroups = parsed && parsed.sessionGroups && typeof parsed.sessionGroups === "object" ? parsed.sessionGroups : ({})
+      sessionQuietMinutes = parsed && Number.isInteger(parsed.sessionQuietMinutes) ? Math.max(0, Math.min(10080, parsed.sessionQuietMinutes)) : 60
       videoAudio = !!(parsed && parsed.videoAudio === true)
       quietHoursEnabled = !!(parsed && parsed.quietHoursEnabled === true)
       quietStartHour = parsed && Number.isInteger(parsed.quietStartHour) ? Math.max(0, Math.min(23, parsed.quietStartHour)) : 22
@@ -85,6 +97,8 @@ Item {
       notificationEvents = ({})
       notificationProviders = ({})
       notificationsEnabled = true
+      sessionGroups = ({})
+      sessionQuietMinutes = 60
       videoAudio = false
       quietHoursEnabled = false
       quietStartHour = 22
@@ -145,6 +159,8 @@ Item {
       notificationEvents: notificationEvents,
       notificationProviders: notificationProviders,
       notificationsEnabled: notificationsEnabled,
+      sessionGroups: sessionGroups,
+      sessionQuietMinutes: sessionQuietMinutes,
       videoAudio: videoAudio,
       quietHoursEnabled: quietHoursEnabled,
       quietStartHour: quietStartHour,
@@ -200,6 +216,31 @@ Item {
     return true
   }
   function toggleNotificationProvider(provider) { return setNotificationProvider(provider, !notificationProviderEnabled(provider)) }
+  function sessionGroupEnabled(provider) {
+    var key = String(provider || "").toLowerCase()
+    // An explicit false has to survive, so test for the stored booleans rather
+    // than falling through on a falsy value.
+    if (sessionGroups[key] === true || sessionGroups[key] === false) return sessionGroups[key]
+    return sessionGroupDefaults[key] === true
+  }
+  function setSessionGroup(provider, enabled) {
+    var key = String(provider || "").toLowerCase()
+    if (!/^[a-z0-9_-]{1,32}$/.test(key)) return false
+    var next = {}
+    for (var name in sessionGroups) next[name] = sessionGroups[name]
+    next[key] = !!enabled
+    sessionGroups = next
+    persist()
+    return true
+  }
+  function toggleSessionGroup(provider) { return setSessionGroup(provider, !sessionGroupEnabled(provider)) }
+  function setSessionQuietMinutes(minutes) {
+    var value = Number(minutes)
+    if (!isFinite(value) || value < 0 || value > 10080) return false
+    sessionQuietMinutes = Math.round(value)
+    persist()
+    return true
+  }
   function setNotificationsEnabled(enabled) { notificationsEnabled = !!enabled; persist() }
   function toggleNotificationsEnabled() { setNotificationsEnabled(!notificationsEnabled) }
   function setVideoAudio(enabled) { videoAudio = !!enabled; persist() }
