@@ -590,3 +590,20 @@ test("media selection prefers playback and skips playerctld when another player 
   expect(choose({ mprisPlayers: [proxy], mediaIsProxy })).toBe(proxy);
   expect(choose({ mprisPlayers: [], mediaIsProxy })).toBeNull();
 });
+
+describe("the session inspector follows the session you opened", () => {
+  test("a roster sharing one pid resolves to the right member", () => {
+    const body = view.match(/readonly property var liveInspectedSession: \{([\s\S]*?)\n  \}/)?.[1];
+    expect(body).toBeTruthy();
+    const resolve = Function("inspectedSession", "sessions", body || "");
+    const rows = [
+      { pid: 42, provider: "grok-bot", session: "a", project: "news" },
+      { pid: 42, provider: "grok-bot", session: "b", project: "recipes" },
+    ];
+    expect(resolve({ pid: 42, provider: "grok-bot", session: "b" }, rows)).toBe(rows[1]);
+    // A provider that reports no session id still resolves on pid+provider.
+    expect(resolve({ pid: 42, provider: "grok-bot" }, [rows[0]])).toBe(rows[0]);
+    expect(resolve({ pid: 7, provider: "claude" }, rows)).toBeNull();
+    expect(resolve(null, rows)).toBeNull();
+  });
+});

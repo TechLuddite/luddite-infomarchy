@@ -314,10 +314,17 @@ Item {
   readonly property var liveInspectedSession: {
     var pinnedSession = inspectedSession
     if (!pinnedSession) return null
+    // pid+provider stopped being unique once the Grok Bot roster began sharing
+    // one process: inspecting the sixth bot re-resolved to the first on the
+    // next tick. Match the session id too, and keep pid+provider as the
+    // fallback for providers that report no id.
+    var fallback = null
     for (var i = 0; i < sessions.length; i++) {
-      if (sessions[i].pid === pinnedSession.pid && sessions[i].provider === pinnedSession.provider) return sessions[i]
+      if (sessions[i].pid !== pinnedSession.pid || sessions[i].provider !== pinnedSession.provider) continue
+      if (String(sessions[i].session || "") === String(pinnedSession.session || "")) return sessions[i]
+      if (!fallback) fallback = sessions[i]
     }
-    return null
+    return fallback
   }
   function toggleActivityCell(index) { activityCellFilter = activityCellFilter === index ? -1 : index }
   function toggleActivityProvider(provider) { activityProviderFilter = activityProviderFilter === provider ? "" : provider }

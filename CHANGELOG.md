@@ -4,6 +4,9 @@ All notable changes to Infomarchy. The format follows [Keep a Changelog](https:/
 
 ## [Unreleased]
 
+### Fixed
+- **The inspector follows the bot you opened, not whichever shares its pid.** The open drawer is re-resolved against each snapshot so it cannot go stale, but it matched on pid and provider alone — unique until the Grok Bot roster began sharing one process, after which inspecting the sixth bot snapped back to the first four seconds later. It matches the session id too now, and keeps pid+provider as the fallback for providers that report no id.
+
 ### Changed
 - **Keyboard shortcut setup is an explicit install step** (#29, @auggernaut). Installing or enabling the plugin never created the `SUPER+I` and `SUPER+D` bindings, yet the desk advertised both, so a fresh install showed a hint that did nothing. The README now has a dedicated section with a conflict check, reload and `hyprctl configerrors` validation, and the direct toggle command for troubleshooting, and every mention of the shortcuts links to it. Added at merge: when the direct command works but the key does not, the cause is Hyprland holding a stale `OMARCHY_PATH` (seen after `omarchy dev link` without a relogin), with the two-line comparison that proves it.
 
