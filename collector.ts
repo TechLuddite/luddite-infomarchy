@@ -571,10 +571,22 @@ const PROVIDERS: [string, RegExp][] = [
 // explicit session start, and `persist` is a session that survives a terminal
 // disconnect. Both belong on the desk.
 const CURSOR_SERVICE_COMMANDS = new Set([
-  "worker", "mcp", "plugin", "login", "logout", "update", "status", "whoami",
+  "mcp", "plugin", "login", "logout", "update", "status", "whoami",
   "models", "bedrock", "about", "create-chat", "generate-rule", "rule",
   "install-shell-integration", "uninstall-shell-integration",
 ]);
+// `worker` is NOT in that list. It reads like a service — the name says so, and
+// the help calls it "a self-hosted Cloud Agent worker" — but it is the process
+// that actually runs the agent when the conversation lives in the IDE rather
+// than a terminal, and it is the one that writes the transcripts this collector
+// reads. Excluding it means a machine driving Cursor entirely from the IDE, as
+// most do, sees no Cursor session at all. It is one process bound to one
+// workspace directory, with its own pid, cwd and counters, so it is an ordinary
+// unattended session: a card, marked background like Claude's own.
+export function cursorIsWorker(cmd: string[], environ = ""): boolean {
+  if (!cmd.some(arg => arg === "worker")) return envValue(environ, "CURSOR_AGENT_WORKER_EXTENSION") === "1";
+  return true;
+}
 const INTERPRETERS = /(^|\/)(node|nodejs|bun|deno|python[0-9.]*|uv|npx|bunx|sh|bash|zsh|fish|env)$/;
 export function providerOf(cmd: string[]): string | null {
   // Only argv[0] identifies a program. argv[1..2] count solely when argv[0]
@@ -955,6 +967,28 @@ export function sessionStaleness(session: any, stamp = now): { idleSince: number
   const attachable = hosts.some(host => host && ((host.kind === "boomux" && host.shellId) || (host.kind === "background" && host.attachId)));
   const unattended = background || (!session.window && !attachable);
   return { idleSince, idleMs, unattended, stale: unattended && !session.busy && idleMs >= STALE_AFTER_MS };
+}
+// Four sources disagree about whether an agent is working, and the order
+// matters more than any of them. An agent that reports its own state is
+// believed first; a transcript the agent itself wrote is believed next; a
+// terminal title is the weakest and for some providers actively wrong.
+export function sessionBusyState(options: {
+  provider?: string;
+  registryBusy?: boolean | null;
+  transcriptBusy?: boolean | null;
+  titleBusy?: boolean;
+  turnBusy?: boolean;
+}): boolean {
+  // Claude Code's own registry says busy/idle outright.
+  if (options.registryBusy !== null && options.registryBusy !== undefined) return !!options.registryBusy;
+  // Cursor writes {"type":"turn_ended"} when a turn finishes, so its own
+  // transcript settles it — and the window title belongs to the IDE, not to
+  // this conversation, so it could not help anyway.
+  if (options.transcriptBusy !== null && options.transcriptBusy !== undefined) return !!options.transcriptBusy;
+  // Grok's title sticks on 🧠 after the turn ends, so the title is a lie and
+  // only the systemd inhibitor is trustworthy.
+  if (options.provider === "grok") return !!options.turnBusy;
+  return !!options.titleBusy || !!options.turnBusy;
 }
 export function attachStaleness(sessions: any[], stamp = now): any[] {
   for (const session of sessions) {
@@ -1372,6 +1406,10 @@ async function liveSessions(pids: number[]) {
     c && typeof c === "object" && Number.isInteger(c.pid) && c.pid > 0 && typeof c.address === "string");
   const winByPid = new Map<number, any>(clients.map((c: any) => [c.pid, c]));
   const sessions: any[] = [];
+  // Cursor's own turn_ended marker, read once per worker while its transcript
+  // is in hand. The only real busy signal on this desk: every other provider
+  // is inferred from a terminal title or a systemd inhibitor.
+  const cursorBusyByPid = new Map<number, boolean>();
   const [gpuByPid, tmux, claudeRegistry] = await Promise.all([gpuMemoryByPid(), tmuxState(winByPid, pids), claudeAgents()]);
   const hermesByPid = hermesSessions();
   const herdrClients = herdrState(winByPid);
@@ -1449,6 +1487,17 @@ async function liveSessions(pids: number[]) {
         else hosts.push({ kind: "background", label: "background · claude daemon", attachId: registered.jobId });
       }
     }
+    // The IDE's worker is driven from the Cursor window, never from a terminal,
+    // so it is unattended in exactly the sense Claude's --bg sessions are:
+    // dimmed, and stale once it has been idle for hours. Its live chat comes
+    // from the newest transcript under its own working directory, which is
+    // exact — Cursor records it as the file's mtime.
+    if (prov === "cursor" && cursorIsWorker(p.cmd, environ)) {
+      hosts.push({ kind: "background", label: "background · cursor worker" });
+      const chat = cursorCurrentChat(process.env.CURSOR_HOME || join(HOME, ".cursor"), p.cwd);
+      if (chat.session && !sessionIds.includes(chat.session)) sessionIds.unshift(chat.session);
+      if (chat.path) cursorBusyByPid.set(p.pid, cursorTranscriptBusy(readHistoryTail(chat.path)));
+    }
     const sample = processTreeSample(p.pid);
     // The lease names the backend process; the card is the launcher above it.
     if (prov === "hermes" && hermesByPid.size)
@@ -1496,10 +1545,13 @@ async function liveSessions(pids: number[]) {
     const tmuxHostOf = (s.hosts || []).find((host: any) => host.kind === "tmux");
     if (tmuxHostOf && tmuxHostOf.attached && !tmuxHostOf.activePane && s.window) s.window = { ...s.window, title: "" };
     const titleBusy = !!(s.window && titleLooksBusy(s.window.title));
-    // Grok's terminal title sticks on 🧠 after the turn. Trust the inhibitor.
-    // Claude's registry status is authoritative when present.
-    s.busy = s._registryBusy !== null && s._registryBusy !== undefined ? s._registryBusy
-      : s.provider === "grok" ? turnBusy.has(s.pid) : (titleBusy || turnBusy.has(s.pid));
+    s.busy = sessionBusyState({
+      provider: s.provider,
+      registryBusy: s._registryBusy,
+      transcriptBusy: cursorBusyByPid.has(s.pid) ? cursorBusyByPid.get(s.pid) : null,
+      titleBusy,
+      turnBusy: turnBusy.has(s.pid),
+    });
     if (!s.busy && s.window && titleLooksBusy(s.window.title) && s.provider === "grok")
       s.window = { ...s.window, title: "" };
   }
@@ -1802,6 +1854,40 @@ export function cursorTranscriptBusy(text: unknown): boolean {
 
 export function cursorChatId(dir: string): string {
   return cleanSessionId(dir);
+}
+
+// The reverse of cursorProjectPath: the transcript directory for a working
+// directory is that path with every "/" turned into "-".
+export function cursorWorkspaceDir(cwd: string): string {
+  const path = String(cwd || "");
+  if (!path.startsWith("/")) return "";
+  return path.replace(/\/+$/, "").replace(/^\//, "").replace(/\//g, "-");
+}
+
+// Which chat a worker is on right now. inferSessionIdsFromRecent cannot answer
+// this: it only accepts a prompt within half an hour of launch, which fits a
+// terminal agent prompted right after starting and not a worker that lives as
+// long as the IDE window. Observed on a real desk — a worker launched at
+// 16:02:50 whose chat opened at 16:34, 31 minutes later and just outside that
+// window. Cursor already records the answer as file mtime, so read it.
+export function cursorCurrentChat(
+  base: string,
+  cwd: string,
+  list: (path: string) => string[] = ls,
+  modified: (path: string) => number = path => { try { return lstatSync(path).mtimeMs; } catch { return 0; } },
+): { session: string; path: string } {
+  const dir = cursorWorkspaceDir(cwd);
+  if (!dir) return { session: "", path: "" };
+  const root = join(base, "projects", dir, "agent-transcripts");
+  let best = { session: "", path: "", at: -1 };
+  for (const chat of list(root).slice(0, MAX_COLLECTION_ITEMS)) {
+    const session = cursorChatId(chat);
+    if (!session) continue;
+    const path = join(root, chat, `${chat}.jsonl`);
+    const at = modified(path);
+    if (at > best.at) best = { session, path, at };
+  }
+  return { session: best.session, path: best.path };
 }
 
 function cursorHistory() {

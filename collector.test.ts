@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, sy
 import { Database } from "bun:sqlite";
 import { tmpdir } from "os";
 import { join, relative } from "path";
-import { providerOf, titleLooksBusy, cmdIsTurnInhibitor, sessionIdFrom, sessionHostsFromEnvironment, tmuxSocketFromEnvironment, parseTmuxPanes, parseTmuxClients, tmuxPaneForAncestors, linkRecentToLive, inferSessionIdsFromRecent, attachSessionTopics, localSessionSummary, cleanGeneratedSummary, activityCellIndex, parseExternalIpTrace, externalIpCacheFresh, frameSnapshot, parseJsonBounded, readRegularFileLimited, safePrompt, sessionPresentation, writePrivateStateFile, decodeProjectDir, dropPartialFirstLine, readHistoryTail, readRegularFileHead, rolloutSessionId, rolloutCwd, topicCacheHit, topicRetryBlocked, pruneTopicCache, reapStateTempFiles, parseGpuLine, parseDfRows, plausibleTimestamp, normalizeUsage, normalizeUsageLimit, ollamaHostIsLocal, topicRefinementAllowed, terminate, rateForModel, estimateValue, valueSummary, alignDailyTokens, localDayKey, loadPricing, todayValueEstimate, herdrSocketFromEnvironment, herdrClientPids, herdrWindowFor, boomuxClientShellId, boomuxWindowFor, backgroundDaemonKind, parseClaudeAgents, sessionStaleness, STALE_AFTER_MS, decodeBase32, grokBotLine, grokBotRow, grokBotAttention, attachGrokBotRoster, grokSessionUsage, usageModelBreakdown, windowMatchesProvider, hermesSessionByPid, validNetDevice, observationalGitCommand, observationalGitEnv, piUserText, piSessionIdFromName, cursorProjectPath, cursorUserText, cursorTimestamp, cursorTranscriptBusy } from "./collector.ts";
+import { providerOf, titleLooksBusy, cmdIsTurnInhibitor, sessionIdFrom, sessionHostsFromEnvironment, tmuxSocketFromEnvironment, parseTmuxPanes, parseTmuxClients, tmuxPaneForAncestors, linkRecentToLive, inferSessionIdsFromRecent, attachSessionTopics, localSessionSummary, cleanGeneratedSummary, activityCellIndex, parseExternalIpTrace, externalIpCacheFresh, frameSnapshot, parseJsonBounded, readRegularFileLimited, safePrompt, sessionPresentation, writePrivateStateFile, decodeProjectDir, dropPartialFirstLine, readHistoryTail, readRegularFileHead, rolloutSessionId, rolloutCwd, topicCacheHit, topicRetryBlocked, pruneTopicCache, reapStateTempFiles, parseGpuLine, parseDfRows, plausibleTimestamp, normalizeUsage, normalizeUsageLimit, ollamaHostIsLocal, topicRefinementAllowed, terminate, rateForModel, estimateValue, valueSummary, alignDailyTokens, localDayKey, loadPricing, todayValueEstimate, herdrSocketFromEnvironment, herdrClientPids, herdrWindowFor, boomuxClientShellId, boomuxWindowFor, backgroundDaemonKind, parseClaudeAgents, sessionStaleness, STALE_AFTER_MS, decodeBase32, grokBotLine, grokBotRow, grokBotAttention, attachGrokBotRoster, grokSessionUsage, usageModelBreakdown, windowMatchesProvider, hermesSessionByPid, validNetDevice, observationalGitCommand, observationalGitEnv, piUserText, piSessionIdFromName, cursorProjectPath, cursorUserText, cursorTimestamp, cursorTranscriptBusy, cursorIsWorker, cursorWorkspaceDir, cursorCurrentChat, sessionBusyState } from "./collector.ts";
 import { sessionEventId } from "./notification-events.ts";
 
 const testRoot = mkdtempSync(join(tmpdir(), "infomarchy-test-"));
@@ -1328,7 +1328,7 @@ describe("zombie detection", () => {
 // things worth pinning are which invocations are conversations, and that the
 // only clock available is read correctly.
 describe("Cursor", () => {
-  test("a terminal session is a card; the IDE's worker and the management commands are not", () => {
+  test("a conversation is a card; the management commands are not", () => {
     expect(providerOf(["/home/u/.local/bin/cursor-agent"])).toBe("cursor");
     expect(providerOf(["cursor-agent", "fix the flaky test"])).toBe("cursor");
     expect(providerOf(["cursor-agent", "-p", "summarise this repo"])).toBe("cursor");
@@ -1336,14 +1336,16 @@ describe("Cursor", () => {
     expect(providerOf(["cursor-agent", "agent", "fix the build"])).toBe("cursor");
     expect(providerOf(["cursor-agent", "persist"])).toBe("cursor");
 
-    // The worker executes Cursor's cloud agents locally. It is the shape the
-    // IDE actually launches: the subcommand sits after several flags, so an
-    // argv[1]-only check would have missed it entirely.
+    // The worker reads like a service and is not one: it is the process that
+    // runs the agent when the conversation lives in the IDE instead of a
+    // terminal, and it writes the transcripts this collector reads. Excluding
+    // it left a machine driving Cursor entirely from the IDE — which is most of
+    // them — with no Cursor session at all.
     expect(providerOf([
       "/home/u/.local/bin/cursor-agent", "--use-system-ca", "/home/u/index.js",
       "--api-key", "crsr_deadbeefdeadbeefdeadbeef", "--endpoint", "https://api2.cursor.sh",
       "worker", "start", "--worker-dir", "/home/u/repos/app", "--verbose",
-    ])).toBeNull();
+    ])).toBe("cursor");
     for (const command of ["mcp", "plugin", "login", "logout", "update", "status", "whoami",
                            "models", "bedrock", "about", "create-chat", "generate-rule", "rule",
                            "install-shell-integration", "uninstall-shell-integration"])
@@ -1351,6 +1353,41 @@ describe("Cursor", () => {
 
     // argv[0] still has to be the launcher, or `vim notes/cursor-agent` is an agent.
     expect(providerOf(["vim", "notes/cursor-agent"])).toBeNull();
+  });
+
+  test("the worker is recognised so its card can be marked unattended", () => {
+    const argv = ["cursor-agent", "--api-key", "crsr_x", "worker", "start", "--worker-dir", "/home/u/repos/app"];
+    expect(cursorIsWorker(argv)).toBe(true);
+    // The IDE announces it in the environment too, which catches a future
+    // invocation that no longer spells the subcommand out.
+    expect(cursorIsWorker(["cursor-agent"], "CURSOR_AGENT_WORKER_EXTENSION=1\0")).toBe(true);
+    // A terminal conversation is not a worker, however it was started.
+    expect(cursorIsWorker(["cursor-agent"])).toBe(false);
+    expect(cursorIsWorker(["cursor-agent", "fix the worker pool"], "CURSOR_INVOKED_AS=cursor-agent\0")).toBe(false);
+    expect(cursorIsWorker(["cursor-agent", "agent", "go"])).toBe(false);
+  });
+
+  test("the live chat comes from the newest transcript, because inference cannot reach it", () => {
+    // inferSessionIdsFromRecent only accepts a prompt within half an hour of
+    // launch, which fits a terminal agent and not a worker that lives as long
+    // as the IDE window. Observed: a worker launched 16:02:50 whose chat opened
+    // at 16:34 — 31 minutes later, just outside that window.
+    expect(cursorWorkspaceDir("/home/u/repos/four-monorepo")).toBe("home-u-repos-four-monorepo");
+    expect(cursorWorkspaceDir("/home/u/repos/app/")).toBe("home-u-repos-app");
+    expect(cursorWorkspaceDir("relative/path")).toBe("");
+    expect(cursorWorkspaceDir("")).toBe("");
+
+    const older = "11111111-1111-4111-8111-111111111111";
+    const newer = "22222222-2222-4222-8222-222222222222";
+    const chat = cursorCurrentChat("/base", "/home/u/repos/app",
+      () => [older, newer, "not-a-chat-id"],
+      (path: string) => path.includes(newer) ? 2000 : 1000);
+    expect(chat.session).toBe(newer);
+    expect(chat.path).toBe(`/base/projects/home-u-repos-app/agent-transcripts/${newer}/${newer}.jsonl`);
+    // No transcripts at all is a worker that has never been asked anything —
+    // still a session, just without a topic.
+    expect(cursorCurrentChat("/base", "/home/u/repos/app", () => [], () => 0).session).toBe("");
+    expect(cursorCurrentChat("/base", "", () => [older], () => 1).session).toBe("");
   });
 
   test("a dashed project directory resolves against the filesystem, not by guessing", () => {
@@ -1461,6 +1498,24 @@ describe("Cursor", () => {
     expect(row.project).toContain("my-repo");
     // A real timestamp, not the file mtime standing in for one.
     expect(row.activityCell).toBeGreaterThanOrEqual(0);
+  });
+
+  test("a transcript beats a window title, and a registry beats both", () => {
+    // Cursor's window title is the IDE's, so it says nothing about this
+    // conversation; its transcript does. The order is what matters here.
+    expect(sessionBusyState({ provider: "cursor", transcriptBusy: true, titleBusy: false })).toBe(true);
+    expect(sessionBusyState({ provider: "cursor", transcriptBusy: false, titleBusy: true, turnBusy: true })).toBe(false);
+    // An agent that reports its own state still outranks the transcript.
+    expect(sessionBusyState({ provider: "cursor", registryBusy: false, transcriptBusy: true })).toBe(false);
+    expect(sessionBusyState({ provider: "claude", registryBusy: true, titleBusy: false })).toBe(true);
+    // Untouched for everyone else: Grok trusts only the inhibitor, others OR.
+    expect(sessionBusyState({ provider: "grok", titleBusy: true, turnBusy: false })).toBe(false);
+    expect(sessionBusyState({ provider: "grok", turnBusy: true })).toBe(true);
+    expect(sessionBusyState({ provider: "codex", titleBusy: true })).toBe(true);
+    expect(sessionBusyState({ provider: "codex", turnBusy: true })).toBe(true);
+    expect(sessionBusyState({ provider: "codex" })).toBe(false);
+    // A missing transcript must not read as "not busy" and shadow the title.
+    expect(sessionBusyState({ provider: "cursor", transcriptBusy: null, titleBusy: true })).toBe(true);
   });
 
   test("a rule-injected turn is indistinguishable from a human prompt, and is not guessed at", () => {
