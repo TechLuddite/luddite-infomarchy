@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, sy
 import { Database } from "bun:sqlite";
 import { tmpdir } from "os";
 import { join, relative } from "path";
-import { providerOf, titleLooksBusy, cmdIsTurnInhibitor, sessionIdFrom, sessionHostsFromEnvironment, tmuxSocketFromEnvironment, parseTmuxPanes, parseTmuxClients, tmuxPaneForAncestors, linkRecentToLive, inferSessionIdsFromRecent, attachSessionTopics, localSessionSummary, cleanGeneratedSummary, activityCellIndex, parseExternalIpTrace, externalIpCacheFresh, frameSnapshot, parseJsonBounded, readRegularFileLimited, safePrompt, sessionPresentation, writePrivateStateFile, decodeProjectDir, dropPartialFirstLine, readHistoryTail, readRegularFileHead, rolloutSessionId, rolloutCwd, topicCacheHit, topicRetryBlocked, pruneTopicCache, reapStateTempFiles, parseGpuLine, parseDfRows, plausibleTimestamp, normalizeUsage, normalizeUsageLimit, ollamaHostIsLocal, topicRefinementAllowed, terminate, rateForModel, estimateValue, valueSummary, alignDailyTokens, localDayKey, loadPricing, todayValueEstimate, herdrSocketFromEnvironment, herdrClientPids, herdrWindowFor, boomuxClientShellId, boomuxWindowFor, backgroundDaemonKind, parseClaudeAgents, sessionStaleness, STALE_AFTER_MS, decodeBase32, grokBotLine, grokBotRow, grokBotAttention, attachGrokBotRoster, grokSessionUsage, usageModelBreakdown, windowMatchesProvider, hermesSessionByPid, validNetDevice, observationalGitCommand, observationalGitEnv, piUserText, piSessionIdFromName } from "./collector.ts";
+import { providerOf, titleLooksBusy, cmdIsTurnInhibitor, sessionIdFrom, sessionHostsFromEnvironment, tmuxSocketFromEnvironment, parseTmuxPanes, parseTmuxClients, tmuxPaneForAncestors, linkRecentToLive, inferSessionIdsFromRecent, attachSessionTopics, localSessionSummary, cleanGeneratedSummary, activityCellIndex, parseExternalIpTrace, externalIpCacheFresh, frameSnapshot, parseJsonBounded, readRegularFileLimited, safePrompt, sessionPresentation, writePrivateStateFile, decodeProjectDir, dropPartialFirstLine, readHistoryTail, readRegularFileHead, rolloutSessionId, rolloutCwd, topicCacheHit, topicRetryBlocked, pruneTopicCache, reapStateTempFiles, parseGpuLine, parseDfRows, plausibleTimestamp, normalizeUsage, normalizeUsageLimit, ollamaHostIsLocal, topicRefinementAllowed, terminate, rateForModel, estimateValue, valueSummary, alignDailyTokens, localDayKey, loadPricing, todayValueEstimate, herdrSocketFromEnvironment, herdrClientPids, herdrWindowFor, boomuxClientShellId, boomuxWindowFor, backgroundDaemonKind, parseClaudeAgents, sessionStaleness, STALE_AFTER_MS, decodeBase32, grokBotLine, grokBotRow, grokBotAttention, attachGrokBotRoster, grokSessionUsage, usageModelBreakdown, windowMatchesProvider, hermesSessionByPid, validNetDevice, observationalGitCommand, observationalGitEnv, piUserText, piSessionIdFromName, cursorProjectPath, cursorUserText, cursorTimestamp, cursorTranscriptBusy } from "./collector.ts";
 import { sessionEventId } from "./notification-events.ts";
 
 const testRoot = mkdtempSync(join(tmpdir(), "infomarchy-test-"));
@@ -1320,5 +1320,171 @@ describe("zombie detection", () => {
   test("idleSince is the newest of launch and last prompt", () => {
     expect(sessionStaleness({ startedAt: 1000, topicAt: 5000, hosts: [], window: null }, now).idleSince).toBe(5000);
     expect(sessionStaleness({ startedAt: 7000, topicAt: 0, hosts: [], window: null }, now).idleSince).toBe(7000);
+  });
+});
+
+// Cursor's agent ships as one binary that is both a terminal session and the
+// IDE's own worker, and its transcripts carry no timestamp field — so the two
+// things worth pinning are which invocations are conversations, and that the
+// only clock available is read correctly.
+describe("Cursor", () => {
+  test("a terminal session is a card; the IDE's worker and the management commands are not", () => {
+    expect(providerOf(["/home/u/.local/bin/cursor-agent"])).toBe("cursor");
+    expect(providerOf(["cursor-agent", "fix the flaky test"])).toBe("cursor");
+    expect(providerOf(["cursor-agent", "-p", "summarise this repo"])).toBe("cursor");
+    // `agent` and `persist` are explicit session starts, not services.
+    expect(providerOf(["cursor-agent", "agent", "fix the build"])).toBe("cursor");
+    expect(providerOf(["cursor-agent", "persist"])).toBe("cursor");
+
+    // The worker executes Cursor's cloud agents locally. It is the shape the
+    // IDE actually launches: the subcommand sits after several flags, so an
+    // argv[1]-only check would have missed it entirely.
+    expect(providerOf([
+      "/home/u/.local/bin/cursor-agent", "--use-system-ca", "/home/u/index.js",
+      "--api-key", "crsr_deadbeefdeadbeefdeadbeef", "--endpoint", "https://api2.cursor.sh",
+      "worker", "start", "--worker-dir", "/home/u/repos/app", "--verbose",
+    ])).toBeNull();
+    for (const command of ["mcp", "plugin", "login", "logout", "update", "status", "whoami",
+                           "models", "bedrock", "about", "create-chat", "generate-rule", "rule",
+                           "install-shell-integration", "uninstall-shell-integration"])
+      expect(providerOf(["cursor-agent", command]), command).toBeNull();
+
+    // argv[0] still has to be the launcher, or `vim notes/cursor-agent` is an agent.
+    expect(providerOf(["vim", "notes/cursor-agent"])).toBeNull();
+  });
+
+  test("a dashed project directory resolves against the filesystem, not by guessing", () => {
+    // "/" becomes "-", which is ambiguous the moment a directory name contains
+    // a dash: home-jttraino-repos-four-monorepo is .../four-monorepo, not
+    // .../four/monorepo. Verified against the real tree this was written on.
+    const tree = new Set(["/home", "/home/u", "/home/u/repos", "/home/u/repos/four-monorepo",
+                          "/home/u/repos/four-monorepo/four-os"]);
+    const exists = (path: string) => tree.has(path);
+    expect(cursorProjectPath("home-u-repos-four-monorepo", exists)).toBe("/home/u/repos/four-monorepo");
+    expect(cursorProjectPath("home-u-repos-four-monorepo-four-os", exists)).toBe("/home/u/repos/four-monorepo/four-os");
+    expect(cursorProjectPath("home-u-repos", exists)).toBe("/home/u/repos");
+    // Unresolvable, Cursor's own placeholder, and its bookkeeping files all
+    // yield nothing rather than a fabricated path.
+    expect(cursorProjectPath("home-u-repos-gone", exists)).toBe("");
+    expect(cursorProjectPath("empty-window", exists)).toBe("");
+    expect(cursorProjectPath(".agent-data-cleanup-2026-09-16", exists)).toBe("");
+    expect(cursorProjectPath("", exists)).toBe("");
+    // A pathological name is refused rather than walked.
+    expect(cursorProjectPath(Array(80).fill("x").join("-"), exists)).toBe("");
+  });
+
+  test("the prompt is unwrapped from its envelope", () => {
+    expect(cursorUserText({ content: [{ type: "text", text: "<timestamp>Wednesday, Sep 16, 2026, 3:37 PM (UTC-4)</timestamp>\n<user_query>\nload the startup context\n</user_query>" }] }))
+      .toBe("load the startup context");
+    // No envelope, string content, and a timestamp with no query.
+    expect(cursorUserText({ content: [{ type: "text", text: "plain prompt" }] })).toBe("plain prompt");
+    expect(cursorUserText({ content: "plain string" })).toBe("plain string");
+    expect(cursorUserText({ content: [{ type: "text", text: "<timestamp>x</timestamp>" }] })).toBe("");
+    // Non-text blocks (tool calls) are not prompt text.
+    expect(cursorUserText({ content: [{ type: "tool_use", name: "Read" }] })).toBe("");
+    expect(cursorUserText(null)).toBe("");
+  });
+
+  test("the injected <timestamp> is the only clock, so it is parsed not guessed", () => {
+    // Local 3:37 PM at UTC-4 is 19:37Z. Date.parse reads this string
+    // inconsistently and drops the offset on some builds, hence the regex.
+    expect(cursorTimestamp("<timestamp>Wednesday, Sep 16, 2026, 3:37 PM (UTC-4)</timestamp>"))
+      .toBe(Date.UTC(2026, 8, 16, 19, 37));
+    expect(cursorTimestamp("<timestamp>Monday, Jan 5, 2026, 12:05 AM (UTC+0)</timestamp>"))
+      .toBe(Date.UTC(2026, 0, 5, 0, 5));
+    expect(cursorTimestamp("<timestamp>Tuesday, Mar 3, 2026, 12:30 PM (UTC+5:30)</timestamp>"))
+      .toBe(Date.UTC(2026, 2, 3, 7, 0));
+    // Unparseable, absent, and a year that would sort above every real row.
+    expect(cursorTimestamp("<timestamp>sometime last week</timestamp>")).toBe(0);
+    expect(cursorTimestamp("no tag here")).toBe(0);
+    expect(cursorTimestamp("<timestamp>Friday, Sep 16, 2099, 3:37 PM (UTC-4)</timestamp>")).toBe(0);
+    expect(cursorTimestamp(null)).toBe(0);
+  });
+
+  test("turn_ended is a real busy signal, unlike a terminal title", () => {
+    const user = JSON.stringify({ role: "user", message: { content: [{ type: "text", text: "go" }] } });
+    const assistant = JSON.stringify({ role: "assistant", message: { content: [{ type: "text", text: "working" }] } });
+    const ended = JSON.stringify({ type: "turn_ended", status: "success" });
+    expect(cursorTranscriptBusy(`${user}\n${assistant}\n${ended}`)).toBe(false);
+    expect(cursorTranscriptBusy(`${user}\n${assistant}`)).toBe(true);
+    // Waiting on the model to start is not the agent working.
+    expect(cursorTranscriptBusy(user)).toBe(false);
+    expect(cursorTranscriptBusy("")).toBe(false);
+    expect(cursorTranscriptBusy("{not json")).toBe(false);
+    // Trailing blank lines from a partially flushed write must not hide it.
+    expect(cursorTranscriptBusy(`${user}\n${assistant}\n\n`)).toBe(true);
+  });
+
+  test("chats, prompts and projects reach the snapshot, honouring CURSOR_HOME", async () => {
+    const root = join(testRoot, "cursor-home");
+    const repo = join(testRoot, "cursor-work", "my-repo");
+    mkdirSync(repo, { recursive: true });
+    // The directory name is the repo path with "/" replaced by "-".
+    const encoded = repo.replace(/^\//, "").replace(/\//g, "-");
+    const chat = "9c5f00fd-a247-4c9c-ae2c-5188251d7b81";
+    const dir = join(root, "projects", encoded, "agent-transcripts", chat);
+    mkdirSync(dir, { recursive: true });
+    const stamp = new Date();
+    const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][stamp.getUTCMonth()];
+    const hour = stamp.getUTCHours() % 12 || 12;
+    const meridiem = stamp.getUTCHours() < 12 ? "AM" : "PM";
+    const minute = String(stamp.getUTCMinutes()).padStart(2, "0");
+    writeFileSync(join(dir, `${chat}.jsonl`), [
+      JSON.stringify({ role: "user", message: { content: [{ type: "text", text:
+        `<timestamp>Today, ${month} ${stamp.getUTCDate()}, ${stamp.getUTCFullYear()}, ${hour}:${minute} ${meridiem} (UTC+0)</timestamp>\n<user_query>\nwire up the collector\n</user_query>` }] } }),
+      JSON.stringify({ role: "assistant", message: { content: [{ type: "text", text: "on it" }] } }),
+      JSON.stringify({ type: "turn_ended", status: "success" }),
+    ].join("\n") + "\n");
+    // Cursor's placeholder for a window with no folder open contributes nothing.
+    mkdirSync(join(root, "projects", "empty-window"), { recursive: true });
+
+    const home = join(testRoot, "cursor-home-empty");
+    mkdirSync(home, { recursive: true });
+    const proc = Bun.spawn(["bun", join(import.meta.dir, "collector.ts")], {
+      env: { HOME: home, USER: "tester", CURSOR_HOME: root, XDG_STATE_HOME: join(home, "state"), PATH: process.env.PATH || "", INFOMARCHY_SKIP_EXTERNAL_IP: "1", INFOMARCHY_SKIP_GITHUB: "1" },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const output = await new Response(proc.stdout).text();
+    expect(await proc.exited).toBe(0);
+    const snap = decodeFrames(output);
+
+    expect(snap.ai.providers.cursor.present).toBe(true);
+    expect(snap.ai.providers.cursor.sessions).toBe(1);
+    expect(snap.ai.providers.cursor.prompts).toBe(1);
+    // The transcript ends in turn_ended, so nothing is reported as working.
+    expect(snap.ai.providers.cursor.busy).toBe(0);
+    expect(snap.ai.counts.cursor.today).toBe(1);
+    const row = snap.ai.recent.find((entry: any) => entry.provider === "cursor");
+    expect(row).toMatchObject({ provider: "cursor", session: chat, text: "wire up the collector" });
+    // The ambiguous dashed directory resolved back to the real repo.
+    expect(row.project).toContain("my-repo");
+    // A real timestamp, not the file mtime standing in for one.
+    expect(row.activityCell).toBeGreaterThanOrEqual(0);
+  });
+
+  test("a rule-injected turn is indistinguishable from a human prompt, and is not guessed at", () => {
+    // Observed in real transcripts: Cursor's hooks and rules inject their own
+    // turns as role "user", wrapped in <user_query>, carrying a <timestamp>,
+    // positioned after turn_ended — structurally identical to something typed
+    // by a person, with no metadata field to separate them. So both are
+    // reported. This is deliberate: the alternative is a content heuristic
+    // that would quietly drop real prompts, and this project prefers observing
+    // a format to guessing at one. Revisit if Cursor ever marks them.
+    const injected = { content: [{ type: "text", text: "<timestamp>Wednesday, Sep 16, 2026, 4:42 PM (UTC-4)</timestamp>\n<user_query>Briefly inform the user about the task result.</user_query>" }] };
+    const typed = { content: [{ type: "text", text: "<timestamp>Wednesday, Sep 16, 2026, 4:38 PM (UTC-4)</timestamp>\n<user_query>\nlet's do az login\n</user_query>" }] };
+    expect(cursorUserText(injected)).toBe("Briefly inform the user about the task result.");
+    expect(cursorUserText(typed)).toBe("let's do az login");
+    // Same shape, same wrapper, same clock: nothing to branch on.
+    expect(cursorTimestamp(JSON.stringify(injected.content))).toBeGreaterThan(0);
+    expect(cursorTimestamp(JSON.stringify(typed.content))).toBeGreaterThan(0);
+  });
+
+  test("a Cursor API key is redacted like every other vendor prefix", () => {
+    // Worded to isolate the prefix rule: "token is <value>" would be caught by
+    // the stronger key-name rule instead, which redacts the prefix too.
+    expect(safePrompt("rotate crsr_23c5c84eabae6848bfff5d17542c9c59 please")).toBe("rotate crsr_[redacted] please");
+    expect(safePrompt("cursor-agent --api-key crsr_23c5c84eabae6848bfff5d17542c9c59 worker"))
+      .toContain("--api-key [redacted]");
   });
 });
