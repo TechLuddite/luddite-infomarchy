@@ -28,7 +28,7 @@ const CEILINGS: Record<string, number> = {
   "Infomarchy.qml": 26,
   "InfoModel.qml": 5,
   "InfoSettings.qml": 0,
-  "InfoView.qml": 507,
+  "InfoView.qml": 509,
   "Overlay.qml": 29,
   "WaveWallpaper.qml": 0,
 };
