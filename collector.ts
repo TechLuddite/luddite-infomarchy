@@ -575,11 +575,34 @@ const PROVIDERS: [string, RegExp][] = [
   // binary as "antigravity"); both launch the identical program.
   ["antigravity", /(^|\/)(antigravity|agy)$/],
   ["pi", /(^|\/)pi$/],
+  // Cursor's agent ships as `cursor-agent`, both as a terminal CLI and as the
+  // binary the IDE launches for its own worker.
+  ["cursor", /(^|\/)cursor-agent$/],
   ["opencode", /(^|\/)opencode$/],
   ["aider", /(^|\/)aider$/],
   ["copilot", /(^|\/)copilot$/],
   ["ollama", /(^|\/)ollama$/],
 ];
+// Deliberately not "agent" or "persist": `cursor-agent agent <prompt>` is an
+// explicit session start, and `persist` is a session that survives a terminal
+// disconnect. Both belong on the desk.
+const CURSOR_SERVICE_COMMANDS = new Set([
+  "mcp", "plugin", "login", "logout", "update", "status", "whoami",
+  "models", "bedrock", "about", "create-chat", "generate-rule", "rule",
+  "install-shell-integration", "uninstall-shell-integration",
+]);
+// `worker` is NOT in that list. It reads like a service — the name says so, and
+// the help calls it "a self-hosted Cloud Agent worker" — but it is the process
+// that actually runs the agent when the conversation lives in the IDE rather
+// than a terminal, and it is the one that writes the transcripts this collector
+// reads. Excluding it means a machine driving Cursor entirely from the IDE, as
+// most do, sees no Cursor session at all. It is one process bound to one
+// workspace directory, with its own pid, cwd and counters, so it is an ordinary
+// unattended session: a card, marked background like Claude's own.
+export function cursorIsWorker(cmd: string[], environ = ""): boolean {
+  if (!cmd.some(arg => arg === "worker")) return envValue(environ, "CURSOR_AGENT_WORKER_EXTENSION") === "1";
+  return true;
+}
 const INTERPRETERS = /(^|\/)(node|nodejs|bun|deno|python[0-9.]*|uv|npx|bunx|sh|bash|zsh|fish|env)$/;
 export function providerOf(cmd: string[]): string | null {
   // Only argv[0] identifies a program. argv[1..2] count solely when argv[0]
@@ -621,6 +644,14 @@ export function providerOf(cmd: string[]): string | null {
       // OpenCode also exposes several persistent services. Only its TUI/run
       // invocations represent a session that belongs on the desk.
       if (name === "opencode" && cmd.some(a => ["serve", "web", "acp", "mcp", "github"].includes(a))) return null;
+      // One binary, a dozen subcommands, and only the agent itself is a
+      // conversation. `worker` is the self-hosted Cloud Agent worker the IDE
+      // starts to execute tool calls locally; the rest are one-shot management
+      // commands that would flash up a card with nothing to click. Scanned
+      // across argv rather than at argv[1], because the IDE puts the
+      // subcommand after several flags (--api-key, --endpoint, …) — the same
+      // scan opencode's serve/web/acp/mcp/github exclusion already uses.
+      if (name === "cursor" && cmd.some(a => CURSOR_SERVICE_COMMANDS.has(a))) return null;
       // `agy remote-control start` and `agy mic-serve` are background
       // services (a remote-access daemon and a mic-forwarding server), not
       // an agent conversation — same shape as Codex's app-server exclusion.
@@ -963,6 +994,28 @@ export function sessionStaleness(session: any, stamp = now): { idleSince: number
   const attachable = hosts.some(host => host && ((host.kind === "boomux" && host.shellId) || (host.kind === "background" && host.attachId)));
   const unattended = background || (!session.window && !attachable);
   return { idleSince, idleMs, unattended, stale: unattended && !session.busy && idleMs >= STALE_AFTER_MS };
+}
+// Four sources disagree about whether an agent is working, and the order
+// matters more than any of them. An agent that reports its own state is
+// believed first; a transcript the agent itself wrote is believed next; a
+// terminal title is the weakest and for some providers actively wrong.
+export function sessionBusyState(options: {
+  provider?: string;
+  registryBusy?: boolean | null;
+  transcriptBusy?: boolean | null;
+  titleBusy?: boolean;
+  turnBusy?: boolean;
+}): boolean {
+  // Claude Code's own registry says busy/idle outright.
+  if (options.registryBusy !== null && options.registryBusy !== undefined) return !!options.registryBusy;
+  // Cursor writes {"type":"turn_ended"} when a turn finishes, so its own
+  // transcript settles it — and the window title belongs to the IDE, not to
+  // this conversation, so it could not help anyway.
+  if (options.transcriptBusy !== null && options.transcriptBusy !== undefined) return !!options.transcriptBusy;
+  // Grok's title sticks on 🧠 after the turn ends, so the title is a lie and
+  // only the systemd inhibitor is trustworthy.
+  if (options.provider === "grok") return !!options.turnBusy;
+  return !!options.titleBusy || !!options.turnBusy;
 }
 export function attachStaleness(sessions: any[], stamp = now): any[] {
   for (const session of sessions) {
@@ -1380,6 +1433,10 @@ async function liveSessions(pids: number[]) {
     c && typeof c === "object" && Number.isInteger(c.pid) && c.pid > 0 && typeof c.address === "string");
   const winByPid = new Map<number, any>(clients.map((c: any) => [c.pid, c]));
   const sessions: any[] = [];
+  // Cursor's own turn_ended marker, read once per worker while its transcript
+  // is in hand. The only real busy signal on this desk: every other provider
+  // is inferred from a terminal title or a systemd inhibitor.
+  const cursorBusyByPid = new Map<number, boolean>();
   const [gpuByPid, tmux, claudeRegistry] = await Promise.all([gpuMemoryByPid(), tmuxState(winByPid, pids), claudeAgents()]);
   const hermesByPid = hermesSessions();
   const herdrClients = herdrState(winByPid);
@@ -1457,6 +1514,17 @@ async function liveSessions(pids: number[]) {
         else hosts.push({ kind: "background", label: "background · claude daemon", attachId: registered.jobId });
       }
     }
+    // The IDE's worker is driven from the Cursor window, never from a terminal,
+    // so it is unattended in exactly the sense Claude's --bg sessions are:
+    // dimmed, and stale once it has been idle for hours. Its live chat comes
+    // from the newest transcript under its own working directory, which is
+    // exact — Cursor records it as the file's mtime.
+    if (prov === "cursor" && cursorIsWorker(p.cmd, environ)) {
+      hosts.push({ kind: "background", label: "background · cursor worker" });
+      const chat = cursorCurrentChat(process.env.CURSOR_HOME || join(HOME, ".cursor"), p.cwd);
+      if (chat.session && !sessionIds.includes(chat.session)) sessionIds.unshift(chat.session);
+      if (chat.path) cursorBusyByPid.set(p.pid, cursorTranscriptBusy(readHistoryTail(chat.path)));
+    }
     const sample = processTreeSample(p.pid);
     // The lease names the backend process; the card is the launcher above it.
     if (prov === "hermes" && hermesByPid.size)
@@ -1504,10 +1572,13 @@ async function liveSessions(pids: number[]) {
     const tmuxHostOf = (s.hosts || []).find((host: any) => host.kind === "tmux");
     if (tmuxHostOf && tmuxHostOf.attached && !tmuxHostOf.activePane && s.window) s.window = { ...s.window, title: "" };
     const titleBusy = !!(s.window && titleLooksBusy(s.window.title));
-    // Grok's terminal title sticks on 🧠 after the turn. Trust the inhibitor.
-    // Claude's registry status is authoritative when present.
-    s.busy = s._registryBusy !== null && s._registryBusy !== undefined ? s._registryBusy
-      : s.provider === "grok" ? turnBusy.has(s.pid) : (titleBusy || turnBusy.has(s.pid));
+    s.busy = sessionBusyState({
+      provider: s.provider,
+      registryBusy: s._registryBusy,
+      transcriptBusy: cursorBusyByPid.has(s.pid) ? cursorBusyByPid.get(s.pid) : null,
+      titleBusy,
+      turnBusy: turnBusy.has(s.pid),
+    });
     if (!s.busy && s.window && titleLooksBusy(s.window.title) && s.provider === "grok")
       s.window = { ...s.window, title: "" };
   }
@@ -1558,7 +1629,7 @@ export function redactCredentials(value: unknown): string {
     .replace(/\b(xox[abprs]-)[A-Za-z0-9-]{10,}\b/g, "$1[redacted]")
     .replace(/\b([A-Z][A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|APIKEY|PRIVATE_KEY|ACCESS_KEY|AUTH)[A-Z0-9_]*)(\s*=\s*)(?:"[^"]{4,}"|'[^']{4,}'|[^\s"']{4,})/g, "$1$2[redacted]")
     // Common token formats. Keep a small prefix so the redaction is still recognizable.
-    .replace(/\b(sk-(?:proj-|ant-)?|sk[_-](?:live|test)_|gh[opusr]_|github_pat_|xai-|glpat-|hf_|npm_|ntn_)[A-Za-z0-9_-]{12,}\b/gi, "$1[redacted]")
+    .replace(/\b(sk-(?:proj-|ant-)?|sk[_-](?:live|test)_|gh[opusr]_|github_pat_|xai-|glpat-|hf_|npm_|ntn_|crsr_)[A-Za-z0-9_-]{12,}\b/gi, "$1[redacted]")
     .replace(/\b(authorization\s*:\s*(?:bearer|basic)\s+)[^\s"']+/gi, "$1[redacted]")
     // Credential CLI flags, with either a separate value or --flag=value.
     .replace(/(--(?:api[-_]?key|access[-_]?token|auth[-_]?token|token|password|passwd|secret))\b(\s+|=)(?:"[^"]*"|'[^']*'|[^\s"']+)/gi, "$1$2[redacted]")
@@ -1770,6 +1841,167 @@ function grokHistory() {
     }))
     .filter((a: any) => a.pid !== null);
   return { present: true, sessions: sessionIds.size, active: activeSessions };
+}
+
+// ------------------------------------------------------------------- Cursor
+// Cursor keeps one JSONL per chat at
+// ~/.cursor/projects/<dashed-cwd>/agent-transcripts/<chatId>/<chatId>.jsonl,
+// in the same {role, message:{content:[{type,text}]}} shape Claude Code writes.
+// Two things it does NOT have: a single history file, and a timestamp field.
+// The only clock is a <timestamp> tag the client injects into the user turn,
+// with the file's mtime as the fallback.
+
+// The directory name is the working directory with every "/" turned into "-",
+// which is ambiguous the moment a path segment contains a dash of its own:
+// home-jttraino-repos-four-monorepo is /home/jttraino/repos/four-monorepo, not
+// /home/jttraino/repos/four/monorepo. Resolve it against the filesystem
+// instead of guessing — take the shortest segment at each step that exists,
+// extending it across dashes until it does. `exists` is injectable so this
+// stays testable without touching the real tree.
+export function cursorProjectPath(dir: string, exists: (path: string) => boolean = existsSync): string {
+  const name = String(dir || "");
+  // "empty-window" is Cursor's own placeholder for a window with no folder open.
+  if (!name || name === "empty-window" || name.startsWith(".")) return "";
+  const parts = name.split("-");
+  if (parts.length > 64) return "";
+  let path = "";
+  for (let i = 0; i < parts.length; ) {
+    let segment = parts[i];
+    let next = i + 1;
+    while (!exists(path + "/" + segment) && next < parts.length) segment += "-" + parts[next++];
+    const candidate = path + "/" + segment;
+    if (!exists(candidate)) return "";
+    path = candidate;
+    i = next;
+  }
+  return path;
+}
+
+// The client wraps the prompt in <user_query> and prepends a <timestamp>. Strip
+// both: the card wants what the human typed, not the envelope.
+export function cursorUserText(message: any): string {
+  const content = message?.content;
+  const parts: string[] = [];
+  if (typeof content === "string") parts.push(content);
+  else if (Array.isArray(content))
+    for (const block of content)
+      if (block && typeof block === "object" && block.type === "text" && typeof block.text === "string") parts.push(block.text);
+  const joined = parts.join(" ");
+  const query = joined.match(/<user_query>([\s\S]*?)<\/user_query>/);
+  return (query ? query[1] : joined.replace(/<timestamp>[\s\S]*?<\/timestamp>/g, " ")).trim();
+}
+
+const CURSOR_MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+// "<timestamp>Wednesday, Sep 16, 2026, 3:37 PM (UTC-4)</timestamp>". Parsed
+// rather than handed to Date.parse, which reads that string inconsistently and
+// silently ignores the offset on some builds.
+export function cursorTimestamp(text: unknown): number {
+  const match = String(text || "").match(
+    /<timestamp>[^<]*?([A-Za-z]{3})[a-z]*\s+(\d{1,2}),\s*(\d{4}),\s*(\d{1,2}):(\d{2})\s*(AM|PM)\s*\(UTC([+-]\d{1,2})(?::?(\d{2}))?\)/i,
+  );
+  if (!match) return 0;
+  const month = CURSOR_MONTHS.indexOf(match[1].toLowerCase());
+  if (month < 0) return 0;
+  const day = +match[2], year = +match[3], minute = +match[5];
+  let hour = +match[4] % 12;
+  if (match[6].toUpperCase() === "PM") hour += 12;
+  const sign = match[7].startsWith("-") ? -1 : 1;
+  const offset = sign * (Math.abs(+match[7]) * 60 + (+(match[8] || 0)));
+  const ms = Date.UTC(year, month, day, hour, minute) - offset * 60_000;
+  return plausibleTimestamp(ms) ? ms : 0;
+}
+
+// A transcript ends with {"type":"turn_ended","status":...} once the agent has
+// finished. A trailing assistant turn without it means the agent is still
+// working — a real signal, unlike the terminal-title guessing every other
+// provider needs.
+export function cursorTranscriptBusy(text: unknown): boolean {
+  const lines = String(text || "").split("\n").filter(line => line.trim());
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let entry: any;
+    try { entry = parseJsonBounded(lines[i], 4096, 12); } catch { continue; }
+    if (!entry || typeof entry !== "object") continue;
+    if (entry.type === "turn_ended") return false;
+    if (entry.role) return entry.role === "assistant";
+  }
+  return false;
+}
+
+export function cursorChatId(dir: string): string {
+  return cleanSessionId(dir);
+}
+
+// The reverse of cursorProjectPath: the transcript directory for a working
+// directory is that path with every "/" turned into "-".
+export function cursorWorkspaceDir(cwd: string): string {
+  const path = String(cwd || "");
+  if (!path.startsWith("/")) return "";
+  return path.replace(/\/+$/, "").replace(/^\//, "").replace(/\//g, "-");
+}
+
+// Which chat a worker is on right now. inferSessionIdsFromRecent cannot answer
+// this: it only accepts a prompt within half an hour of launch, which fits a
+// terminal agent prompted right after starting and not a worker that lives as
+// long as the IDE window. Observed on a real desk — a worker launched at
+// 16:02:50 whose chat opened at 16:34, 31 minutes later and just outside that
+// window. Cursor already records the answer as file mtime, so read it.
+export function cursorCurrentChat(
+  base: string,
+  cwd: string,
+  list: (path: string) => string[] = ls,
+  modified: (path: string) => number = path => { try { return lstatSync(path).mtimeMs; } catch { return 0; } },
+): { session: string; path: string } {
+  const dir = cursorWorkspaceDir(cwd);
+  if (!dir) return { session: "", path: "" };
+  const root = join(base, "projects", dir, "agent-transcripts");
+  let best = { session: "", path: "", at: -1 };
+  for (const chat of list(root).slice(0, MAX_COLLECTION_ITEMS)) {
+    const session = cursorChatId(chat);
+    if (!session) continue;
+    const path = join(root, chat, `${chat}.jsonl`);
+    const at = modified(path);
+    if (at > best.at) best = { session, path, at };
+  }
+  return { session: best.session, path: best.path };
+}
+
+function cursorHistory() {
+  const base = process.env.CURSOR_HOME || join(HOME, ".cursor");
+  const root = join(base, "projects");
+  if (!existsSync(root)) return { present: false };
+  let chats = 0, prompts = 0, busy = 0;
+  for (const dir of ls(root).slice(0, MAX_COLLECTION_ITEMS)) {
+    const transcripts = join(root, dir, "agent-transcripts");
+    if (!existsSync(transcripts)) continue;
+    const project = shortPath(cursorProjectPath(dir));
+    for (const chat of ls(transcripts).slice(0, MAX_COLLECTION_ITEMS)) {
+      const session = cursorChatId(chat);
+      if (!session) continue;
+      const path = join(transcripts, chat, `${chat}.jsonl`);
+      const text = readHistoryTail(path);
+      if (!text) continue;
+      chats++;
+      if (cursorTranscriptBusy(text)) busy++;
+      // mtime is the fallback clock for a turn whose <timestamp> is missing or
+      // unparseable, so a chat still lands on the heatmap in roughly the right
+      // hour instead of vanishing.
+      let mtime = 0;
+      try { mtime = lstatSync(path).mtimeMs; } catch {}
+      for (const line of text.split("\n").filter(Boolean)) {
+        let entry: any;
+        try { entry = parseJsonBounded(line, 8192, 12); } catch { continue; }
+        if (!entry || entry.role !== "user") continue;
+        const raw = cursorUserText(entry.message);
+        if (!raw) continue;
+        const ts = cursorTimestamp(JSON.stringify(entry.message?.content ?? "")) || mtime;
+        if (!plausibleTimestamp(ts)) continue;
+        prompts++;
+        bump(ts, "cursor"); cnt("cursor", ts);
+        recent.push({ provider: "cursor", ts, project, text: safePrompt(raw), session });
+      }
+    }
+  }
+  return { present: true, sessions: chats, prompts, busy };
 }
 
 function hermesTimestampMs(value: unknown): number {
@@ -2542,7 +2774,7 @@ async function runCollector() {
   const [cpuS, memS, diskS, netS, pingS, gpuS, sessions, ollama, externalIpS, github, gitea] = await Promise.all([
     Promise.resolve(cpu()), Promise.resolve(mem()), disk(), net(), ping(), gpu(), liveSessions(pids), ollamaState(), externalIp(), githubActivity(), giteaActivity(),
   ]);
-  const claude = claudeHistory(), codex = codexHistory(), grok = grokHistory(), grokBot = grokBotHistory(), opencode = opencodeHistory(), pi = piHistory(), hermes = hermesHistory(), kimi = kimiHistory();
+  const claude = claudeHistory(), codex = codexHistory(), grok = grokHistory(), grokBot = grokBotHistory(), opencode = opencodeHistory(), pi = piHistory(), hermes = hermesHistory(), kimi = kimiHistory(), cursor = cursorHistory();
   recent.sort((a, b) => b.ts - a.ts);
   for (const entry of recent) entry.activityCell = activityCellIndex(entry.ts, heatDays);
   inferSessionIdsFromRecent(sessions, recent);
@@ -2575,7 +2807,7 @@ async function runCollector() {
       attention: sessions.filter((s: any) => s.attention),
       events: notificationState.events,
       collisions: repoCollisions(sessions),
-      counts, providers: { claude, codex, grok, grokBot, opencode, pi, hermes, kimi, ollama }, usage: agentsUsage(),
+      counts, providers: { claude, codex, grok, grokBot, opencode, pi, hermes, kimi, cursor, ollama }, usage: agentsUsage(),
       usageDays: heatDays.map(localDayKey),
       heatmap: { start: start7, days: heatDays, cells: heat.map(c => [c.n, c.p]) },
       github, gitea,
