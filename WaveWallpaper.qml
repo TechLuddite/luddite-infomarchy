@@ -1,7 +1,8 @@
 import QtQuick
 
 // Wallpaper surface. A GIF or WebP plays as the file's own animation; anything
-// else is a still and stays a still.
+// else is a still and stays a still. Overlay playback pauses while it is
+// closed; fillMode handles the display's aspect ratio.
 //
 // This used to run a wave shader over the still. It was removed on 8 September
 // 2026: the shader drew the same image a second time, and the desk dims this
@@ -27,6 +28,8 @@ Item {
     playing: root.playing
     paused: !root.playing
     speed: 1.0
-    sourceSize: Qt.size(Math.max(1, Math.round(root.width)), Math.max(1, Math.round(root.height)))
+    // Keep the decoded frame's natural proportions. AnimatedImage stretches
+    // frames to an explicit sourceSize before fillMode is applied, so using
+    // the display dimensions here distorts wallpapers on mismatched outputs.
   }
 }

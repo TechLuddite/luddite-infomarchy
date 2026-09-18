@@ -6,8 +6,8 @@ import { join } from "path";
 import { parseJsonBounded, readRegularFileLimited, writePrivateStateFile } from "./collector";
 import { withStateLock } from "./state-lock";
 
-const MAPS = ["sections", "webSections", "attentionMuted", "pinnedPrompts", "seenChanges", "notificationEvents", "notificationProviders"];
-const BOOLS = ["notificationsEnabled", "quietHoursEnabled", "dashboardVisible", "privacyMode", "webEnabled"];
+const MAPS = ["sections", "webSections", "attentionMuted", "pinnedPrompts", "seenChanges", "notificationEvents", "notificationProviders", "sessionGroups"];
+const BOOLS = ["notificationsEnabled", "quietHoursEnabled", "dashboardVisible", "privacyMode", "webEnabled", "videoAudio"];
 const STRINGS = ["selectedOllamaModel", "ollamaHost"];
 const ORDERS = ["rightOrder", "opsOrder", "webNarrowOrder"];
 const BAD_KEYS = ["__proto__", "prototype", "constructor", "toJSON", "toString", "valueOf"];
@@ -27,6 +27,7 @@ function validPatch(patch: any): boolean {
     if (ORDERS.includes(key)) return Array.isArray(value) && value.length <= 16 && value.every(v => typeof v === "string" && /^[a-zA-Z]+$/.test(v));
     if (key === "webAccessMode") return value === "lan" || value === "tailscale" || value === "manual";
     if (key === "quietStartHour" || key === "quietEndHour") return Number.isInteger(value) && value >= 0 && value <= 23;
+    if (key === "sessionQuietMinutes") return Number.isInteger(value) && value >= 0 && value <= 10080;
     return false;
   });
 }

@@ -130,6 +130,7 @@ Item {
   function providerColor(p) {
     switch (String(p)) {
       case "claude": return root.yellow
+      case "kimi": return root.blue
       case "codex": return root.cyan
       case "grok": return root.magenta
       case "grok-bot": return root.magenta
@@ -140,6 +141,7 @@ Item {
       case "ollama": return root.green
       case "opencode": return root.blue
       case "pi": return root.green
+      case "cursor": return root.cyan
       case "aider": return root.yellow
       case "copilot": return root.magenta
       default: return Color.accent
@@ -161,6 +163,7 @@ Item {
   function providerLabel(p) {
     switch (String(p)) {
       case "claude": return "Claude"
+      case "kimi": return "Kimi"
       case "codex": return "Codex"
       case "grok": return "Grok"
       case "grok-bot": return "Grok Bot"
@@ -171,6 +174,7 @@ Item {
       case "ollama": return "Ollama"
       case "opencode": return "opencode"
       case "pi": return "Pi"
+      case "cursor": return "Cursor"
       case "aider": return "Aider"
       case "copilot": return "Copilot"
       default: return plainText(p, 64)

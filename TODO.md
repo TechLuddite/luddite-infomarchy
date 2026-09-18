@@ -18,6 +18,7 @@ Completed features and fixes are recorded in [CHANGELOG.md](CHANGELOG.md). Curre
 
 - [ ] Polish the experimental settings bar widget before proposing it upstream: reliable enable/discovery for the combined plugin, a clear GUI path, and real bar/panel placement checks. The user previewed it and chose to exclude it from the Web Mode PR. Retain the local preview; dashboard SETTINGS remains the supported setup path.
 
+- [ ] GITEA (upstream 2026-09-18) is desk-only. Web Mode drops it from the browser snapshot; rendering it there needs the same server-side privacy treatment as GITHUB.
 - [ ] Stable keyed session model: the sessions Repeater is rebuilt on every snapshot (Qt clears delegates on model replacement), which restarts animations and drops per-card state; preview paths are cached at the view level as a stopgap. (Astra finding, 2026-09-05.)
 - [ ] Automatic topic refinement can race an explicit UNLOAD within the same tick and reload the model; refinement is loopback-only and capped at 6 requests, but a suppress-after-unload signal would close it fully. (Astra finding, 2026-09-05.)
 - [ ] Many live sessions on a small monitor can push lower cards off screen; panels are deliberately non-scrolling, so cap visible session cards and show "+N more". (Astra finding, 2026-09-05.)

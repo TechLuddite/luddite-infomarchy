@@ -22,11 +22,13 @@ The wallpaper desk, the collector, and the design are theirs. Use [the original]
 
 **Hermes.** Recent prompts come from `$HERMES_HOME/state.db` or `~/.hermes/state.db`. Resume is `hermes --resume <id>`. A live Hermes card raises the Hermes app (window below the launcher, class-gated) and reads the session id from the lease file.
 
-**LOCAL AI.** Load/unload and the model list talk to a persisted origin (`ollamaHost` in `dashboard.json`, `omarchy-shell infomarchy setOllamaHost` / `getOllamaHost`), else `OLLAMA_HOST`, else `http://127.0.0.1:11434`. Topic refinement still requires loopback unless `INFOMARCHY_ALLOW_REMOTE_OLLAMA=1`. A loopback port that is an SSH tunnel is treated as local.
+**LOCAL AI.** Load/unload and the model list talk to a persisted origin (`ollamaHost` in `dashboard.json`, `omarchy-shell infomarchy setOllamaHost` / `getOllamaHost`), else `OLLAMA_HOST`, else `http://127.0.0.1:11434`. Topic refinement still requires loopback unless `INFOMARCHY_ALLOW_REMOTE_OLLAMA=1`. A loopback port that is an SSH tunnel is treated as local, so `INFOMARCHY_SKIP_REFINEMENT=1` (upstream) switches automatic refinement off outright.
 
 **CONTAINERS.** Lower-right card lists Docker (or Podman) containers with a per-row on/off toggle. Start and stop go through `container-control.ts`, which checks a live `ps -a` inventory and passes the name as its own argv element. Compose services show as short labels. At most eight rows. The snapshot keeps id, name, label, service, project, image, state, running, and health. Compose working_dir, env files, commands, mounts, and ports are dropped. Hide or reorder it from the module strip like the other right-column cards. Skip collection with `INFOMARCHY_SKIP_CONTAINERS=1`.
 
 **MEDIA CONTROLS.** Last right-column card. Live MPRIS (`Quickshell.Services.Mpris`): title, artist, album, player identity, PREV / PLAY or PAUSE / NEXT. Prefers a playing player over `playerctld`. No album art fetch. Stream privacy leaves those fields in the clear. Not on Web Mode. Hide or reorder it from the module strip like the other right-column cards.
+
+**GITEA** (upstream, `tea login add`) renders on the desk only. Web Mode does not render it and drops it from the browser snapshot.
 
 **Web Mode.** A live browser version of the desk for your phone or another computer, with LAN HTTP, guided private HTTPS through Tailscale, or Manual HTTPS using an existing certificate. See [Web Mode](#web-mode) for behavior and privacy, and [Set up Web Mode](#set-up-web-mode) for all three setup paths.
 
@@ -51,6 +53,8 @@ o.bind("SUPER + D", "Infomarchy: AI info desk", "omarchy-shell shell toggle tech
 o.bind("SUPER + I", "Infomarchy: toggle wallpaper dashboard", "omarchy-shell infomarchy toggleDashboard")
 o.bind("SUPER + SHIFT + I", "Infomarchy: stream privacy", "omarchy-shell infomarchy togglePrivacy")
 ```
+
+Then `hyprctl reload` and check that `hyprctl configerrors` prints nothing. If the key does nothing but `omarchy-shell infomarchy toggleDashboard` works, Hyprland holds a stale `OMARCHY_PATH`; log out and back in.
 
 **SUPER+SHIFT+I** hides WAN, LAN, Wi-Fi SSID, `user@host`, GitHub login, `/home/<user>` mounts, and window previews. One press turns it on. Three presses within two seconds turn it off (the chip shows 1/3, then 2/3). Overlay ignores key-repeat so holding the chord cannot unmask. `omarchy-shell infomarchy setPrivacy false` still clears it in one shot. Recent-task prompts keep the first four words and mask the rest, including the inspect drawer. COPY EXCERPT still copies the full text. OSS project names, repos, and session topics stay. It persists in `dashboard.json`. The module strip shows **PRIVACY ON** in yellow while it is active. Web Mode follows this persisted desktop setting; its privacy status cannot be changed in the browser. Missing or invalid settings default to privacy on.
 
