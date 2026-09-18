@@ -301,6 +301,13 @@ Item {
     var p = String(path || "")
     return privacyMode ? p.replace(/^\/home\/[^/]+/, "~") : p
   }
+  // A terminal title is usually `user@host: /home/user/dir`, which names the
+  // account, the machine and the home path in one line. Mask all three.
+  function displayTitle(title) {
+    var t = String(title || "")
+    if (!privacyMode) return t
+    return t.replace(/\/home\/[^\/\s]+/g, "~").replace(/[A-Za-z0-9._-]+@[A-Za-z0-9._-]+/g, "user@host")
+  }
   // Stream privacy: keep the first four words of a recent-task prompt (in the
   // 3 to 5 range), then a fixed mask so the rest of the ask and its length stay off
   // the desk. Four or fewer words pass through.
@@ -615,7 +622,7 @@ Item {
       var k = view.giteaKinds[i]
       if (c[k] && (c[k].week > 0 || c[k].today > 0)) parts.push(view.giteaKindLabel(k) + " " + c[k].today + "/" + c[k].week)
     }
-    if (!parts.length) return view.gitea.login ? "@" + view.gitea.login : ""
+    if (!parts.length) return privacyMode || !view.gitea.login ? "" : "@" + view.gitea.login
     return "today/week · " + parts.join(" · ")
   }
   // Why the Gitea grid is empty or behind, in the words the user needs.
@@ -628,7 +635,7 @@ Item {
       case "pending": return "fetching Gitea activity…"
       case "unavailable": return "Gitea unreachable · " + String(view.gitea.error || "fetch failed")
       case "stale": return "stale · " + String(view.gitea.error || "fetch failed") + " · cached rows"
-      case "ok": return (view.gitea.login ? "@" + view.gitea.login + " · " : "") + (view.gitea.coverage === "partial" ? "filling older days · " : "") + "hover · click pins · red = now"
+      case "ok": return (privacyMode || !view.gitea.login ? "" : "@" + view.gitea.login + " · ") + (view.gitea.coverage === "partial" ? "filling older days · " : "") + "hover · click pins · red = now"
       default: return ""
     }
   }
@@ -1360,7 +1367,7 @@ Item {
                     visible: !sc.grouped
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
-                    text: sc.modelData.topic ? "↳ " + sc.modelData.topic : "↳ " + ((sc.modelData.window || {}).title || "topic unavailable")
+                    text: sc.modelData.topic ? "↳ " + sc.modelData.topic : "↳ " + (view.displayTitle((sc.modelData.window || {}).title) || "topic unavailable")
                     color: sc.modelData.topic ? sc.tone : view.textDim
                     font.family: view.mono
                     font.pixelSize: Style.font.bodySmall
@@ -1425,7 +1432,7 @@ Item {
                   }
                   PlainText { Layout.fillWidth: true; Layout.minimumWidth: 0; visible: !sessionFlow.dense && (!!sc.modelData.cwd); text: view.displayPath(sc.modelData.cwd || ""); color: view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption; elide: Text.ElideMiddle }
                   PlainText { Layout.fillWidth: true; Layout.minimumWidth: 0; visible: !sessionFlow.dense && ((sc.modelData.hosts || []).length > 0); text: "hosted in " + view.sessionHostLabel(sc.modelData) + (sc.modelData.window ? " · click jumps to the pane" : ((sc.modelData.hosts || []).some(function(h) { return h && h.kind === "background" && h.attachId }) ? " · click attaches a terminal" : " · no client window found")); color: sc.tone; font.family: view.mono; font.pixelSize: Style.font.caption; elide: Text.ElideRight }
-                  PlainText { Layout.fillWidth: true; Layout.minimumWidth: 0; visible: !sessionFlow.dense && (!!sc.modelData.topic && !!(sc.modelData.window && sc.modelData.window.title)); text: sc.modelData.window ? (sc.modelData.window.title || "") : ""; color: view.textDim; font.family: view.mono; font.pixelSize: Style.font.caption; elide: Text.ElideRight }
+                  PlainText { Layout.fillWidth: true; Layout.minimumWidth: 0; visible: !sessionFlow.dense && (!!sc.modelData.topic && !!(sc.modelData.window && sc.modelData.window.title)); text: view.displayTitle((sc.modelData.window || {}).title); color: view.textDim; font.family: view.mono; font.pixelSize: Style.font.caption; elide: Text.ElideRight }
                   PlainText { Layout.fillWidth: true; Layout.minimumWidth: 0; visible: !sessionFlow.dense && (!!sc.modelData.git); text: sc.modelData.git ? ("git " + sc.modelData.git.branch + (sc.modelData.git.dirty ? " · " + sc.modelData.git.dirty + " changed" : " · clean") + (sc.modelData.git.ahead ? " · ↑" + sc.modelData.git.ahead : "") + (sc.modelData.git.behind ? " · ↓" + sc.modelData.git.behind : "") + (sc.modelData.git.conflicts ? " · " + sc.modelData.git.conflicts + " conflicts" : "")) : ""; color: sc.modelData.git && sc.modelData.git.conflicts ? view.desk.red : sc.modelData.git && sc.modelData.git.dirty ? view.desk.yellow : view.desk.green; font.family: view.mono; font.pixelSize: Style.font.caption; elide: Text.ElideRight }
                   PlainText { Layout.fillWidth: true; Layout.minimumWidth: 0; text: "pid " + sc.modelData.pid + (sc.modelData.name ? " · " + sc.modelData.name : "") + (sc.modelData.window ? " · ws " + sc.modelData.window.workspace : " · no window") + " · cpu " + (sc.modelData.resources && sc.modelData.resources.cpuPct !== null ? sc.modelData.resources.cpuPct.toFixed(1) + "%" : "—") + " · ram " + ((sc.modelData.resources || {}).rss !== null ? view.desk.bytes((sc.modelData.resources || {}).rss) : "—") + " · " + ((sc.modelData.resources || {}).processes !== null ? ((sc.modelData.resources || {}).processes || 0) : "—") + " proc" + ((sc.modelData.resources || {}).gpuMemory ? " · gpu " + view.desk.bytes(sc.modelData.resources.gpuMemory) : ""); color: view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption; elide: Text.ElideRight }
                 }
@@ -2685,7 +2692,7 @@ Item {
         }
       }
       PlainText { Layout.fillWidth: true; text: view.displayPath(sessionInspector.session.cwd || "") || "unknown project"; color: view.desk.themeForeground; font.family: view.mono; font.pixelSize: Style.font.subtitle; elide: Text.ElideMiddle }
-      PlainText { Layout.fillWidth: true; text: (sessionInspector.session.window || {}).title || "no window title"; color: view.textDim; font.family: view.mono; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight }
+      PlainText { Layout.fillWidth: true; text: view.displayTitle((sessionInspector.session.window || {}).title) || "no window title"; color: view.textDim; font.family: view.mono; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight }
       PlainText { Layout.fillWidth: true; visible: (sessionInspector.session.hosts || []).length > 0; text: view.sessionHostDetail(sessionInspector.session); color: sessionInspector.tone; font.family: view.mono; font.pixelSize: Style.font.bodySmall; elide: Text.ElideRight }
       PlainText { Layout.fillWidth: true; text: "CPU " + (sessionInspector.session.resources && sessionInspector.session.resources.cpuPct !== null ? sessionInspector.session.resources.cpuPct.toFixed(1) + "%" : "—") + "   ·   RAM " + ((sessionInspector.session.resources || {}).rss !== null ? view.desk.bytes((sessionInspector.session.resources || {}).rss) : "—") + "   ·   " + ((sessionInspector.session.resources || {}).processes !== null ? ((sessionInspector.session.resources || {}).processes || 0) : "—") + " PROCESSES" + ((sessionInspector.session.resources || {}).gpuMemory ? "   ·   GPU " + view.desk.bytes(sessionInspector.session.resources.gpuMemory) : ""); color: view.textDim; font.family: view.mono; font.pixelSize: Style.font.bodySmall }
       PlainText {

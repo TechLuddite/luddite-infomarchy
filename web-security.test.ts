@@ -25,7 +25,9 @@ const base = {
 describe("desktop disclosure boundary", () => {
   test("all response bytes omit private sentinels and leave the desktop source intact", () => {
     const before = JSON.stringify(snapshot);
-    for (const prefs of [parseDashPrefs({ privacyMode: true }), parseDashPrefs({}), parseDashPrefs(null), parseDashPrefs({ privacyMode: "false" })]) {
+    // Only a saved literal true masks; the desk reads the same file the same way.
+    for (const prefs of [parseDashPrefs({}), parseDashPrefs(null), parseDashPrefs({ privacyMode: "true" }), parseDashPrefs({ privacyMode: 1 })]) expect(prefs.privacyMode).toBe(false);
+    for (const prefs of [parseDashPrefs({ privacyMode: true })]) {
       for (const pathname of [base.pathname, base.pathname + "snapshot.json"]) {
         const r = handleRequest({ ...base, pathname, prefs });
         expect(r.status).toBe(200);

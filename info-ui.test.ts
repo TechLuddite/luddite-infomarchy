@@ -924,7 +924,8 @@ describe("the session inspector follows the session you opened", () => {
 
 describe("stream privacy mode", () => {
   test("persists a toggle that masks identity and leaves OSS project names", () => {
-    expect(settings).toContain("property bool privacyMode: true");
+    expect(settings).toContain("property bool privacyMode: false");
+    expect(settings).toContain("privacyMode = !!(parsed && parsed.privacyMode === true)");
     expect(settings).toContain("function togglePrivacyMode()");
     expect(settings).toContain("privacyMode: privacyMode");
     expect(settings).toContain("readonly property int privacyUnlockNeeded: 3");
@@ -950,6 +951,12 @@ describe("stream privacy mode", () => {
     expect(view).toContain("p.replace(/^\\/home\\/[^/]+/, \"~\")");
     expect(view).toContain("visible: !view.privacyMode && !!mc.net.addr");
     expect(view).toContain("privacyMode || !github.login");
+    expect(view).toContain("privacyMode || !view.gitea.login");
+    expect(view).toContain("function displayTitle(title)");
+    expect(view).toContain("view.displayTitle((sessionInspector.session.window || {}).title)");
+    expect(view).toContain("view.displayTitle((sc.modelData.window || {}).title)");
+    expect(view).not.toContain('text: sc.modelData.window ? (sc.modelData.window.title || "") : ""');
+    expect(view).not.toContain('(sessionInspector.session.window || {}).title || "no window title"');
     expect(view).toContain("onPrivacyModeChanged: if (privacyMode && previewsEnabled) previewsEnabled = false");
     expect(view).toContain("view.previewsEnabled && !view.privacyMode");
     expect(view).toContain('text: !view.privacyMode ? "PRIVACY" : (view.settings.privacyUnlockCount > 0 ? "PRIVACY ON · " + view.settings.privacyUnlockCount + "/" + view.settings.privacyUnlockNeeded : "PRIVACY ON")');
@@ -969,6 +976,18 @@ describe("stream privacy mode", () => {
     expect(settings).toContain("privacyUnlockReset.restart()");
     expect(settings).toContain("readonly property int privacyUnlockMs: 2000");
     expect(service).toContain("function setPrivacy(v: string): void { dashboardSettings.setPrivacyMode(");
+  });
+
+  test("window titles lose account, host and home path under privacy", () => {
+    const source = view.match(/function displayTitle\([\s\S]*?\n  \}/)?.[0];
+    expect(source).toBeTruthy();
+    const masked = Function("privacyMode", `return (${source})`)(true);
+    const clear = Function("privacyMode", `return (${source})`)(false);
+    expect(masked("larry@box: /home/larry/Projects/x")).toBe("user@host: ~/Projects/x");
+    expect(masked("claude — /home/larry/work")).toBe("claude — ~/work");
+    expect(masked("Processing… task")).toBe("Processing… task");
+    expect(masked("")).toBe("");
+    expect(clear("larry@box: /home/larry/Projects/x")).toBe("larry@box: /home/larry/Projects/x");
   });
 
   test("recent-task prompts keep the first four words and mask the rest", () => {

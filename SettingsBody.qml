@@ -242,7 +242,7 @@ ColumnLayout {
   Text { textFormat: Text.PlainText; text: "WEB MODE"; color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true; font.letterSpacing: 1.4 }
   Text {
     textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap
-    text: "Desktop privacy " + (root.settings.privacyMode ? "ON" : "OFF") + ". Turning it off lets connected web viewers receive full values. Recent prompts keep four words and session topics remain visible when privacy is on."
+    text: "Desktop privacy " + (root.settings.privacyMode ? "ON" : "OFF") + ". It is off until you turn it on, and connected web viewers receive full values while it is off. Recent prompts keep four words and session topics remain visible when privacy is on."
     color: root.settings.privacyMode ? root.yellow : root.red; font.family: root.mono; font.pixelSize: Style.font.caption
   }
   RowLayout {

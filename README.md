@@ -188,7 +188,7 @@ Each viewer link contains a bearer token: someone with the link and network acce
 
 ### Privacy follows the desktop
 
-The browser shows **PRIVACY ON/OFF · controlled on desktop**. Use the desktop privacy chip or **SUPER+SHIFT+I** to change it: one press enables privacy; three presses within two seconds disable it. Missing, unreadable, or malformed settings default to privacy on.
+The browser shows **PRIVACY ON/OFF · controlled on desktop**. Use the desktop privacy chip or **SUPER+SHIFT+I** to change it: one press enables privacy; three presses within two seconds disable it. Privacy is off until the desk saves it on; a missing, unreadable, or malformed setting reads as off in the browser exactly as it does on the desk, so the two never disagree.
 
 With privacy on, the server omits WAN/LAN addresses, Wi-Fi SSID, and user/host identity, shortens home mounts, and sends recent prompts only through their first four words plus the mask. Full values are absent from the HTML and JSON, including hidden elements. Session topics, project names, and prompts of four words or fewer stay visible. GitHub login remains excluded at either setting. The JSON view also excludes desktop action arguments, session working directories, previews, and extra provider fields.
 

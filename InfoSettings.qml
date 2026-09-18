@@ -56,7 +56,7 @@ Item {
   property bool dashboardVisible: false
   // Stream/screenshot mask: hide WAN, LAN, SSID, user@host, GitHub login.
   // OSS project names stay. Missing or invalid settings default to privacy on.
-  property bool privacyMode: true
+  property bool privacyMode: false
   property int privacyUnlockCount: 0
   readonly property int privacyUnlockNeeded: 3
   readonly property int privacyUnlockMs: 2000
@@ -113,7 +113,7 @@ Item {
       selectedOllamaModel = parsed && /^[A-Za-z0-9][A-Za-z0-9._:\/-]{0,255}$/.test(String(parsed.selectedOllamaModel || "")) ? String(parsed.selectedOllamaModel) : ""
       ollamaHost = parsed ? normalizeOllamaHost(parsed.ollamaHost) : ""
       dashboardVisible = parsed && typeof parsed.dashboardVisible === "boolean" ? parsed.dashboardVisible : true
-      privacyMode = !(parsed && parsed.privacyMode === false)
+      privacyMode = !!(parsed && parsed.privacyMode === true)
       privacyUnlockCount = 0
       // Only a missing mode is a legacy LAN setting. Unknown explicit values
       // must never turn an intended HTTPS listener into plaintext HTTP.
@@ -145,7 +145,7 @@ Item {
       selectedOllamaModel = ""
       ollamaHost = ""
       dashboardVisible = true
-      privacyMode = true
+      privacyMode = false
       privacyUnlockCount = 0
       webModeInvalid = false
       webAccessMode = "lan"

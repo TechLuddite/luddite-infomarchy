@@ -304,7 +304,7 @@ export function parseDashPrefs(raw: unknown): DashPrefs {
   const sections = parsed.sections && typeof parsed.sections === "object" ? parsed.sections as Record<string, boolean> : {};
   const webSections = parsed.webSections && typeof parsed.webSections === "object" ? parsed.webSections as Record<string, boolean> : {};
   return {
-    privacyMode: parsed.privacyMode !== false,
+    privacyMode: parsed.privacyMode === true,
     sections,
     webSections,
     rightOrder: normalizeOrder(parsed.rightOrder, DEFAULT_RIGHT_ORDER),

@@ -27,7 +27,7 @@ const CEILINGS: Record<string, number> = {
   "Infomarchy.qml": 27,
   "InfoModel.qml": 5,
   "InfoSettings.qml": 2,
-  "InfoView.qml": 509,
+  "InfoView.qml": 511,
   "Overlay.qml": 29,
   "WaveWallpaper.qml": 0,
   // Settings drawer: dynamic Style properties, unqualified access and

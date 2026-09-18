@@ -10,7 +10,7 @@ For Tailscale mode, Tailscale owns private connectivity and HTTPS certificate li
 
 ## Disclosure policy
 
-Only literal boolean `false` in persisted desktop `privacyMode` disables privacy. Missing, unreadable, invalid, or malformed settings default to on. Desktop preference changes are field-specific patches, including per-key map edits, rather than cached whole-file snapshots. `dashboard-state.ts` merges each patch into freshly read settings under `dashboard.lock`; the browser layout writer uses that same transaction. Unrelated stale desktop/browser edits cannot restore privacy-off, WEB-on, or a previous access mode. Each QML instance queues writes through startup and reloads persisted state after completion; failures are visible and reload saved settings.
+Only a persisted literal boolean `true` in desktop `privacyMode` enables privacy. Missing, unreadable, invalid, or malformed settings read as off, the same way the desk reads them, so the browser never masks what the desk shows or shows what the desk masks. Viewer tokens, not the privacy mask, are the access boundary. Desktop preference changes are field-specific patches, including per-key map edits, rather than cached whole-file snapshots. `dashboard-state.ts` merges each patch into freshly read settings under `dashboard.lock`; the browser layout writer uses that same transaction. Unrelated stale desktop/browser edits cannot restore privacy-off, WEB-on, or a previous access mode. Each QML instance queues writes through startup and reloads persisted state after completion; failures are visible and reload saved settings.
 
 The browser's privacy label is read-only; the layout preference endpoint rejects unexpected keys, including privacy mutations.
 
