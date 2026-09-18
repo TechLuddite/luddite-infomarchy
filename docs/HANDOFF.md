@@ -119,3 +119,7 @@ The user authorized live deployment and shell reload, then synchronization of th
 - `web-page.ts` drops `ai.gitea` from the browser snapshot (it carries the Gitea login); regression in `web-server.test.ts`. GITEA is not rendered on Web Mode (TODO).
 - `qml-resolve.test.ts` ceilings re-measured on base, master, upstream and the merge with the new gate: BackgroundWallpaper 0, Infomarchy 27, InfoModel 6, InfoSettings 2, InfoView 553, Overlay 29. Every merged count equals base plus upstream's delta plus the fork's delta, so no new unresolved name was introduced.
 - `bun test --timeout 30000`: 361 passed, 0 failed across 27 files, including the new upstream gates. `git diff --check` clean. No live provider or visual verification at integration time; see the deployment record below.
+
+### Live deployment and fork synchronization — 2026-09-18
+
+The live clone (`~/.config/omarchy/plugins/techluddite.luddite-infomarchy`) was fast-forwarded to `8267936` from the local checkout, so its previous state `b0c7e88` remains in its own history. `omarchy restart shell` succeeded: `omarchy-shell shell ping` answered, `infomarchy geometry` reported the new `gitea` heatmap slot, `getPrivacy` returned true, and noncredential `web-status.json` reported Tailscale ready on 8788. `prev-bg.json` advanced twelve seconds later, confirming the kept Timer refresh; the shell journal shows no warnings from this plugin. Fork master was then pushed to `origin`. No visual or provider-specific verification was performed.
