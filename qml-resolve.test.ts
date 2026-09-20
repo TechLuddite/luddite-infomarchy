@@ -28,7 +28,11 @@ import { join } from "path";
 const CEILINGS: Record<string, number> = {
   "Apps.qml": 6,
   "BackgroundWallpaper.qml": 0,
-  "Infomarchy.qml": 26,
+  // 28 adds the desk's workspace gate: deskWorkspaceMatches reads
+  // dashboardSettings from inside the per-screen PanelWindow, and qmllint
+  // cannot resolve an outer-scope id through a Variants delegate — the same
+  // false positive the InfoView.qml count below is almost entirely made of.
+  "Infomarchy.qml": 28,
   "InfoModel.qml": 6,
   "InfoSettings.qml": 0,
   // 509 came in with privacy mode (#17). The two above it are the topic mask

@@ -305,6 +305,8 @@ omarchy-shell shell call nixfred.infomarchy refresh                   # overlay 
 omarchy-shell infomarchy setWallpaperOpacity 0.5                      # 0 = solid theme bg
 omarchy-shell infomarchy toggleDashboard                              # hide/show cards; keep wallpaper
 omarchy-shell infomarchy setDashboardVisible true                     # explicit on/off control
+omarchy-shell infomarchy setDeskWorkspace 5                           # cards only on workspace 5; wallpaper stays everywhere
+omarchy-shell infomarchy setDeskWorkspace 0                           # cards on every workspace again (default)
 omarchy-shell infomarchy toggleSection machine                        # remove/restore one dashboard card
 omarchy-shell infomarchy setSection recent true                       # explicit section visibility
 omarchy-shell infomarchy toggleNotifications                         # all Infomarchy alerts on/off
@@ -319,6 +321,7 @@ omarchy-shell infomarchy setDemo false                                # return t
 | poll interval | `refreshMs` in `Infomarchy.qml` / `Overlay.qml` | 4000 / 3000 ms |
 | wallpaper dim | `wallpaperOpacity` in `Infomarchy.qml` | 0.32 |
 | wallpaper dashboard | `SUPER+I` or wallpaper IPC above; state survives shell/plugin restarts | visible |
+| desk workspace | `setDeskWorkspace` above; `0` is every workspace | 0 (every workspace) |
 | session notifications | Next Actions card or wallpaper IPC above | on |
 | notification quiet hours | Next Actions card or wallpaper IPC above | off (22:00–08:00 when enabled) |
 | space left for the bar | `topInset` in `InfoView.qml` | 40 px × font scale |

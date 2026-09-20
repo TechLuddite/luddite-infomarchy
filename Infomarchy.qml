@@ -235,6 +235,9 @@ Scope {
     function setHideQuiet(v: string): void { dashboardSettings.setHideQuietSessions(["1", "true", "on", "yes"].indexOf(String(v).toLowerCase()) >= 0) }
     function toggleHideQuiet(): void { dashboardSettings.toggleHideQuietSessions() }
     function getHideQuiet(): string { return dashboardSettings.hideQuietSessions ? "true" : "false" }
+    // 0 restores the desk to every workspace.
+    function setDeskWorkspace(v: string): string { return dashboardSettings.setDeskWorkspace(Number(v)) ? "ok" : "usage: setDeskWorkspace 0-" + dashboardSettings.maxWorkspace }
+    function getDeskWorkspace(): string { return String(dashboardSettings.deskWorkspace) }
     function setQuietMinutes(v: string): void { dashboardSettings.setSessionQuietMinutes(Number(v)) }
     function getQuietMinutes(): string { return String(dashboardSettings.sessionQuietMinutes) }
     function toggleQuietHours(): void { dashboardSettings.toggleQuietHoursEnabled() }
@@ -269,6 +272,12 @@ Scope {
       readonly property var hyprlandMonitor: Hyprland.monitorFor(modelData)
       readonly property var visibleWorkspace: hyprlandMonitor ? hyprlandMonitor.activeWorkspace : null
       readonly property bool fullscreenHere: visibleWorkspace ? visibleWorkspace.hasFullscreen : false
+      // 0 means every workspace — the behaviour before this setting existed.
+      // While the workspace is unknown (no Hyprland monitor yet, early in
+      // startup) the desk stays on rather than blinking out: an unset gate
+      // must never be the reason the dashboard is missing.
+      readonly property bool deskWorkspaceMatches: dashboardSettings.deskWorkspace === 0
+        || !visibleWorkspace || visibleWorkspace.id === dashboardSettings.deskWorkspace
 
       // A wallpaper's sound track plays from one output only, or every monitor
       // layers its own copy of it. Same rule the built-in renderer uses.
@@ -402,7 +411,12 @@ Scope {
         interactive: true
         keyboardAvailable: false
         Component.onCompleted: if (!root.deskView) root.deskView = this
-        visible: dashboardSettings.ready && dashboardSettings.dashboardVisible
+        // The cards, not the wallpaper: a background layer belongs to an
+        // output and is drawn under every workspace on it, so pinning the desk
+        // to one workspace has to be done here rather than on the surface.
+        // Hiding the PanelWindow instead would take the wallpaper with it and
+        // leave the other workspaces on the flat theme colour.
+        visible: dashboardSettings.ready && dashboardSettings.dashboardVisible && panel.deskWorkspaceMatches
       }
     }
   }

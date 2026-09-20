@@ -58,6 +58,16 @@ Item {
   // explicitly asked to group keeps its group card, since asking to group it is
   // asking to keep seeing it.
   property bool hideQuietSessions: true
+  // Which workspace the desk is drawn on. The background layer itself is
+  // per-output and has no workspace of its own, so this gates the cards only:
+  // the wallpaper keeps rendering everywhere, exactly as it does now. 0 is
+  // every workspace, which is the behaviour every existing install already has
+  // and therefore the default. A workspace that does not exist yet is a valid
+  // choice — Hyprland creates one on first use, and the desk appears with it.
+  property int deskWorkspace: 0
+  // Hyprland ids ordinary workspaces from 1 up with no documented ceiling;
+  // 999 is well past any real desk and keeps a typo out of the config.
+  readonly property int maxWorkspace: 999
   // Sound for a video wallpaper. Off unless asked for: a wallpaper that
   // starts talking the moment it is set is a bug, not a feature.
   property bool videoAudio: false
@@ -106,6 +116,7 @@ Item {
       sessionGroups = parsed && parsed.sessionGroups && typeof parsed.sessionGroups === "object" ? parsed.sessionGroups : ({})
       sessionQuietMinutes = parsed && Number.isInteger(parsed.sessionQuietMinutes) ? Math.max(0, Math.min(10080, parsed.sessionQuietMinutes)) : 60
       hideQuietSessions = !parsed || parsed.hideQuietSessions !== false
+      deskWorkspace = parsed && Number.isInteger(parsed.deskWorkspace) ? Math.max(0, Math.min(maxWorkspace, parsed.deskWorkspace)) : 0
       videoAudio = !!(parsed && parsed.videoAudio === true)
       quietHoursEnabled = !!(parsed && parsed.quietHoursEnabled === true)
       quietStartHour = parsed && Number.isInteger(parsed.quietStartHour) ? Math.max(0, Math.min(23, parsed.quietStartHour)) : 22
@@ -128,6 +139,7 @@ Item {
       sessionGroups = ({})
       sessionQuietMinutes = 60
       hideQuietSessions = true
+      deskWorkspace = 0
       videoAudio = false
       quietHoursEnabled = false
       quietStartHour = 22
@@ -193,6 +205,7 @@ Item {
       sessionGroups: sessionGroups,
       sessionQuietMinutes: sessionQuietMinutes,
       hideQuietSessions: hideQuietSessions,
+      deskWorkspace: deskWorkspace,
       videoAudio: videoAudio,
       quietHoursEnabled: quietHoursEnabled,
       quietStartHour: quietStartHour,
@@ -269,6 +282,18 @@ Item {
   function toggleSessionGroup(provider) { return setSessionGroup(provider, !sessionGroupEnabled(provider)) }
   function setHideQuietSessions(enabled) { hideQuietSessions = !!enabled; persist() }
   function toggleHideQuietSessions() { setHideQuietSessions(!hideQuietSessions) }
+  // Hyprland's named/special workspaces carry negative ids (olrec is -1337);
+  // those are not places the desk belongs, so only ordinary positive ids and
+  // 0-for-everywhere are accepted. An out-of-range value is refused, not
+  // clamped — silently pinning the desk to workspace 1 because someone typed
+  // 0x5 would read as the gate being broken.
+  function setDeskWorkspace(workspace) {
+    var value = Number(workspace)
+    if (!isFinite(value) || value < 0 || value > maxWorkspace || value !== Math.round(value)) return false
+    deskWorkspace = value
+    persist()
+    return true
+  }
   function setSessionQuietMinutes(minutes) {
     var value = Number(minutes)
     if (!isFinite(value) || value < 0 || value > 10080) return false
