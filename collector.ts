@@ -21,6 +21,7 @@ import { deriveNotificationEvents } from "./notification-events";
 import { containerEngine, containerListArgv, parseContainerList } from "./container-control";
 import { fleetEnabled, fleetHostsFromEnv, fleetRefreshDue, fleetSnapshot, parseFleetStoreText, refreshFleet } from "./fleet-remote";
 import { hermesUsageRefreshDue, hermesUsageSummary, parseHermesUsageStoreText, refreshHermesUsage } from "./hermes-usage";
+import { fleetSessionsEnabled, fleetSessionsPayload, fleetSessionsRefreshDue, mergeFleetSessions, parseFleetSessionStoreText, refreshFleetSessions } from "./fleet-sessions";
 
 const HOME = process.env.HOME || "/root";
 const XDG_STATE = process.env.XDG_STATE_HOME || join(HOME, ".local/state");
@@ -40,6 +41,7 @@ const GITEA_FILE = join(STATE_DIR, "gitea-activity.json");
 // Same one-writer sharing as GITHUB_FILE, so background + overlay never SSH
 // out independently and double the probes.
 const FLEET_FILE = join(STATE_DIR, "fleet.json");
+const FLEET_SESSIONS_FILE = join(STATE_DIR, "fleet-sessions.json");
 const HERMES_USAGE_FILE = join(STATE_DIR, "hermes-usage.json");
 const now = Date.now();
 const MIN_RATE_DT = 1;
@@ -414,12 +416,30 @@ async function fleetActivity() {
   const hosts = fleetHostsFromEnv();
   if (!hosts.length || !fleetEnabled()) return [];
   const store = parseFleetStoreText(read(FLEET_FILE));
+  let rows;
   if (FLEET_WRITER && fleetRefreshDue(store, now)) {
     const refreshed = await refreshFleet(store, now, hosts, run, providerOf);
     try { writePrivateStateFile(STATE_DIR, basename(FLEET_FILE), JSON.stringify(refreshed)); } catch {}
-    return fleetSnapshot(refreshed);
+    rows = fleetSnapshot(refreshed);
+  } else {
+    rows = fleetSnapshot(store);
   }
-  return fleetSnapshot(store);
+  return await attachFleetSessions(rows, hosts);
+}
+
+// Per-session detail for those same hosts, merged onto the rows above (see
+// fleet-sessions.ts). A host that cannot answer the richer probe keeps the ps
+// row it already has, so this can only add detail, never take a row away.
+const FLEET_SESSIONS_WRITER = instanceId() !== "overlay";
+async function attachFleetSessions(rows: any[], hosts: ReturnType<typeof fleetHostsFromEnv>) {
+  if (!rows.length || !fleetSessionsEnabled()) return rows;
+  const store = parseFleetSessionStoreText(read(FLEET_SESSIONS_FILE));
+  if (FLEET_SESSIONS_WRITER && fleetSessionsRefreshDue(store, hosts, now)) {
+    const refreshed = await refreshFleetSessions(store, now, hosts, run);
+    try { writePrivateStateFile(STATE_DIR, basename(FLEET_SESSIONS_FILE), JSON.stringify(refreshed)); } catch {}
+    return mergeFleetSessions(rows, refreshed);
+  }
+  return mergeFleetSessions(rows, store);
 }
 
 // Hermes/OpenRouter model usage, read from the same configured hosts (see
@@ -2977,6 +2997,17 @@ function demoSnapshot(stamp = Date.now()) {
 async function runCollector() {
   if (process.argv.includes("--demo")) {
     await emit(frameSnapshot(demoSnapshot()));
+    return;
+  }
+  // Asked by another machine's desk over SSH (see fleet-sessions.ts). Only the
+  // session scan runs: no machine telemetry, no network checks, no Ollama, no
+  // GitHub/Gitea, no history walk — the caller wants presence and attention,
+  // and a probe that costs a full tick on every remote host is one nobody can
+  // afford to leave on. One line of JSON, bounded, no framing.
+  if (process.argv.includes("--fleet-sessions")) {
+    const sessions = await liveSessions(scanProcs());
+    attachStaleness(sessions);
+    process.stdout.write(fleetSessionsPayload(sessions) + "\n");
     return;
   }
   const pids = scanProcs();
