@@ -328,12 +328,20 @@ Item {
     if (win && !name.test(win)) win = ""
     if (pane && !name.test(pane)) pane = ""
     var target = win ? session + ":" + win : session
+    // ssh carries the local TERM to the remote, and a terminal newer than the
+    // remote's terminfo database kills tmux outright: Ghostty's xterm-ghostty
+    // on a host that has never heard of it makes attach exit with "terminal
+    // does not support clear", so the window opens and vanishes. Keep the real
+    // TERM when the remote knows it, fall back when it does not.
+    var term = 'infocmp "$TERM" >/dev/null 2>&1 || TERM=xterm-256color; export TERM'
     // select first, attach last: attach is what blocks, and `exec` leaves the
     // terminal showing tmux rather than a shell sitting behind it.
-    var remote = "tmux select-window -t '" + target + "'"
+    var remote = term + "; tmux select-window -t '" + target + "'"
     if (win && pane) remote += "; tmux select-pane -t '" + target + "." + pane + "'"
     remote += "; exec tmux attach-session -t '" + session + "'"
-    Quickshell.execDetached(["uwsm-app", "--", "xdg-terminal-exec", "--", "ssh", "-t", alias, remote])
+    // No "--" before the command: xdg-terminal-exec takes it directly, the way
+    // resume-session.ts already launches a provider CLI.
+    Quickshell.execDetached(["uwsm-app", "--", "xdg-terminal-exec", "ssh", "-t", alias, remote])
     return true
   }
 
