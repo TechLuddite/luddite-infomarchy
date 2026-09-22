@@ -321,7 +321,7 @@ omarchy-shell infomarchy setDemo false                                # return t
 | wallpaper dashboard | `SUPER+I` or wallpaper IPC above; state survives shell/plugin restarts | visible |
 | session notifications | Next Actions card or wallpaper IPC above | on |
 | notification quiet hours | Next Actions card or wallpaper IPC above | off (22:00–08:00 when enabled) |
-| space left for the bar | `topInset` in `InfoView.qml` | 40 px × font scale |
+| space left for the bar | live `shell.bar` edge and `barSize` in `Infomarchy.qml` | measured bar thickness on that edge; 40 px × font scale at the top when no bar is injected |
 | provider colours | `providerColor()` in `InfoModel.qml` | theme ANSI roles |
 | add a provider | one regex in `PROVIDERS` in `collector.ts` | — |
 | fleet hosts | `INFOMARCHY_FLEET_HOSTS` env var, comma-separated ssh aliases | unset (disabled) |
