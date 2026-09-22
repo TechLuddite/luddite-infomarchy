@@ -18,6 +18,23 @@ Backfill pending; the release history itself is in CHANGELOG.md.
 
 ## 2026-09-22
 
+### Pin the desk to one workspace, keeping the wallpaper on all of them (#38)
+
+**Casey Shields** · GitHub [@shieldsworks](https://github.com/shieldsworks) · X: none found (checked 2026-09-22)
+
+`omarchy-shell infomarchy setDeskWorkspace 5` shows the cards only while
+workspace 5 is on screen. The wallpaper still draws everywhere, because the gate
+sits on the cards and not the background surface. `0` (the default) means every
+workspace, so an install that never sets it behaves exactly as before. Values
+out of range are refused, not clamped.
+
+Merged on top of #37 and #40. The Infomarchy.qml resolve ceiling conflict with
+#40 was taken as a union (26 + 4 + 2 = 32). 435 tests pass on the merged tree.
+First contribution from this author.
+
+Note on the handle: GitHub has no X field and no social accounts, and
+shieldsworks.com links no X profile. Ask before tagging.
+
 ### FLEET sessions: which remote agent needs you, and one click to get there (#37)
 
 **RidgetopAi (Brian)** · GitHub [@RidgetopAi](https://github.com/RidgetopAi) · X: none found (checked 2026-09-22)

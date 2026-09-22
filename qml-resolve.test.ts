@@ -31,7 +31,9 @@ const CEILINGS: Record<string, number> = {
   // +4: each edge reads root.barEdgeInsets from inside the per-screen
   // PanelWindow. qmllint counts every outer-id read as unqualified, the
   // same false positive root.deskView already produces in this file.
-  "Infomarchy.qml": 30,
+  // +2 (#38): deskWorkspaceMatches reads dashboardSettings from inside the
+  // same PanelWindow, the same false positive again.
+  "Infomarchy.qml": 32,
   "InfoModel.qml": 6,
   "InfoSettings.qml": 0,
   // 509 came in with privacy mode (#17). The two above it are the topic mask

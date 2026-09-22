@@ -424,6 +424,52 @@ describe("LOCAL AI rows stay inside the card body", () => {
   });
 });
 
+describe("the desk can be pinned to one workspace", () => {
+  const settings = readFileSync(join(import.meta.dir, "InfoSettings.qml"), "utf8");
+  const service = readFileSync(join(import.meta.dir, "Infomarchy.qml"), "utf8");
+
+  test("0 means every workspace, so an install that never sets it is unchanged", () => {
+    expect(settings).toContain("property int deskWorkspace: 0");
+    // Both halves of applyConfig: a missing or malformed key must land on 0,
+    // never on some workspace the user never asked for.
+    expect(settings).toContain("deskWorkspace = parsed && Number.isInteger(parsed.deskWorkspace) ? Math.max(0, Math.min(maxWorkspace, parsed.deskWorkspace)) : 0");
+    expect(settings).toContain("deskWorkspace: deskWorkspace,");
+  });
+
+  test("an out-of-range workspace is refused, not clamped", () => {
+    // Clamping would pin the desk to workspace 1 for anyone who fat-fingers a
+    // value, which reads as the gate being broken rather than as a bad input.
+    // Hyprland's special workspaces are negative (olrec is -1337) and are not
+    // places the desk belongs.
+    const setter = settings.match(/function setDeskWorkspace\(workspace\) \{[\s\S]*?\n  \}/)?.[0];
+    expect(setter, "InfoSettings must expose setDeskWorkspace").toBeTruthy();
+    expect(setter).toContain("value < 0 || value > maxWorkspace");
+    expect(setter).toContain("value !== Math.round(value)");
+    expect(setter).toContain("return false");
+  });
+
+  test("the gate hides the cards, never the wallpaper", () => {
+    // Hiding the PanelWindow would take the wallpaper with it and leave every
+    // other workspace on the flat theme colour. The gate belongs on the view.
+    expect(service).toContain("visible: dashboardSettings.ready && dashboardSettings.dashboardVisible && panel.deskWorkspaceMatches");
+    expect(service).not.toMatch(/visible: !remapGuard\.remapping && .*deskWorkspace/);
+  });
+
+  test("an unknown workspace shows the desk rather than hiding it", () => {
+    // Early in startup there is no Hyprland monitor yet. An unset gate must
+    // never be the reason the dashboard is missing.
+    const match = service.match(/readonly property bool deskWorkspaceMatches:[\s\S]*?deskWorkspace\n/)?.[0];
+    expect(match, "Infomarchy must resolve deskWorkspaceMatches").toBeTruthy();
+    expect(match).toContain("dashboardSettings.deskWorkspace === 0");
+    expect(match).toContain("!visibleWorkspace");
+  });
+
+  test("the workspace is reachable over IPC, both ways", () => {
+    expect(service).toContain("function setDeskWorkspace(v: string): string");
+    expect(service).toContain("function getDeskWorkspace(): string");
+  });
+});
+
 describe("the desk keeps refreshing", () => {
   const model = readFileSync(join(import.meta.dir, "InfoModel.qml"), "utf8");
 
