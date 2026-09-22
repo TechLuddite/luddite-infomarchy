@@ -16,6 +16,28 @@ Backfill pending; the release history itself is in CHANGELOG.md.
 
 ---
 
+## 2026-09-22
+
+### The desk keeps clear of the bar on whichever edge it occupies (#40)
+
+**Danny Welch** · GitHub [@dannyowelch](https://github.com/dannyowelch) · X [@dannyowelch](https://x.com/dannyowelch)
+
+The cards used to reserve a fixed 40px strip at the top, because the background
+layer ignores exclusion zones. A bottom or side bar covered the desk, and hiding
+the bar left the gap behind. The desk now reads the live bar from the shell API
+and clears only the edge the bar is on, by the bar's real thickness. Moving,
+resizing or hiding the bar moves the cards immediately, with no reload.
+
+Merged 9a47cce. 390 tests pass on the merged tree. First contribution from this
+author.
+
+Note on the handle: GitHub carries no X link and no social accounts. The X
+account @dannyowelch has the same display name (Danny Welch), replies to
+@NixFred directly, and posts about running Omarchy, so it counts as verified,
+not guessed.
+
+---
+
 ## 2026-09-18
 
 ### Optional APPS module: local dev servers as systemd user services (#36)
