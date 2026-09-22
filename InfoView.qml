@@ -225,6 +225,7 @@ Item {
   readonly property var visibleCollisions: collisions.filter(function(item) { return projectMatches(item) })
   readonly property var usage: (ai && ai.usage) ? ai.usage : ({})
   readonly property var fleet: (ai && Array.isArray(ai.fleet)) ? ai.fleet : ([])
+  readonly property int fleetNeedsYou: fleet.reduce(function(sum, host) { return sum + (host.needsYou || 0) }, 0)
   readonly property bool activityFilterActive: sectionEnabled("activity") && (activityCellFilter >= 0 || activityProviderFilter !== "")
   readonly property var visibleRecentTasks: {
     var rows = ai.recent || []
@@ -2454,14 +2455,24 @@ Item {
           draggable: true
           title: "FLEET"
           hint: view.fleet.filter(function(h) { return h.ok }).length + "/" + view.fleet.length + " up"
+          // Same glow the local Needs You inbox uses, for the same reason: a
+          // remote agent waiting on you is the one thing on this card worth
+          // pulling your eye across the desk.
+          glow: view.fleetNeedsYou > 0
+          glowTone: view.desk.yellow
           ColumnLayout {
             width: parent.width
             spacing: Style.spacing.sm
             Repeater {
               model: view.fleet
-              delegate: RowLayout {
-                id: fleetRow
+              delegate: ColumnLayout {
+                id: fleetHost
                 required property var modelData
+                Layout.fillWidth: true
+                spacing: Style.spacing.xs
+              RowLayout {
+                id: fleetRow
+                readonly property var modelData: fleetHost.modelData
                 Layout.fillWidth: true
                 spacing: Style.spacing.sm
                 Rectangle { width: 8; height: 8; radius: 4; color: fleetRow.modelData.ok ? view.desk.green : view.desk.red }
@@ -2482,6 +2493,66 @@ Item {
                 PlainText { visible: fleetRow.modelData.ok && (fleetRow.modelData.providers || []).length === 0; text: "idle"; color: view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption }
                 PlainText { visible: !fleetRow.modelData.ok; text: "unreachable"; color: view.desk.red; font.family: view.mono; font.pixelSize: Style.font.caption }
                 PlainText { text: view.desk.ago(fleetRow.modelData.checkedAt); color: view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption; horizontalAlignment: Text.AlignRight }
+              }
+              // ---- per-session rows, when the host could answer the richer
+              // probe (fleet-sessions.ts). A host that could not simply has no
+              // sessions array, and this collapses to nothing — which is the
+              // ps-only row exactly as it shipped.
+              Repeater {
+                model: fleetHost.modelData.sessions || []
+                delegate: RowLayout {
+                  id: fleetSession
+                  required property var modelData
+                  readonly property bool waiting: fleetSession.modelData.attention === "waiting"
+                  readonly property bool clickable: view.interactive && !!fleetSession.modelData.tmux
+                  Layout.fillWidth: true
+                  Layout.leftMargin: Style.spacing.md
+                  spacing: Style.spacing.sm
+                  PlainText {
+                    text: "└"
+                    color: view.textFaint
+                    font.family: view.mono
+                    font.pixelSize: Style.font.caption
+                  }
+                  Rectangle {
+                    width: 6; height: 6; radius: 3
+                    color: fleetSession.waiting ? view.desk.yellow : fleetSession.modelData.busy ? view.desk.cyan : view.textFaint
+                  }
+                  PlainText {
+                    text: fleetSession.modelData.project || view.desk.providerLabel(fleetSession.modelData.provider)
+                    color: fleetSession.waiting ? view.desk.themeForeground : view.textDim
+                    font.family: view.mono
+                    font.pixelSize: Style.font.caption
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    elide: Text.ElideRight
+                  }
+                  Tag {
+                    visible: fleetSession.waiting
+                    text: "NEEDS YOU"
+                    tone: view.desk.yellow
+                  }
+                  PlainText {
+                    visible: !fleetSession.waiting && fleetSession.modelData.busy
+                    text: "working"
+                    color: view.textFaint
+                    font.family: view.mono
+                    font.pixelSize: Style.font.caption
+                  }
+                  PlainText {
+                    visible: !fleetSession.waiting && !fleetSession.modelData.busy && fleetSession.modelData.stale
+                    text: "idle"
+                    color: view.textFaint
+                    font.family: view.mono
+                    font.pixelSize: Style.font.caption
+                  }
+                  HoverHandler { enabled: fleetSession.clickable; cursorShape: Qt.PointingHandCursor }
+                  TapHandler {
+                    enabled: fleetSession.clickable
+                    onTapped: view.desk.focusFleetSession(fleetHost.modelData.host, fleetSession.modelData.tmux)
+                  }
+                }
+              }
               }
             }
           }

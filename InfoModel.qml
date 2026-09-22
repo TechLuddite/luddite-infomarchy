@@ -311,6 +311,40 @@ Item {
       Quickshell.execDetached(["hyprctl", "dispatch", "focuswindow", "address:0x" + addr])
   }
 
+  // A fleet session runs on another machine, so its jump is the local one
+  // displaced by one hop: open a terminal, ssh to the host, and run the same
+  // tmux select over there. The alias and the tmux names were validated by
+  // fleet-sessions.ts on the way in and are validated again here, because
+  // this is where they become a command line. An id that fails either check
+  // costs the jump, never a shell escape.
+  function focusFleetSession(host, tmux) {
+    var alias = String(host || "")
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$/.test(alias)) return false
+    var handle = tmux || {}
+    var name = /^[A-Za-z0-9_.:@%+=-]{1,64}$/
+    var session = String(handle.session || "")
+    if (!name.test(session)) return false
+    var win = String(handle.window || ""), pane = String(handle.pane || "")
+    if (win && !name.test(win)) win = ""
+    if (pane && !name.test(pane)) pane = ""
+    var target = win ? session + ":" + win : session
+    // ssh carries the local TERM to the remote, and a terminal newer than the
+    // remote's terminfo database kills tmux outright: Ghostty's xterm-ghostty
+    // on a host that has never heard of it makes attach exit with "terminal
+    // does not support clear", so the window opens and vanishes. Keep the real
+    // TERM when the remote knows it, fall back when it does not.
+    var term = 'infocmp "$TERM" >/dev/null 2>&1 || TERM=xterm-256color; export TERM'
+    // select first, attach last: attach is what blocks, and `exec` leaves the
+    // terminal showing tmux rather than a shell sitting behind it.
+    var remote = term + "; tmux select-window -t '" + target + "'"
+    if (win && pane) remote += "; tmux select-pane -t '" + target + "." + pane + "'"
+    remote += "; exec tmux attach-session -t '" + session + "'"
+    // No "--" before the command: xdg-terminal-exec takes it directly, the way
+    // resume-session.ts already launches a provider CLI.
+    Quickshell.execDetached(["uwsm-app", "--", "xdg-terminal-exec", "ssh", "-t", alias, remote])
+    return true
+  }
+
   // An agent inside tmux may live on a window/pane the client is not showing.
   // After focusing the terminal, select that pane so the agent is on screen.
   // Both values come from the collector and are validated here again.

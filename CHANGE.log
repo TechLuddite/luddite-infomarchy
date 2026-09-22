@@ -18,6 +18,30 @@ Backfill pending; the release history itself is in CHANGELOG.md.
 
 ## 2026-09-22
 
+### FLEET sessions: which remote agent needs you, and one click to get there (#37)
+
+**RidgetopAi (Brian)** · GitHub [@RidgetopAi](https://github.com/RidgetopAi) · X: none found (checked 2026-09-22)
+
+Builds on #35. A fleet host running Infomarchy now expands its FLEET row into
+one line per remote session: project, working or idle, and a NEEDS YOU tag, with
+the card glowing when any remote agent is waiting. Clicking a row opens a
+terminal, ssh's over and lands in that exact tmux window and pane. A host
+without bun or Infomarchy keeps its plain ps row and is asked again only every
+10 minutes.
+
+Privacy boundary: only provider, project basename, attention state, busy, stale,
+uptime and the tmux address leave the remote machine. Window titles, prompt
+text, paths and git state do not. The remote builds the row in one function and
+the receiver validates it again. Checked live on gus: the payload carried exactly
+those fields and nothing else.
+
+Merged on top of #40. 430 tests pass on the merged tree. First contribution from
+this author.
+
+Note on the handle: GitHub has no X field and no social accounts, and
+ridgetopai.com links no X profile. Commits are authored
+`Ridge (OVH dev) <brian@ridgetopai.com>`. Ask before tagging.
+
 ### The desk keeps clear of the bar on whichever edge it occupies (#40)
 
 **Danny Welch** · GitHub [@dannyowelch](https://github.com/dannyowelch) · X [@dannyowelch](https://x.com/dannyowelch)

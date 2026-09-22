@@ -41,7 +41,13 @@ const CEILINGS: Record<string, number> = {
   // card's delegate (Repeater + required property + outer-scope
   // references), the same false-positive shape the LOCAL AI delegate
   // already produces ~26 of — see docs/fleet-remote-hosts.md.
-  "InfoView.qml": 569,
+  // 593 folds in the FLEET card's per-session rows: a second nested Repeater
+  // with its own required property, so every outer-scope reference inside it
+  // (view.desk, Style.spacing, the host delegate's own modelData) reads as
+  // unqualified, plus the two layout-positioning warnings the existing status
+  // dot already produces, for the session dot beside it. Same false-positive
+  // shape as the row above it, counted twice because there are now two rows.
+  "InfoView.qml": 593,
   "Overlay.qml": 29,
   "WaveWallpaper.qml": 0,
 };
