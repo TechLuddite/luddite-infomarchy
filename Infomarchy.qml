@@ -5,6 +5,7 @@ import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
+import "bar-insets.js" as BarInsets
 
 // Background-layer host. Replaces omarchy.background (manifest clonedFrom), so
 // the theme's wallpaper is still shown — dimmed — behind the live dashboard,
@@ -14,6 +15,20 @@ import qs.Ui
 // snapshot files theme-set deletes after 3s can win the race.
 Scope {
   id: root
+
+  // Declared so omarchy-shell injects PluginShellApi (`if ("shell" in inst)`).
+  // bar.position, bar.barSize and bar.barHidden on that object are live
+  // bindings; the reads below are what move the desk when the bar moves
+  // after this plugin has already loaded.
+  property var shell: null
+  readonly property int barFallbackInset: Math.round(40 * Style.fontScale)
+  readonly property var barEdgeInsets: BarInsets.insets(
+    shell && shell.bar ? {
+      position: shell.bar.position,
+      barSize: shell.bar.barSize,
+      barHidden: shell.bar.barHidden
+    } : null,
+    barFallbackInset)
 
   // Match omarchy-theme-bg-set and Color.currentThemePath: $HOME/.local/state,
   // not XDG_STATE_HOME, which can point somewhere the CLI never writes.
@@ -401,6 +416,10 @@ Scope {
         settings: dashboardSettings
         interactive: true
         keyboardAvailable: false
+        topInset: root.barEdgeInsets.top
+        rightInset: root.barEdgeInsets.right
+        bottomInset: root.barEdgeInsets.bottom
+        leftInset: root.barEdgeInsets.left
         Component.onCompleted: if (!root.deskView) root.deskView = this
         visible: dashboardSettings.ready && dashboardSettings.dashboardVisible
       }

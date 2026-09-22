@@ -93,8 +93,13 @@ Item {
     view.navigated()
   }
   // Room for the bar. The background layer ignores exclusion zones on purpose,
-  // so we leave a top strip free instead of drawing under the bar.
+  // so the cards keep their own margin instead of drawing under it. The
+  // wallpaper host fills these from the live bar; the top default is the
+  // historical strip for a caller that does not.
   property int topInset: Math.round(40 * Style.fontScale)
+  property int rightInset: 0
+  property int bottomInset: 0
+  property int leftInset: 0
 
   readonly property var snap: (desk && desk.snap) ? desk.snap : ({})
   readonly property bool privacyMode: !!(settings && settings.privacyMode)
@@ -1154,7 +1159,13 @@ Item {
 
   // ---- layout ----------------------------------------------------------------
   Item {
-    anchors { fill: parent; topMargin: view.topInset + view.gap; leftMargin: view.gap * 2; rightMargin: view.gap * 2; bottomMargin: view.gap * 2 }
+    anchors {
+      fill: parent
+      topMargin: view.topInset + view.gap
+      leftMargin: view.leftInset + view.gap * 2
+      rightMargin: view.rightInset + view.gap * 2
+      bottomMargin: view.bottomInset + view.gap * 2
+    }
 
     ColumnLayout {
       anchors.fill: parent
