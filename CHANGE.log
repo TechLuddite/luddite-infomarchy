@@ -18,6 +18,24 @@ Backfill pending; the release history itself is in CHANGELOG.md.
 
 ## 2026-09-22
 
+### Event-driven refresh on top of the poll (#39)
+
+**Reverb** · GitHub [@reverb256](https://github.com/reverb256) · X: none found (checked 2026-09-18, see Backfill)
+
+The follow-up Fred invited on #11, built to the constraints he set there: the
+repeating timer stays as the floor, and paths come from HOME, HERMES_HOME and
+XDG_STATE_HOME with no literal home directory. A change to Hermes's state.db or
+WAL, or to dashboard.json, pulls the next refresh forward after 250 ms.
+
+Fixed in the merge: FileView preloads by default, which would have read gus's
+12 MB state.db and 1 MB WAL into memory in every desk instance only to watch
+them. Adding `preload: false` keeps them as pure watches. A throwaway quickshell
+confirmed the change signal still fires on append and atomic replace without
+loading the file. Dropped `atomicWrites` from the dashboard.json watcher,
+since it only affects writes and this FileView never writes.
+
+435 tests pass on the merged tree. Second contribution (after #11).
+
 ### Pin the desk to one workspace, keeping the wallpaper on all of them (#38)
 
 **Casey Shields** · GitHub [@shieldsworks](https://github.com/shieldsworks) · X: none found (checked 2026-09-22)

@@ -296,6 +296,47 @@ Item {
     onTriggered: root.refresh()
   }
 
+  // --- event-driven refresh (on top of the floor) -----------------------------
+  // The timer above is the floor; a change that means "the desk has something
+  // new to say" pulls the next collect forward. Paths are built from HOME /
+  // HERMES_HOME / XDG_STATE_HOME, the same resolution collector.ts uses,
+  // never a literal home directory, so the watches fire on any machine.
+  // FileView watches single files (a directory errors in a tight loop), and a
+  // file that does not exist simply never fires. The 250 ms debounce
+  // coalesces bursts: an agent commits to the DB and its WAL together.
+  // preload: false keeps these as pure watches. FileView otherwise reads the
+  // whole file into memory at startup, and state.db runs to megabytes; the
+  // change signal fires without the contents ever being loaded.
+  readonly property string hermesDir: Quickshell.env("HERMES_HOME") || (Quickshell.env("HOME") + "/.hermes")
+  readonly property string stateRoot: Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") + "/.local/state")
+  FileView {
+    path: root.hermesDir + "/state.db"
+    preload: false
+    watchChanges: true
+    printErrors: false
+    onFileChanged: debounceTimer.restart()
+  }
+  FileView {
+    path: root.hermesDir + "/state.db-wal"
+    preload: false
+    watchChanges: true
+    printErrors: false
+    onFileChanged: debounceTimer.restart()
+  }
+  FileView {
+    path: root.stateRoot + "/infomarchy/dashboard.json"
+    preload: false
+    watchChanges: true
+    printErrors: false
+    onFileChanged: debounceTimer.restart()
+  }
+  Timer {
+    id: debounceTimer
+    interval: 250
+    repeat: false
+    onTriggered: root.refresh()
+  }
+
   function refresh() {
     if (!root.active || collector.running || bunProbe.running) return
     if (root.bunChecked && root.bunAvailable) collector.running = true
