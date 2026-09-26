@@ -55,7 +55,7 @@ shieldsworks.com links no X profile. Ask before tagging.
 
 ### FLEET sessions: which remote agent needs you, and one click to get there (#37)
 
-**RidgetopAi (Brian)** · GitHub [@RidgetopAi](https://github.com/RidgetopAi) · X: none found (checked 2026-09-22)
+**RidgetopAi (Brian)** · GitHub [@RidgetopAi](https://github.com/RidgetopAi) · X [@RidgetopAI](https://x.com/RidgetopAI) · ridgetopai.net
 
 Builds on #35. A fleet host running Infomarchy now expands its FLEET row into
 one line per remote session: project, working or idle, and a NEEDS YOU tag, with
@@ -73,9 +73,9 @@ those fields and nothing else.
 Merged on top of #40. 430 tests pass on the merged tree. First contribution from
 this author.
 
-Note on the handle: GitHub has no X field and no social accounts, and
-ridgetopai.com links no X profile. Commits are authored
-`Ridge (OVH dev) <brian@ridgetopai.com>`. Ask before tagging.
+Note on the handle: on 2026-09-22 GitHub carried no X field and no social
+accounts. Re-checked 2026-09-26 and both now declare @RidgetopAI, with
+ridgetopai.net as the site; the account exists. Verified, not guessed.
 
 ### The desk keeps clear of the bar on whichever edge it occupies (#40)
 
