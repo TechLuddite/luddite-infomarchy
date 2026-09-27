@@ -256,7 +256,7 @@ function ensureConfigLocked(extraCidrs: string[] = [], listening?: boolean): Web
     tokens: [makeToken("default")],
     port: SERVE_BACKEND_PORT,
     extraCidrs: extraCidrs.filter(item => !!parseCidr(item)).slice(0, MAX_EXTRA_CIDRS),
-    listening: listening !== false,
+    listening: listening === true,
   };
   if (!saveConfig(created)) throw new Error("Cannot save Web Mode settings");
   return created;

@@ -94,3 +94,18 @@ describe("token-revoke says why", () => {
     expect([r.code, r.json]).toEqual([1, { ok: false, reason: "unavailable" }]);
   });
 });
+
+describe("viewer and CIDR edits before WEB is ever on", () => {
+  // Only serve marks web.json listening. Otherwise the collector would copy the
+  // desk snapshot into web-snapshot.json every tick for a listener that never ran.
+  test("token-add, cidr-add and cidrs create web.json not listening", async () => {
+    for (const args of [["token-add", "phone"], ["cidr-add", "10.1.0.0/24"], ["cidrs", "10.1.0.0/24"]]) {
+      const state = mkdtempSync(join(root, "fresh-"));
+      const r = await cli(state, ...args);
+      expect(r.json.ok).toBe(true);
+      const saved = JSON.parse(readFileSync(join(state, "infomarchy", "web.json"), "utf8"));
+      expect(saved.listening).toBe(false);
+      expect(saved.tokens.length).toBeGreaterThan(0);
+    }
+  });
+});
