@@ -2971,8 +2971,24 @@ export function withGrokObservedLimits(record: any, directory = STATE_DIR, liveA
   };
 }
 const MAX_GROK_USAGE_SESSIONS = 256;
-const MAX_GROK_UPDATE_TAIL = 512 * 1024;
-let currentGrokUsageCache: any = null;
+// The newest session names are lstat'd to find the newest files, so the scan
+// is bounded too.
+const MAX_GROK_USAGE_CANDIDATES = 1024;
+// A real turn_completed line is under 1 KiB. A longer line is tool output.
+const MAX_GROK_TURN_LINE = 16 * 1024;
+// One pass reads at most this much, newest session first. A file not reached
+// keeps its place and is read on a later pass.
+const MAX_GROK_READ_BYTES = 16 * 1024 * 1024;
+const MAX_GROK_READ_MS = 150;
+const GROK_READ_CHUNK = 1024 * 1024;
+const MAX_GROK_FILE_MODELS = 16;
+const MAX_GROK_TURN_IDS = 512;
+// readJson refuses a prev file over MAX_JSON_NODES, which would lose every
+// other field kept there, so the Grok entries stay well under it.
+const MAX_GROK_PREV_NODES = 20_000;
+const GROK_USAGE_VERSION = "grok-usage-v3";
+const GROK_TURN_NEEDLE = Buffer.from('"sessionUpdate":"turn_completed"');
+let currentGrokUsageFiles: any = null;
 
 function nToken(value: unknown): number {
   const n = Number(value);
@@ -2991,7 +3007,6 @@ function tokenTotal(u: TokenUsage): number {
 function tokenBurn(u: TokenUsage): number {
   return u.inputTokens + u.outputTokens + u.cacheCreationInputTokens;
 }
-export type GrokUsageSnap = { ts: number; usage: TokenUsage; models: Record<string, TokenUsage> };
 // Grok's usage block overlaps: on every local updates.jsonl line checked,
 // totalTokens is inputTokens + outputTokens, cachedReadTokens is part of
 // inputTokens and reasoningTokens is no larger than outputTokens. So cached
@@ -3010,63 +3025,183 @@ function grokTokenFields(raw: any): TokenUsage | null {
   };
   return tokenTotal(usage) > 0 ? usage : null;
 }
-export function grokUsageFromUpdate(value: any, fallbackTs = 0): GrokUsageSnap | null {
-  const stack: any[] = [value];
-  const candidates: any[] = [];
-  let steps = 0;
-  while (stack.length && steps++ < 128) {
-    const item = stack.pop();
-    if (!item || typeof item !== "object") continue;
-    if (!Array.isArray(item) && Number.isFinite(Number(item.inputTokens)) && Number.isFinite(Number(item.outputTokens)))
-      candidates.push(item);
-    const children = Array.isArray(item) ? item : Object.values(item);
-    for (const child of children.slice(0, 24)) stack.push(child);
-  }
-  const usage = candidates.find(item => item.modelUsage && typeof item.modelUsage === "object") || candidates[candidates.length - 1];
-  const totals = grokTokenFields(usage);
-  if (!totals) return null;
-  const models: Record<string, TokenUsage> = {};
-  const rawModels = usage.modelUsage && typeof usage.modelUsage === "object" ? usage.modelUsage : {};
-  for (const [name, raw] of Object.entries(rawModels).slice(0, 16)) {
-    const model = grokTokenFields(raw);
-    const key = uiString(name, 64);
-    if (model && key) models[key] = model;
-  }
-  if (!Object.keys(models).length) models.grok = totals;
-  const ts = stampOfUpdate(value) || fallbackTs;
-  return { ts, usage: totals, models };
-}
 function stampOfUpdate(value: any): number {
   const raw = value && typeof value === "object" ? value.timestamp : 0;
   if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) return raw > 1e12 ? raw : raw * 1000;
   const parsed = Date.parse(String(raw || ""));
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
-export function grokUsageFromUpdatesText(text: string): GrokUsageSnap[] {
-  const snaps: GrokUsageSnap[] = [];
-  for (const line of String(text || "").split("\n")) {
-    if (!line.includes("inputTokens")) continue;
-    const parsed = parseJsonBounded(line, 2048, 12);
-    const snap = grokUsageFromUpdate(parsed);
-    if (snap) snaps.push(snap);
+export type GrokTurn = { id: string; ts: number; models: Record<string, TokenUsage> };
+// Grok writes one usage record per turn, not a running total: each
+// turn_completed update has its own prompt_id, and modelCalls and inputTokens
+// fall between turns. Only that exact record shape counts, so a usage-shaped
+// object inside tool or model output is never read as usage.
+export function grokTurnFromUpdate(value: any, sessionId: string, stamp = now): GrokTurn | null {
+  if (!sessionId || !value || typeof value !== "object" || value.method !== "_x.ai/session/update") return null;
+  const params = value.params;
+  if (!params || typeof params !== "object" || params.sessionId !== sessionId) return null;
+  const update = params.update;
+  if (!update || typeof update !== "object" || update.sessionUpdate !== "turn_completed") return null;
+  const id = update.prompt_id;
+  if (typeof id !== "string" || !id || id.length > 128) return null;
+  const usage = update.usage;
+  if (!usage || typeof usage !== "object" || Array.isArray(usage)) return null;
+  const meta = params._meta && typeof params._meta === "object" ? Number(params._meta.agentTimestampMs) : 0;
+  const ts = plausibleTimestamp(meta, stamp) ? meta : stampOfUpdate(value);
+  if (!plausibleTimestamp(ts, stamp)) return null;
+  const models: Record<string, TokenUsage> = {};
+  const rawModels = usage.modelUsage && typeof usage.modelUsage === "object" && !Array.isArray(usage.modelUsage) ? usage.modelUsage : {};
+  for (const [name, raw] of Object.entries(rawModels).slice(0, 16)) {
+    const model = grokTokenFields(raw);
+    const key = uiString(name, 64);
+    if (model && key) models[key] = model;
   }
-  return snaps.length > 256 ? snaps.slice(-256) : snaps;
+  if (!Object.keys(models).length) {
+    const totals = grokTokenFields(usage);
+    if (!totals) return null;
+    models.grok = totals;
+  }
+  return { id, ts, models };
 }
-export function foldGrokSessionSnaps(snaps: GrokUsageSnap[]): { last: GrokUsageSnap | null; daily: Map<string, number> } {
-  const daily = new Map<string, number>();
-  if (!snaps.length) return { last: null, daily };
-  const ordered = snaps.slice().sort((a, b) => a.ts - b.ts);
-  let previous = 0;
-  for (const snap of ordered) {
-    const total = tokenBurn(snap.usage);
-    const delta = total - previous;
-    if (delta > 0 && snap.ts) {
-      const day = localDayKey(snap.ts);
-      daily.set(day, (daily.get(day) || 0) + delta);
-    }
-    previous = total;
+// One entry per updates.jsonl, kept in the prev file: how far it has been read
+// and what its turns added up to, so a pass reads only new bytes.
+export type GrokFileEntry = {
+  ino: number; offset: number; skip: boolean; turns: number; ids: string[];
+  lifetime: Record<string, TokenUsage>; days: Record<string, Record<string, number>>;
+};
+export function emptyGrokFileEntry(ino = 0): GrokFileEntry {
+  return { ino, offset: 0, skip: false, turns: 0, ids: [], lifetime: {}, days: {} };
+}
+function emptyTokenUsage(): TokenUsage {
+  return { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 };
+}
+// The prompt_id set spans every file, so a turn is counted in one file only.
+// Grok's docs say /fork starts from a copy of the conversation. Whether that
+// copies the parent's turn records, and under which sessionId, is not
+// verified. Each file keeps the ids of its last MAX_GROK_TURN_IDS turns.
+function addGrokTurn(entry: GrokFileEntry, turn: GrokTurn, seen: Set<string>, keepDays: Set<string>): void {
+  const id = Bun.hash(turn.id).toString(36);
+  if (seen.has(id)) return;
+  seen.add(id);
+  entry.ids.push(id);
+  if (entry.ids.length > MAX_GROK_TURN_IDS) entry.ids.splice(0, entry.ids.length - MAX_GROK_TURN_IDS);
+  entry.turns++;
+  const day = localDayKey(turn.ts);
+  for (const [name, usage] of Object.entries(turn.models)) {
+    const model = entry.lifetime[name] || Object.keys(entry.lifetime).length < MAX_GROK_FILE_MODELS ? name : "other";
+    addTokenUsage(entry.lifetime[model] ||= emptyTokenUsage(), usage);
+    if (!keepDays.has(day)) continue;
+    const models = entry.days[day] ||= {};
+    models[model] = (models[model] || 0) + tokenBurn(usage);
   }
-  return { last: ordered[ordered.length - 1], daily };
+}
+// Folds the complete lines of a chunk read at entry.offset and returns the
+// bytes consumed. A trailing partial line is left for the next read, so a line
+// Grok is still writing is read whole later. A line longer than
+// MAX_GROK_TURN_LINE is dropped without being buffered, across reads if needed.
+export function foldGrokTurnsChunk(entry: GrokFileEntry, chunk: Buffer, sessionId: string, seen: Set<string>, dayKeys: string[], stamp = now): number {
+  const keepDays = new Set(dayKeys);
+  let position = 0;
+  if (entry.skip) {
+    const newline = chunk.indexOf(10);
+    if (newline < 0) return chunk.length;
+    position = newline + 1;
+    entry.skip = false;
+  }
+  let hit = chunk.indexOf(GROK_TURN_NEEDLE, position);
+  while (position < chunk.length) {
+    const newline = chunk.indexOf(10, position);
+    if (newline < 0) {
+      if (chunk.length - position <= MAX_GROK_TURN_LINE) return position;
+      entry.skip = true;
+      return chunk.length;
+    }
+    if (hit >= 0 && hit < position) hit = chunk.indexOf(GROK_TURN_NEEDLE, position);
+    if (hit >= 0 && hit < newline && newline - position <= MAX_GROK_TURN_LINE) {
+      const turn = grokTurnFromUpdate(parseJsonBounded(chunk.toString("utf8", position, newline), 2048, 12), sessionId, stamp);
+      if (turn) addGrokTurn(entry, turn, seen, keepDays);
+    }
+    position = newline + 1;
+  }
+  return position;
+}
+type GrokReadBudget = { bytes: number; deadline: number; buffer: Buffer | null };
+function readGrokUpdates(path: string, entry: GrokFileEntry, sessionId: string, seen: Set<string>, budget: GrokReadBudget, dayKeys: string[]): void {
+  let fd = -1;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const opened = fstatSync(fd);
+    // Replaced or truncated since the lstat: the next pass starts it again.
+    if (!opened.isFile() || opened.ino !== entry.ino || opened.size < entry.offset) return;
+    const buffer = budget.buffer ||= Buffer.allocUnsafe(GROK_READ_CHUNK);
+    while (entry.offset < opened.size && budget.bytes > 0 && performance.now() < budget.deadline) {
+      const bytes = readSync(fd, buffer, 0, Math.min(buffer.byteLength, opened.size - entry.offset, budget.bytes), entry.offset);
+      if (bytes <= 0) break;
+      budget.bytes -= bytes;
+      const consumed = foldGrokTurnsChunk(entry, buffer.subarray(0, bytes), sessionId, seen, dayKeys);
+      entry.offset += consumed;
+      if (!consumed) break;
+    }
+  } catch {}
+  finally { if (fd >= 0) try { closeSync(fd); } catch {} }
+}
+// A resumed old session keeps its old id, so recency is the file's mtime.
+export function newestGrokFiles<T extends { mtimeMs: number }>(files: T[], keep = MAX_GROK_USAGE_SESSIONS): T[] {
+  return files.slice().sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, keep);
+}
+function grokUsageNumbers(value: any, keys: string[]): boolean {
+  return !!value && typeof value === "object" && !Array.isArray(value)
+    && Object.keys(value).length <= keys.length && keys.every(key => Number.isFinite(value[key]) && value[key] >= 0);
+}
+function grokModelMap(value: any, check: (item: any) => boolean): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const entries = Object.entries(value);
+  return entries.length <= MAX_GROK_FILE_MODELS + 1 && entries.every(([name, item]) => !!name && uiString(name, 64) === name && check(item));
+}
+const TOKEN_USAGE_KEYS = ["inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens"];
+// Anything out of shape drops the entry, and the file is read again from the
+// start rather than trusted.
+export function grokEntryFromPrev(raw: any): GrokFileEntry | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const count = (value: unknown) => Number.isSafeInteger(value) && (value as number) >= 0;
+  if (!count(raw.ino) || !count(raw.offset) || !count(raw.turns) || typeof raw.skip !== "boolean" || typeof raw.ids !== "string") return null;
+  const ids = raw.ids ? raw.ids.split(",") : [];
+  if (ids.length > MAX_GROK_TURN_IDS || !ids.every((id: string) => /^[0-9a-z]{1,16}$/.test(id))) return null;
+  if (!grokModelMap(raw.lifetime, item => grokUsageNumbers(item, TOKEN_USAGE_KEYS))) return null;
+  if (!raw.days || typeof raw.days !== "object" || Array.isArray(raw.days)) return null;
+  const days = Object.entries(raw.days);
+  if (days.length > 62 || !days.every(([day, models]) => /^\d{4}-\d{2}-\d{2}$/.test(day)
+    && grokModelMap(models, burn => Number.isFinite(burn) && burn >= 0))) return null;
+  return { ino: raw.ino, offset: raw.offset, skip: raw.skip, turns: raw.turns, ids, lifetime: raw.lifetime, days: raw.days };
+}
+function grokUsageFilesFromPrev(raw: any): Map<string, GrokFileEntry> {
+  const out = new Map<string, GrokFileEntry>();
+  if (!raw || typeof raw !== "object" || raw.v !== GROK_USAGE_VERSION || !raw.files || typeof raw.files !== "object") return out;
+  for (const [path, value] of Object.entries(raw.files).slice(0, MAX_GROK_USAGE_SESSIONS)) {
+    const entry = grokEntryFromPrev(value);
+    if (entry) out.set(path, entry);
+  }
+  return out;
+}
+// Entries arrive newest first and are kept up to the node budget. Days
+// outside the heat window are dropped, lifetime keeps everything.
+export function grokUsageFilesForPrev(files: Array<[string, GrokFileEntry]>, dayKeys: string[]): { v: string; files: Record<string, any> } {
+  const keepDays = new Set(dayKeys);
+  const out: Record<string, any> = {};
+  let nodes = 3;
+  for (const [path, entry] of files) {
+    const days: Record<string, Record<string, number>> = {};
+    let size = 8 + Object.keys(entry.lifetime).length * 5;
+    for (const [day, models] of Object.entries(entry.days)) {
+      if (!keepDays.has(day)) continue;
+      days[day] = models;
+      size += 1 + Object.keys(models).length;
+    }
+    if (nodes + size > MAX_GROK_PREV_NODES) break;
+    nodes += size;
+    out[path] = { ino: entry.ino, offset: entry.offset, skip: entry.skip, turns: entry.turns, ids: entry.ids.join(","), lifetime: entry.lifetime, days };
+  }
+  return { v: GROK_USAGE_VERSION, files: out };
 }
 function localUsageRecord(fields: {
   name: string; todayPrompts: number; todaySessions: number; todayTotalTokens: number;
@@ -3082,64 +3217,74 @@ function localUsageRecord(fields: {
     modelUsage: fields.modelUsage, todayTokensByModel: fields.todayTokensByModel, recentDays: fields.recentDays,
   });
 }
+// Each pass sums the per-file entries again, so a new local day needs no
+// cache key. HARD REFRESH has nothing to bypass here: every new byte is read.
 function grokLocalUsage(): any | null {
   const base = process.env.GROK_HOME || join(HOME, ".grok");
   const root = join(base, "sessions");
-  const files: string[] = [];
+  // Session ids are UUIDv7, so the highest names are the newest sessions,
+  // whatever order the filesystem lists them in. The newest by name across
+  // every group are lstat'd, then ordered by mtime. A resumed session older
+  // than the newest MAX_GROK_USAGE_CANDIDATES by name is not seen.
+  const named: Array<{ groupPath: string; name: string }> = [];
   for (const group of ls(root).slice(0, MAX_COLLECTION_ITEMS)) {
     const groupPath = join(root, group);
     try { const state = lstatSync(groupPath); if (state.isSymbolicLink() || !state.isDirectory()) continue; } catch { continue; }
-    for (const entry of ls(groupPath).slice(0, MAX_COLLECTION_ITEMS)) {
-      if (!cleanSessionId(entry)) continue;
-      const updates = join(groupPath, entry, "updates.jsonl");
-      try {
-        const state = lstatSync(updates);
-        if (state.isSymbolicLink() || !state.isFile()) continue;
-        files.push(updates);
-      } catch { continue; }
-      if (files.length >= MAX_GROK_USAGE_SESSIONS) break;
-    }
-    if (files.length >= MAX_GROK_USAGE_SESSIONS) break;
+    const names = ls(groupPath).filter(name => cleanSessionId(name) === name).sort().reverse().slice(0, MAX_GROK_USAGE_CANDIDATES);
+    for (const name of names) named.push({ groupPath, name });
   }
-  if (!files.length) return null;
-  const identity = files.map(path => {
-    try { const state = lstatSync(path); return `${path}:${state.size}:${Math.round(state.mtimeMs)}`; } catch { return path; }
-  }).join("|");
-  // Billing is attached after selecting the local record, including cache hits.
-  // The version token drops records cached before burn left out cache reads.
-  const hashed = String(Bun.hash("grok-usage-v2|" + identity + "|" + localDayKey(now)));
-  const cached = prev.grokLocalUsage && prev.grokLocalUsage.identity === hashed ? prev.grokLocalUsage : null;
-  if (!FORCE_REFRESH && cached?.record) { currentGrokUsageCache = cached; return cached.record; }
+  named.sort((a, b) => (a.name < b.name ? 1 : a.name > b.name ? -1 : 0));
+  const candidates: Array<{ path: string; sessionId: string; ino: number; size: number; mtimeMs: number }> = [];
+  for (const { groupPath, name } of named.slice(0, MAX_GROK_USAGE_CANDIDATES)) {
+    const path = join(groupPath, name, "updates.jsonl");
+    try {
+      const state = lstatSync(path);
+      if (state.isSymbolicLink() || !state.isFile()) continue;
+      candidates.push({ path, sessionId: name, ino: state.ino, size: state.size, mtimeMs: state.mtimeMs });
+    } catch { continue; }
+  }
+  if (!candidates.length) return null;
+  const files = newestGrokFiles(candidates);
+  const cached = grokUsageFilesFromPrev(prev.grokUsageFiles);
+  const entries: Array<[string, GrokFileEntry]> = files.map(file => {
+    const entry = cached.get(file.path);
+    // A new inode or a shorter file is a replaced or truncated session.
+    return [file.path, entry && entry.ino === file.ino && entry.offset <= file.size ? entry : emptyGrokFileEntry(file.ino)];
+  });
+  const seen = new Set<string>();
+  for (const [, entry] of entries) for (const id of entry.ids) seen.add(id);
+  const dayKeys = heatDays.map(localDayKey);
+  const budget: GrokReadBudget = { bytes: MAX_GROK_READ_BYTES, deadline: performance.now() + MAX_GROK_READ_MS, buffer: null };
+  files.forEach((file, index) => {
+    const entry = entries[index][1];
+    if (file.size > entry.offset && budget.bytes > 0) readGrokUpdates(file.path, entry, file.sessionId, seen, budget, dayKeys);
+  });
+  currentGrokUsageFiles = grokUsageFilesForPrev(entries, dayKeys);
+  const today = localDayKey(now);
   const modelUsage: Record<string, TokenUsage> = {};
   const todayTokensByModel: Record<string, number> = {};
   const daily = new Map<string, number>();
-  const sessions = new Set<string>();
-  const todaySessions = new Set<string>();
-  const today = localDayKey(now);
-  for (const path of files) {
-    const text = readRegularFileTail(path, MAX_GROK_UPDATE_TAIL) || readRegularFileLimited(path, MAX_GROK_UPDATE_TAIL);
-    const folded = foldGrokSessionSnaps(grokUsageFromUpdatesText(text || ""));
-    if (!folded.last) continue;
-    sessions.add(path);
-    for (const [model, usage] of Object.entries(folded.last.models)) {
-      const bucket = modelUsage[model] || (modelUsage[model] = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 });
-      addTokenUsage(bucket, usage);
+  let sessions = 0, todaySessions = 0;
+  for (const [, entry] of entries) {
+    if (!entry.turns) continue;
+    sessions++;
+    for (const [model, usage] of Object.entries(entry.lifetime)) addTokenUsage(modelUsage[model] ||= emptyTokenUsage(), usage);
+    for (const [day, models] of Object.entries(entry.days)) {
+      for (const [model, burn] of Object.entries(models)) {
+        daily.set(day, (daily.get(day) || 0) + burn);
+        if (day === today) todayTokensByModel[model] = (todayTokensByModel[model] || 0) + burn;
+      }
     }
-    for (const [day, tokens] of folded.daily) daily.set(day, (daily.get(day) || 0) + tokens);
-    if (folded.daily.get(today)) todaySessions.add(path);
+    if (Object.values(entry.days[today] || {}).some(burn => burn > 0)) todaySessions++;
   }
-  if (!sessions.size) return null;
-  const dayKeys = heatDays.map(localDayKey);
-  const todayTotalTokens = daily.get(today) || 0;
-  const record = localUsageRecord({
+  if (!sessions) return null;
+  return localUsageRecord({
     name: "Grok",
-    todayPrompts: counts.grok?.today || 0, todaySessions: todaySessions.size, todayTotalTokens,
-    totalPrompts: counts.grok?.total || 0, totalSessions: sessions.size,
+    todayPrompts: counts.grok?.today || 0, todaySessions, todayTotalTokens: daily.get(today) || 0,
+    totalPrompts: counts.grok?.total || 0, totalSessions: sessions,
     modelUsage, todayTokensByModel,
     recentDays: dayKeys.map(date => ({ date, messageCount: daily.get(date) || 0 })),
   });
-  currentGrokUsageCache = { identity: hashed, record };
-  return record;
 }
 const CLAUDE_AUTH_REFRESH_MS = 15 * 60 * 1000;
 // One host-wide clock in a shared state file, written before the CLI is
@@ -3522,7 +3667,7 @@ async function runCollector() {
       topicSummaries,
       ciByRepo: currentCiByRepo,
       opencodeTotals: currentOpencodeTotals,
-      grokLocalUsage: currentGrokUsageCache,
+      grokUsageFiles: currentGrokUsageFiles,
       sessionNotifications: notificationState.tracked,
     }));
   } catch {}
