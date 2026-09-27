@@ -210,6 +210,9 @@ ColumnLayout {
           root.extraCidrs = Array.isArray(parsed.extraCidrs) ? parsed.extraCidrs.slice(0, 8) : []
           root.defaultCidrs = Array.isArray(parsed.defaults) ? parsed.defaults.slice(0, 8) : []
           if (!root.selectedTokenId && root.tokens.length) root.selectedTokenId = root.tokens[0].id
+          // Viewer links from a build that offered LAN HTTP were replaced.
+          // The notice stays until the first new link is copied or shown.
+          if (typeof parsed.notice === "string" && parsed.notice) root.statusText = root.plain(parsed.notice, 200)
         } catch (e) {}
       }
     }

@@ -2,13 +2,15 @@ import { afterAll, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { LEGACY_NOTICE } from "./web-server";
 
 // The desk rule: every settings control is visible at 1600x1000 logical with
 // no page scrolling, lists excepted. This measures InfoView's own SETTINGS
 // panel, extracted from InfoView.qml at test time, with the real SettingsBody
 // and InfoSettings inside it and Omarchy's Style tokens at base-size 12 and 16.
 // It fails if the drawer would need its scrollbar. The token and CIDR lists
-// scroll inside their own bounded boxes, so they never push the page.
+// scroll inside their own bounded boxes, so they never push the page. The
+// one-time notice for replaced pre-release viewer links is shown in every case.
 const root = mkdtempSync(join(tmpdir(), "infomarchy-drawer-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 const view = readFileSync(join(import.meta.dir, "InfoView.qml"), "utf8");
@@ -62,7 +64,7 @@ QtObject {
 `);
   writeFileSync(join(dir, "web-server.ts"), `
     const cmd = process.argv[2];
-    if (cmd === "tokens") console.log(JSON.stringify({ok:true,tokens:Array.from({length:8},(_, i)=>({id:"0000000"+i,label:"viewer-"+i,createdAt:1,suffix:"ab"+i})),extraCidrs:Array.from({length:8},(_, i)=>"10."+i+".0.0/24"),defaults:["127.0.0.0/8","10.0.0.0/8","172.16.0.0/12","192.168.0.0/16"],listening:true}));
+    if (cmd === "tokens") console.log(JSON.stringify({ok:true,tokens:Array.from({length:8},(_, i)=>({id:"0000000"+i,label:"viewer-"+i,createdAt:1,suffix:"ab"+i})),extraCidrs:Array.from({length:8},(_, i)=>"10."+i+".0.0/24"),defaults:["127.0.0.0/8","10.0.0.0/8","172.16.0.0/12","192.168.0.0/16"],listening:true,notice:${JSON.stringify(LEGACY_NOTICE)}}));
     else if (cmd === "status") console.log(JSON.stringify({ok:true,running:true,ready:true,message:""}));
     else if (cmd === "qr") console.log(JSON.stringify({ok:true,size:41,rows:Array.from({length:41},()=>"10".repeat(20)+"1")}));
     else console.log(JSON.stringify({ok:false}));
@@ -93,7 +95,7 @@ ${panel}
     settingsBody.refreshQr(); settle.start()
   } }
   Timer { id: settle; interval: 1200; onTriggered: {
-    console.log("FIT " + JSON.stringify({ tokens: settingsBody.tokens.length, cidrs: settingsBody.extraCidrs.length, qr: settingsBody.qrSize,
+    console.log("FIT " + JSON.stringify({ tokens: settingsBody.tokens.length, cidrs: settingsBody.extraCidrs.length, qr: settingsBody.qrSize, notice: settingsBody.statusText,
       content: settingsBody.implicitHeight, viewport: settingsFlick.height, panel: settingsPanel.height, cap: view.height - view.gap * 4 }))
     Qt.quit()
   } }
@@ -102,7 +104,7 @@ ${panel}
   return dir;
 }
 
-for (const baseSize of [12, 16]) for (const mode of ["tailscale", "manual"]) test.skipIf(!existsSync("/usr/bin/quickshell"))(`base-size ${baseSize}, ${mode}: WEB on, QR shown, 8 tokens and 8 CIDRs fit 1600x1000 without scrolling`, async () => {
+for (const baseSize of [12, 16]) for (const mode of ["tailscale", "manual"]) test.skipIf(!existsSync("/usr/bin/quickshell"))(`base-size ${baseSize}, ${mode}: WEB on, QR and notice shown, 8 tokens and 8 CIDRs fit 1600x1000 without scrolling`, async () => {
   const dir = harness(baseSize / 12);
   const state = mkdtempSync(join(root, "s-"));
   const p = Bun.spawn(["/usr/bin/quickshell", "--no-color", "-p", dir], {
@@ -116,8 +118,8 @@ for (const baseSize of [12, 16]) for (const mode of ["tailscale", "manual"]) tes
     const line = output.split("\n").find(l => l.includes("FIT {"));
     expect(line).toBeTruthy();
     const fit = JSON.parse(line!.slice(line!.indexOf("FIT ") + 4));
-    console.log(`drawer base-size ${baseSize} ${mode}: ${line!.slice(line!.indexOf("FIT ") + 4)}`);
-    expect(fit).toMatchObject({ tokens: 8, qr: 41 });
+    console.log(`drawer base-size ${baseSize} ${mode}: ${JSON.stringify({ ...fit, notice: !!fit.notice })}`);
+    expect(fit).toMatchObject({ tokens: 8, qr: 41, notice: LEGACY_NOTICE });
     if (mode === "manual") expect(fit.cidrs).toBe(8);
     // The panel stays under its cap (the window less four gaps), and the body
     // fits its viewport, so the drawer never shows a scrollbar.

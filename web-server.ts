@@ -122,7 +122,15 @@ export type WebConfig = {
   port: number;
   extraCidrs: string[];
   listening: boolean;
+  legacyReplaced?: boolean;
 };
+
+// Every web.json this build writes carries CONFIG_VERSION. A file without it
+// was written by a pre-release build that offered LAN HTTP, so its tokens may
+// have crossed the network unencrypted. It is never read as credentials, and
+// it is replaced once under web-config.lock (loadOrReplaceLegacyLocked).
+const CONFIG_VERSION = 2;
+export const LEGACY_NOTICE = "LAN HTTP was removed. Viewer links made before this update were replaced, because they could have crossed the network unencrypted. Share a new link with each viewer.";
 
 export function validToken(value: unknown): string {
   const token = String(value || "");
@@ -189,7 +197,9 @@ export function tokenAllowed(got: string, tokens: WebToken[]): boolean {
   return ok;
 }
 
-export function loadConfig(): WebConfig | null {
+// Reads web.json with the descriptor, owner, link-count, mode and size checks.
+// A file that fails them is null, and callers never overwrite it.
+function readConfigFile(): Record<string, any> | null {
   let raw = "";
   let fd = -1;
   try {
@@ -209,23 +219,72 @@ export function loadConfig(): WebConfig | null {
   finally { if (fd >= 0) closeSync(fd); }
   if (!raw) return null;
   const parsed = parseJsonBounded(raw, CONFIG_MAX_BYTES, 12);
-  if (!parsed || typeof parsed !== "object") return null;
-  const tokens = parseTokens(parsed as Record<string, unknown>);
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+}
+
+function configFrom(parsed: Record<string, any>): WebConfig | null {
+  const tokens = parseTokens(parsed);
   const port = validPort(parsed.port) || SERVE_BACKEND_PORT;
   const extraCidrs = Array.isArray(parsed.extraCidrs)
     ? parsed.extraCidrs.map((item: unknown) => String(item)).filter((item: string) => !!parseCidr(item)).slice(0, MAX_EXTRA_CIDRS)
     : [];
   if (!tokens.length) return null;
-  return { tokens, port, extraCidrs, listening: parsed.listening !== false };
+  return { tokens, port, extraCidrs, listening: parsed.listening !== false, ...(parsed.legacyReplaced === true ? { legacyReplaced: true } : {}) };
+}
+
+// Fails closed: a pre-release file is never accepted, revealed or encoded,
+// even before anything has replaced it.
+export function loadConfig(): WebConfig | null {
+  const parsed = readConfigFile();
+  return parsed && parsed.version === CONFIG_VERSION ? configFrom(parsed) : null;
+}
+
+// Call only while web-config.lock is held. A safe, readable pre-release file
+// with at least one token gets one new token per old label, keeps its port
+// and allow list, and is saved not listening. Idempotent: the saved file
+// carries CONFIG_VERSION. Nothing about the old or new tokens is printed.
+function loadOrReplaceLegacyLocked(): WebConfig | null {
+  const parsed = readConfigFile();
+  if (!parsed) return null;
+  if (Object.hasOwn(parsed, "version")) return parsed.version === CONFIG_VERSION ? configFrom(parsed) : null;
+  const legacy = configFrom(parsed);
+  if (!legacy) return null;
+  const replaced: WebConfig = {
+    tokens: legacy.tokens.map(row => makeToken(row.label)),
+    port: legacy.port,
+    extraCidrs: legacy.extraCidrs,
+    listening: false,
+    legacyReplaced: true,
+  };
+  if (!saveConfig(replaced)) throw new Error("Cannot replace Web Mode credentials");
+  return replaced;
 }
 
 function saveConfig(config: WebConfig): boolean {
   return writePrivateStateFile(STATE_DIR, CONFIG_NAME, JSON.stringify({
+    version: CONFIG_VERSION,
     tokens: config.tokens,
     port: config.port,
     extraCidrs: config.extraCidrs,
     listening: !!config.listening,
+    ...(config.legacyReplaced ? { legacyReplaced: true } : {}),
   }) + "\n");
+}
+
+// The notice asks for a new link, so the first link handed out clears it.
+// Best effort: a failure here never fails the command that handed it out.
+export function clearLegacyNotice(): void {
+  try { withStateLock(STATE_DIR, "web-config.lock", () => {
+    const config = loadConfig();
+    if (!config?.legacyReplaced) return;
+    delete config.legacyReplaced;
+    saveConfig(config);
+  }); } catch {}
+}
+
+export function loadConfigForSettings(): WebConfig | null {
+  try { return withStateLock(STATE_DIR, "web-config.lock", () => loadOrReplaceLegacyLocked()); }
+  catch { return loadConfig(); }
 }
 
 export function ensureConfig(extraCidrs: string[] = [], listening?: boolean): WebConfig {
@@ -233,7 +292,7 @@ export function ensureConfig(extraCidrs: string[] = [], listening?: boolean): We
 }
 
 function ensureConfigLocked(extraCidrs: string[] = [], listening?: boolean): WebConfig {
-  const existing = loadConfig();
+  const existing = loadOrReplaceLegacyLocked();
   if (existing) {
     let changed = false;
     if (extraCidrs.length) {
@@ -280,7 +339,7 @@ export const REVOKE_EXIT: Record<RevokeResult, number> = { revoked: 0, unavailab
 // unreadable web.json, a busy lock and a failed save.
 export function revokeWebToken(id: string): RevokeResult {
   try { return withStateLock(STATE_DIR, "web-config.lock", (): RevokeResult => {
-    const config = loadConfig();
+    const config = loadOrReplaceLegacyLocked();
     if (!config) return "unavailable";
     const next = config.tokens.filter(row => row.id !== id);
     if (next.length === config.tokens.length) return "not-found";
@@ -306,7 +365,7 @@ export function removeExtraCidr(text: string): boolean {
   try { return withStateLock(STATE_DIR, "web-config.lock", () => {
     const cidr = parseCidr(text);
     if (!cidr) return false;
-    const config = loadConfig();
+    const config = loadOrReplaceLegacyLocked();
     if (!config) return false;
     const next = config.extraCidrs.filter(item => item !== cidr.text);
     if (next.length === config.extraCidrs.length) return false;
@@ -599,7 +658,7 @@ export function publishSnapshot(snapshot: unknown): boolean {
 
 export function disableWebFiles(): void {
   withStateLock(STATE_DIR, "web-config.lock", () => {
-    const existing = loadConfig();
+    const existing = loadOrReplaceLegacyLocked();
     if (existing) {
       existing.listening = false;
       if (!saveConfig(existing)) throw new Error("Cannot disable Web Mode");
@@ -793,19 +852,26 @@ if (import.meta.main) {
     const url = `${status.origin}/t/${row.token}/`;
     if (cmd === "copy-url") {
       const ok = await copyWebLink(url);
+      if (ok) clearLegacyNotice();
       console.log(JSON.stringify({ ok, message: ok ? "Viewer link copied." : "Cannot copy link. Install wl-clipboard and check the Wayland session." }));
       process.exit(ok ? 0 : 1);
-    } else if (reveal) console.log(JSON.stringify({ ok: true, url, id: row.id, label: row.label }));
+    } else if (reveal) {
+      clearLegacyNotice();
+      console.log(JSON.stringify({ ok: true, url, id: row.id, label: row.label }));
+    }
     else console.log(JSON.stringify({ ok: true, id: row.id, label: row.label, suffix: row.token.slice(-4), hint: "add --reveal to print the full viewer link" }));
     process.exit(0);
   }
   if (cmd === "tokens") {
-    const config = loadConfig();
+    // Both desk instances call this at load, so it replaces a pre-release file
+    // and reports the notice, but never clears it or prints a token.
+    const config = loadConfigForSettings();
     if (!config) {
       await Bun.write(Bun.stdout, JSON.stringify({ ok: false, tokens: [] }) + "\n");
       process.exit(0);
     }
-    await Bun.write(Bun.stdout, JSON.stringify({ ok: true, tokens: publicTokenList(config), extraCidrs: config.extraCidrs, defaults: DEFAULT_CIDRS, listening: config.listening }) + "\n");
+    await Bun.write(Bun.stdout, JSON.stringify({ ok: true, tokens: publicTokenList(config), extraCidrs: config.extraCidrs, defaults: DEFAULT_CIDRS, listening: config.listening,
+      ...(config.legacyReplaced ? { notice: LEGACY_NOTICE } : {}) }) + "\n");
     process.exit(0);
   }
   if (cmd === "token-add") {
@@ -846,6 +912,7 @@ if (import.meta.main) {
       process.exit(0);
     }
     const rows = await qrMatrixForUrl(`${status.origin}/t/${row.token}/`);
+    if (rows.length) clearLegacyNotice();
     await Bun.write(Bun.stdout, JSON.stringify({ ok: rows.length > 0, size: rows.length, rows }) + "\n");
     process.exit(rows.length ? 0 : 1);
   }
