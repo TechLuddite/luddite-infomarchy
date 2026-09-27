@@ -759,13 +759,18 @@ if (import.meta.main) {
     process.exit(0);
   }
   if (cmd === "url" || cmd === "copy-url") {
+    // A viewer link is a live credential. `url` prints only the token id and
+    // its last four characters unless --reveal is given, in any argument order.
+    const args = process.argv.slice(3);
+    const reveal = cmd === "url" && args.includes("--reveal");
+    const id = args.find(arg => arg !== "--reveal") || "";
     const config = loadConfig();
     const status = webStatus();
     if (!config || !status.ready) {
       await Bun.write(Bun.stdout, JSON.stringify({ ok: false }) + "\n");
       process.exit(0);
     }
-    const row = tokenById(config, process.argv[3] || "");
+    const row = tokenById(config, id);
     if (!row) {
       await Bun.write(Bun.stdout, JSON.stringify({ ok: false }) + "\n");
       process.exit(0);
@@ -775,7 +780,8 @@ if (import.meta.main) {
       const ok = await copyWebLink(url);
       console.log(JSON.stringify({ ok, message: ok ? "Viewer link copied." : "Cannot copy link. Install wl-clipboard and check the Wayland session." }));
       process.exit(ok ? 0 : 1);
-    } else console.log(JSON.stringify({ ok: true, url, id: row.id, label: row.label }));
+    } else if (reveal) console.log(JSON.stringify({ ok: true, url, id: row.id, label: row.label }));
+    else console.log(JSON.stringify({ ok: true, id: row.id, label: row.label, suffix: row.token.slice(-4), hint: "add --reveal to print the full viewer link" }));
     process.exit(0);
   }
   if (cmd === "tokens") {

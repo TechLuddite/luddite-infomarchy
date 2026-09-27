@@ -203,7 +203,7 @@ The modes are mutually exclusive. Selecting a different mode turns WEB off; enab
 
 Pre-release builds of Web Mode also offered LAN HTTP. It was removed because it sent the dashboard and the viewer token over the network unencrypted. A saved LAN setting loads with WEB off and no mode selected, and WEB stays off until you choose **PRIVATE HTTPS** or **MANUAL HTTPS**. Nothing switches to another mode on its own.
 
-Each viewer link contains a bearer token: someone with the link and network access can use it. **COPY URL** and **SHOW QR** deliberately reveal the selected token's address only after the listener is ready. Routine startup and status checks do not print token links. Keep links and QR images out of public screenshots, logs, commits, and chat. Tokens are individually revocable; turning WEB off stops access but keeps them for the next start.
+Each viewer link contains a bearer token: someone with the link and network access can use it. A viewer link is revealed only by **COPY URL**, **SHOW QR**, or `bun web-server.ts url <id> --reveal` run in a terminal, and only once the listener is ready. Without `--reveal`, `url` prints the token id and the last four characters of the token. `status`, `tokens` and startup print token ids and four-character suffixes only. The QR helper hands the link to the desk encoded as a QR matrix, so treat its output like the link. Keep links and QR images out of public screenshots, logs, commits, and chat. Tokens are individually revocable; turning WEB off stops access but keeps them for the next start.
 
 ### Privacy follows the desktop
 
