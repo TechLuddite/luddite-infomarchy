@@ -15,7 +15,7 @@ export function withStateLock<T>(directory: string, name: string, action: () => 
     const result = Bun.spawnSync(["/usr/bin/timeout", "-k", "1", "3", "/usr/bin/flock", "--wait", "2", "0"], {
       stdin: fd, stdout: "ignore", stderr: "ignore", env: { PATH: "/usr/bin:/bin" },
     });
-    if (result.exitCode !== 0) throw new Error("Settings are busy; try again");
+    if (result.exitCode !== 0) throw new Error("Settings are busy. Try again.");
     return action();
   } finally { closeSync(fd); }
 }

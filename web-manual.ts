@@ -57,7 +57,7 @@ function readPem(path: string, secret: boolean): Buffer {
     fd = openSync(`/proc/self/fd/${dir}/${parts.at(-1)}`, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const st = fstatSync(fd), limit = secret ? 32768 : 131072;
     if (!st.isFile() || ![0, process.getuid!()].includes(st.uid) || st.nlink !== 1 || (st.mode & (secret ? 0o077 : 0o022)) || st.size > limit)
-      fail(`Unsafe ${label} file. Use a bounded regular file; the private key must have mode 0600 or 0400.`);
+      fail(`Unsafe ${label} file. Use a bounded regular file. The private key must have mode 0600 or 0400.`);
     const buf = Buffer.alloc(limit + 1);
     let total = 0;
     while (total < buf.length) { const n = readSync(fd, buf, total, buf.length - total, null); if (!n) break; total += n; }
@@ -67,7 +67,7 @@ function readPem(path: string, secret: boolean): Buffer {
 }
 export function loadManualTls(raw: unknown, now = Date.now()) {
   const config = parseManualHttps(raw);
-  if (!config) fail("Complete Manual HTTPS: hostname or private IPv4 address, private bind address, port (1024–65535), certificate/key paths and SHA-256 fingerprint.");
+  if (!config) fail("Complete Manual HTTPS: hostname or private IPv4 address, private bind address, port (1024 to 65535), certificate/key paths and SHA-256 fingerprint.");
   let cert: Buffer, key: Buffer;
   try { cert = readPem(config.certPath, false); key = readPem(config.keyPath, true); }
   catch { fail("Cannot safely read certificate/key files. Check paths, symlinks, ownership and private-key permissions (0600 or 0400)."); }

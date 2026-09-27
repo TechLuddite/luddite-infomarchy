@@ -309,8 +309,8 @@ ColumnLayout {
         textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap
         text: root.settings.webModeUnset
           ? "Choose an access mode to turn WEB on. Both modes are HTTPS. Switching access mode turns WEB off."
-          : root.settings.webAccessMode === "manual" ? "Use an existing certificate. You manage client trust, renewal and DNS when using a hostname. Bind to a private LAN/VPN address or loopback; public exposure is unsupported. Saving certificate settings turns Manual HTTPS off."
-          : "Private HTTPS lets your connected Tailscale devices view the dashboard securely on port 8788. CONFIGURE & ENABLE sets up access; WEB off closes it. Tailscale and other services keep running."
+          : root.settings.webAccessMode === "manual" ? "Use an existing certificate. You manage client trust, renewal and DNS when using a hostname. Bind to a private LAN/VPN address or loopback. Public exposure is unsupported. Saving certificate settings turns Manual HTTPS off."
+          : "Private HTTPS lets your connected Tailscale devices view the dashboard securely on port 8788. CONFIGURE & ENABLE sets up access, and WEB off closes it. Tailscale and other services keep running."
         color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption
       }
       ColumnLayout {
@@ -368,7 +368,7 @@ ColumnLayout {
           }
         }
         Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; text: root.manualMessage; color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption }
-        Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; text: "The fingerprint confirms the certificate loaded here; it does not install trust on a viewing device. A renewed certificate needs an updated fingerprint. Certificate and key files must be regular files without symlinks; key permissions must be 0600 or 0400."; color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption }
+        Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; text: "The fingerprint confirms the certificate loaded here. It does not install trust on a viewing device. A renewed certificate needs an updated fingerprint. Certificate and key files must be regular files without symlinks, and key permissions must be 0600 or 0400."; color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption }
       }
       Text {
         visible: root.settings.webAccessMode === "tailscale" && !root.settings.webReady && !root.settings.webStarting
@@ -392,7 +392,7 @@ ColumnLayout {
       Text {
         visible: root.settings.webAccessMode === "tailscale"
         textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap
-        text: "Install and connect Tailscale on the viewing device too. Your tailnet must permit access to this computer on port 8788. Then use Copy URL or Show QR. The dashboard QR opens the page; it does not enroll or authorize a device. Public access is unsupported."
+        text: "Install and connect Tailscale on the viewing device too. Your tailnet must permit access to this computer on port 8788. Then use Copy URL or Show QR. The dashboard QR opens the page. It does not enroll or authorize a device. Public access is unsupported."
         color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption
       }
     }

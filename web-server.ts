@@ -748,7 +748,7 @@ export async function serve(mode = process.argv[3], integration = { inspectTails
     }
     if (!ready) {
       stop();
-      const message = "Serve setup failed. Enable MagicDNS and HTTPS certificates in the Tailscale admin console; check local Serve permissions, then retry. No other listener was started.";
+      const message = "Serve setup failed. Enable MagicDNS and HTTPS certificates in the Tailscale admin console. Check local Serve permissions, then retry. No other listener was started.";
       writeWebStatus(false, "tailscale", "", message);
       console.log(JSON.stringify({ ok: false, message }));
       return;

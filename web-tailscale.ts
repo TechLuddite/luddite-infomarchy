@@ -58,7 +58,7 @@ export function assessTailscale(status: any, config: any, help: string): TailSta
     return failure("version", "This Tailscale CLI does not advertise the required Serve options. Update Tailscale, then check again.");
   if (!config || typeof config !== "object" || Array.isArray(config))
     return failure("config", "Cannot inspect Serve configuration. Check tailscale serve status --json and local permissions.");
-  if (portOccupied(config)) return failure("conflict", "HTTPS port 8788 already has a Serve or Funnel mapping. Existing services were left untouched; free that port before setup.");
+  if (portOccupied(config)) return failure("conflict", "HTTPS port 8788 already has a Serve or Funnel mapping. Existing services were left untouched. Free that port before setup.");
   return { ok: true, state: "ready", message: "Ready to configure private HTTPS on port 8788. Enable HTTPS certificates in the admin console if prompted by Tailscale.", origin };
 }
 
