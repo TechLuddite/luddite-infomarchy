@@ -247,7 +247,7 @@ Item {
   Process {
     id: settingsWriter
     property string frame: ""
-    command: ["/usr/bin/bun", Qt.resolvedUrl("dashboard-state.ts").toString().replace(/^file:\/\//, "")]
+    command: ["bun", Qt.resolvedUrl("dashboard-state.ts").toString().replace(/^file:\/\//, "")]
     stdinEnabled: true
     onStarted: { settingsLaunchWatch.stop(); write(frame + "\n"); frame = "" }
     onExited: function(code) {

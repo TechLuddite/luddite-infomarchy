@@ -73,3 +73,12 @@ describe("WEB turns on only through the setup gate", () => {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   }, 12000);
 });
+
+test("desk helpers run bun from PATH like the rest of the plugin", () => {
+  // A hard-coded /usr/bin/bun stops every settings save where Bun lives in
+  // ~/.bun/bin or under mise, while the collector keeps working.
+  for (const name of ["InfoSettings.qml", "SettingsBody.qml", "Infomarchy.qml", "InfoView.qml"]) {
+    expect(readFileSync(join(import.meta.dir, name), "utf8")).not.toContain("/usr/bin/bun");
+  }
+  expect(settings).toContain('command: ["bun", Qt.resolvedUrl("dashboard-state.ts")');
+});

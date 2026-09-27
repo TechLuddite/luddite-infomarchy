@@ -49,7 +49,7 @@ ColumnLayout {
   function checkManual() { if (!settings.settingsWriting && !manualDirty && !manualCheck.running) manualCheck.running = true }
   Process {
     id: manualCheck
-    command: ["/usr/bin/bun", Qt.resolvedUrl("web-manual.ts").toString().replace(/^file:\/\//, "")]
+    command: ["bun", Qt.resolvedUrl("web-manual.ts").toString().replace(/^file:\/\//, "")]
     stdout: SplitParser {
       splitMarker: "\n"
       onRead: function(line) {

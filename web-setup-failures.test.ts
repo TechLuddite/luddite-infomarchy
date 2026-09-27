@@ -11,13 +11,13 @@ for (const scenario of ['unknown','legacy','lan','launch-failure']) test.skipIf(
   writeFileSync(join(dir,'infomarchy/dashboard.json'),JSON.stringify(saved));
   let qml=readFileSync(join(import.meta.dir,'InfoSettings.qml'),'utf8');
   qml=qml.replace('  id: root','  id: root\n  property string reviewWriter: "/nonexistent/infomarchy-test-bun"');
-  if(scenario==='launch-failure') qml=qml.replace('command: ["/usr/bin/bun", Qt.resolvedUrl("dashboard-state.ts")','command: [root.reviewWriter, Qt.resolvedUrl("dashboard-state.ts")');
+  if(scenario==='launch-failure') qml=qml.replace('command: ["bun", Qt.resolvedUrl("dashboard-state.ts")','command: [root.reviewWriter, Qt.resolvedUrl("dashboard-state.ts")');
   writeFileSync(join(dir,'InfoSettings.qml'),qml);
   symlinkSync(join(import.meta.dir,'dashboard-state.ts'),join(dir,'dashboard-state.ts'));
   writeFileSync(join(dir,'web-server.ts'),`import {appendFileSync} from 'fs';appendFileSync(${JSON.stringify(join(dir,'calls'))},process.argv.slice(2).join(' ')+'\\n');console.log(JSON.stringify({ok:true,running:false,ready:false}));`);
   const action = scenario==='launch-failure' ? `
     if(stage===0 && s.ready) {stage=1;s.setPrivacyMode(true)}
-    else if(stage===1 && !s.settingsWriting && s.settingsError && !s.privacyMode) {stage=2;s.reviewWriter="/usr/bin/bun";s.setPrivacyMode(true)}
+    else if(stage===1 && !s.settingsWriting && s.settingsError && !s.privacyMode) {stage=2;s.reviewWriter="bun";s.setPrivacyMode(true)}
     else if(stage===2 && !s.settingsWriting && !s.settingsError && s.privacyMode) {console.log("RECOVERY_OK");Qt.quit()}
   ` : `
     if(stage===0 && s.ready) {
