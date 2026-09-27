@@ -33,9 +33,13 @@ const CEILINGS: Record<string, number> = {
   // same false positive root.deskView already produces in this file.
   // +2 (#38): deskWorkspaceMatches reads dashboardSettings from inside the
   // same PanelWindow, the same false positive again.
-  "Infomarchy.qml": 32,
+  // +1 (#25): the Web Mode listener Process has an onExited handler, the
+  // same exit-status metadata warning every other Process handler produces.
+  "Infomarchy.qml": 33,
   "InfoModel.qml": 6,
-  "InfoSettings.qml": 0,
+  // 2 (#25): the settings writer and the web status reader are Processes
+  // with onExited handlers, which qmllint cannot type without QProcess.
+  "InfoSettings.qml": 2,
   // 509 came in with privacy mode (#17). The two above it are the topic mask
   // folded into that merge: qmllint cannot resolve a view-scoped function, so
   // each call site of displayTopic reads as a missing property, exactly like
@@ -49,9 +53,14 @@ const CEILINGS: Record<string, number> = {
   // unqualified, plus the two layout-positioning warnings the existing status
   // dot already produces, for the session dot beside it. Same false-positive
   // shape as the row above it, counted twice because there are now two rows.
-  "InfoView.qml": 593,
+  // 595: the SETTINGS drawer panel reads Style.spacing.md and
+  // Style.font.subtitle, dynamic Style properties qmllint sees as QObject (#25).
+  "InfoView.qml": 595,
   "Overlay.qml": 29,
   "WaveWallpaper.qml": 0,
+  // Settings drawer: dynamic Style properties, unqualified access and
+  // Process exit-status metadata; covered by real offscreen QML tests too.
+  "SettingsBody.qml": 151,
 };
 
 // Findings that exist only because the plugin deliberately survives an Omarchy
