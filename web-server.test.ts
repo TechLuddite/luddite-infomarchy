@@ -90,8 +90,11 @@ describe("web mode rendering", () => {
     expect(page.headers["Content-Security-Policy"]).toContain("img-src 'self'");
     expect(page.headers["X-Frame-Options"]).toBe("DENY");
     expect(body).toContain("Halo");
-    expect(body).toContain("&lt;img src=x");
-    expect(body).not.toContain("<img src");
+    // Under privacy the topic is not sent at all. With privacy off it is escaped.
+    expect(body).not.toContain("img src=x");
+    const open = String(handleRequest({ ...base, prefs: parseDashPrefs({ privacyMode: false }) }).body);
+    expect(open).toContain("&lt;img src=x");
+    expect(open).not.toContain("<img src");
     expect(body).not.toContain("<script>alert");
     expect(body.match(/<script/g)?.length).toBe(1);
     expect(body).not.toContain("test-viewer");

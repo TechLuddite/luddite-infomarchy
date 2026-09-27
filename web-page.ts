@@ -100,8 +100,10 @@ export function filterWebSnapshot(snapshot: any, privacy = true): any {
     machine.net.ssid = null;
     machine.net.addr = null;
   }
+  // A topic is keywords lifted verbatim from the session's prompts, so under
+  // privacy it is dropped, never shortened, exactly as the desk's displayTopic.
   const session = (row: any) => ({
-    ...pick(row, ["provider", "project", "topic", "uptimeSec", "attention", "attentionReason"]),
+    ...pick(row, privacy ? ["provider", "project", "uptimeSec", "attention", "attentionReason"] : ["provider", "project", "topic", "uptimeSec", "attention", "attentionReason"]),
     git: pick(row?.git, ["branch"]),
   });
   const usage = Object.fromEntries(Object.entries(ai.usage || {}).slice(0, 8).map(([key, row]: [string, any]) => [key, {

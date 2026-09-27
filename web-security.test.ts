@@ -11,8 +11,8 @@ const snapshot = {
   ai: {
     github: { login: "PRIVATE_LOGIN" },
     recent: [{ text: "one two three four PRIVATE_PROMPT", project: "/home/PRIVATE_USER/repo" }, { text: "short prompt" }],
-    sessions: [{ provider: "claude", project: "repo", topic: "VISIBLE_TOPIC", cwd: "PRIVATE_CWD", prompt: "PRIVATE_PROMPT", preview: "PRIVATE_PREVIEW" }],
-    attention: [{ project: "repo", attention: "waiting", attentionReason: "needs approval", attentionDetail: "PRIVATE_DETAIL", cwd: "PRIVATE_CWD" }],
+    sessions: [{ provider: "claude", project: "repo", topic: "PRIVATE_TOPIC", cwd: "PRIVATE_CWD", prompt: "PRIVATE_PROMPT", preview: "PRIVATE_PREVIEW" }],
+    attention: [{ project: "repo", topic: "PRIVATE_ATTENTION_TOPIC", attention: "waiting", attentionReason: "needs approval", attentionDetail: "PRIVATE_DETAIL", cwd: "PRIVATE_CWD" }],
     usage: { claude: { ready: true, name: "Claude", secret: "PRIVATE_USAGE_EXTRA", limits: [{ label: "week", percent: 0.1, secret: "PRIVATE_LIMIT_EXTRA" }] } },
   },
 };
@@ -33,7 +33,8 @@ describe("desktop disclosure boundary", () => {
         const r = handleRequest({ ...base, pathname, prefs });
         expect(r.status).toBe(200);
         expect(String(r.body).includes("PRIVATE_")).toBe(false);
-        expect(r.body).toContain("VISIBLE_TOPIC");
+        // The session topic is prompt keywords: dropped under privacy, as on the desk.
+        expect(String(r.body).includes("TOPIC")).toBe(false);
         expect(r.headers["Cache-Control"]).toBe("no-store");
         expect(handleRequest({ ...base, pathname, prefs, method: "HEAD" }).body).toBe("");
       }
@@ -53,6 +54,11 @@ describe("desktop disclosure boundary", () => {
       expect(html.includes(marker)).toBe(true);
     for (const marker of ["PRIVATE_LOGIN", "PRIVATE_MEDIA", "PRIVATE_CWD", "PRIVATE_PREVIEW", "PRIVATE_DETAIL"])
       expect(html.includes(marker)).toBe(false);
+    // With privacy off the topic is sent, in the page and in both JSON row kinds.
+    expect(html).toContain("PRIVATE_TOPIC");
+    const json = String(handleRequest({ ...base, pathname: base.pathname + "snapshot.json", prefs: parseDashPrefs({ privacyMode: false }) }).body);
+    expect(json).toContain("PRIVATE_TOPIC");
+    expect(json).toContain("PRIVATE_ATTENTION_TOPIC");
     const view = filterWebSnapshot(snapshot, false);
     expect(view.ai.recent[0].text).toContain("PRIVATE_PROMPT");
     expect(view.ai.sessions[0].cwd).toBeUndefined();
