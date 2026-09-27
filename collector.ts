@@ -2947,18 +2947,26 @@ function normalizeLimitRows(rows: unknown, fallbackReset = ""): any[] {
   }
   return out;
 }
+// A row whose window has already reset measures a period that is over. When
+// fetches keep failing the file keeps its last result, so drop it here.
+function unexpiredLimitRows(rows: any[], stamp: number): any[] {
+  return rows.filter(row => {
+    const resetsAt = Date.parse(String(row.resetsAt || ""));
+    return !(Number.isFinite(resetsAt) && resetsAt <= stamp);
+  });
+}
 // grok-billing.json is only kept fresh while the billing opt-in is on. Once it
 // is off the file is ignored, so an old percentage is never shown as current.
 // Grok CLI's own log is still read: it costs no request.
-export function grokObservedLimits(directory = STATE_DIR, liveAllowed = grokBillingAllowed()): any[] {
+export function grokObservedLimits(directory = STATE_DIR, liveAllowed = grokBillingAllowed(), stamp = Date.now()): any[] {
   if (liveAllowed) {
     const liveRaw = readRegularFileLimited(join(directory, GROK_BILLING_FILE), 4096);
     const live = liveRaw ? parseJsonBounded(liveRaw, 4096, 8) : null;
-    const fromLive = normalizeLimitRows(live && live.limits, uiString(live && live.resetsAt, 40));
+    const fromLive = unexpiredLimitRows(normalizeLimitRows(live && live.limits, uiString(live && live.resetsAt, 40)), stamp);
     if (fromLive.length) return fromLive;
   }
   if (directory !== STATE_DIR) return [];
-  return grokBillingMeters(grokBillingFromUnifiedLog(readHistoryTail(join(process.env.GROK_HOME || join(HOME, ".grok"), "logs", "unified.jsonl"), 64 * 1024) || ""));
+  return unexpiredLimitRows(grokBillingMeters(grokBillingFromUnifiedLog(readHistoryTail(join(process.env.GROK_HOME || join(HOME, ".grok"), "logs", "unified.jsonl"), 64 * 1024) || "")), stamp);
 }
 export function withGrokObservedLimits(record: any, directory = STATE_DIR, liveAllowed = grokBillingAllowed()): any {
   const limits = grokObservedLimits(directory, liveAllowed);

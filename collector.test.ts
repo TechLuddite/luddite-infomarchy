@@ -1823,8 +1823,9 @@ describe("zombie detection", () => {
     expect(log?.percent).toBe(0.16);
     const dir = join(testRoot, "grok-billing");
     mkdirSync(dir, { recursive: true });
+    const reset = new Date(Date.now() + 86_400_000).toISOString();
     writeFileSync(join(dir, "grok-billing.json"), JSON.stringify({
-      limits: [{ label: "WEEKLY", percent: 0.17, resetsAt: "2026-09-14T07:26:13Z" }, { label: "BUILD", percent: 0.14, resetsAt: "2026-09-14T07:26:13Z" }],
+      limits: [{ label: "WEEKLY", percent: 0.17, resetsAt: reset }, { label: "BUILD", percent: 0.14, resetsAt: reset }],
     }));
     expect(grokObservedLimits(dir, true).map((row: any) => row.label)).toEqual(["WEEKLY", "BUILD"]);
     expect(grokObservedLimits(dir, true)[0].percent).toBe(0.17);
@@ -2205,6 +2206,22 @@ describe("Grok billing without token snapshots", () => {
     // With the billing opt-in off, a file left from an earlier opt-in is not shown.
     expect(grokObservedLimits(dir, false)).toEqual([]);
     expect(withGrokObservedLimits(sessions, dir, false)).toBe(sessions);
+  });
+
+  test("a billing window that has already reset is not shown", () => {
+    const dir = join(testRoot, "grok-billing-expired");
+    mkdirSync(dir, { recursive: true });
+    const stamp = Date.UTC(2026, 8, 14, 12);
+    writeFileSync(join(dir, "grok-billing.json"), JSON.stringify({
+      limits: [{ label: "WEEKLY", percent: 0.9, resetsAt: new Date(stamp - 3_600_000).toISOString() }],
+    }));
+    expect(grokObservedLimits(dir, true, stamp)).toEqual([]);
+    expect(grokObservedLimits(dir, true, stamp - 7_200_000)[0].percent).toBe(0.9);
+    // Only the rows past their reset go; a row with no reset time stays.
+    writeFileSync(join(dir, "grok-billing.json"), JSON.stringify({
+      limits: [{ label: "WEEKLY", percent: 0.9, resetsAt: new Date(stamp).toISOString() }, { label: "BUILD", percent: 0.2 }],
+    }));
+    expect(grokObservedLimits(dir, true, stamp).map((row: any) => row.label)).toEqual(["BUILD"]);
   });
 });
 
