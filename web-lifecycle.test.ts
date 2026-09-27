@@ -2,7 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { localPrivateIPv4 } from "./web-server";
+import { networkInterfaces } from "os";
 import { mappingReady } from "./web-tailscale";
 
 const root = mkdtempSync(join(tmpdir(), "infomarchy-lifecycle-"));
@@ -53,7 +53,9 @@ test("private listener binds loopback, stops its child, and can enable again", a
       expect(allowed.status).toBe(200);
       expect((await fetch(url)).status).toBe(403);
       expect((await fetch(url, { headers: { "X-Forwarded-Host": "desk.example.ts.net:8788", "X-Forwarded-Proto": "https", "Tailscale-User-Login": "admin@example.com" } })).status).toBe(403);
-      for (const ip of localPrivateIPv4().slice(0, 1)) {
+      // The backend binds loopback only: a non-loopback address of this host must not reach it.
+      const lanAddress = Object.values(networkInterfaces()).flat().find(a => a && a.family === "IPv4" && !a.internal)?.address;
+      for (const ip of lanAddress ? [lanAddress] : []) {
         let reached = false;
         try { await fetch(`http://${ip}:${status.port}${path}`, { signal: AbortSignal.timeout(500) }); reached = true; } catch {}
         expect(reached).toBe(false);
@@ -78,7 +80,7 @@ test("private listener binds loopback, stops its child, and can enable again", a
   }
 });
 
-test("missing prerequisites and failed Serve setup exit without a LAN fallback", async () => {
+test("missing prerequisites and failed Serve setup exit without starting any other listener", async () => {
   for (const ready of [false, true]) {
     const fixture = join(root, `failed-${ready}.ts`);
     writeFileSync(fixture, `

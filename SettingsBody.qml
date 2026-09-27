@@ -248,7 +248,7 @@ ColumnLayout {
   RowLayout {
     Layout.fillWidth: true; spacing: Style.spacing.md
     Repeater {
-      model: [{ id: "lan", label: "LAN HTTP" }, { id: "tailscale", label: "PRIVATE HTTPS" }, { id: "manual", label: "MANUAL HTTPS" }]
+      model: [{ id: "tailscale", label: "PRIVATE HTTPS" }, { id: "manual", label: "MANUAL HTTPS" }]
       delegate: Text {
         required property var modelData
         textFormat: Text.PlainText; text: (root.settings.webAccessMode === modelData.id ? "● " : "○ ") + modelData.label
@@ -260,8 +260,8 @@ ColumnLayout {
   }
   Text {
     textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap
-    text: root.settings.webAccessMode === "lan"
-      ? "LAN HTTP sends dashboard data and access credentials unencrypted. Use a network you control and trust. Privacy does not encrypt traffic. Switching access mode turns WEB off."
+    text: root.settings.webModeUnset
+      ? "Choose an access mode to turn WEB on. Both modes are HTTPS. Switching access mode turns WEB off."
       : root.settings.webAccessMode === "manual" ? "Use an existing certificate. You manage client trust, renewal and DNS when using a hostname. Bind to a private LAN/VPN address or loopback; public exposure is unsupported. Saving certificate settings turns Manual HTTPS off."
       : "Private HTTPS lets your connected Tailscale devices view the dashboard securely on port 8788. CONFIGURE & ENABLE sets up access; WEB off closes it. Tailscale and other services keep running."
     color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption
@@ -357,8 +357,8 @@ ColumnLayout {
       color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, root.settings.webReady ? 0.16 : 0.06)
       border.color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, root.settings.webReady ? 0.55 : 0.18)
       border.width: 1
-      Text { id: webToggle; anchors.centerIn: parent; textFormat: Text.PlainText; text: root.settings.webEnabled ? (root.settings.webReady ? "WEB ON" : (root.settings.webStarting ? "STARTING…" : "WEB FAILED")) : (root.settings.webAccessMode === "lan" ? "WEB OFF" : "CONFIGURE & ENABLE"); color: root.settings.webReady ? root.green : (root.settings.webFailed ? root.yellow : root.faint); font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true }
-      MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; enabled: root.settings.webEnabled || (!root.settings.settingsWriting && (root.settings.webAccessMode === "lan" || (root.settings.webAccessMode === "manual" ? !root.manualDirty : root.tailReady))); onClicked: root.settings.toggleWebEnabled() }
+      Text { id: webToggle; anchors.centerIn: parent; textFormat: Text.PlainText; text: root.settings.webEnabled ? (root.settings.webReady ? "WEB ON" : (root.settings.webStarting ? "STARTING…" : "WEB FAILED")) : "CONFIGURE & ENABLE"; color: root.settings.webReady ? root.green : (root.settings.webFailed ? root.yellow : root.faint); font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true }
+      MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; enabled: root.settings.webEnabled || (!root.settings.settingsWriting && !root.settings.webModeUnset && (root.settings.webAccessMode === "manual" ? !root.manualDirty : root.tailReady)); onClicked: root.settings.toggleWebEnabled() }
     }
     Rectangle {
       visible: root.settings.webFailed
@@ -395,7 +395,7 @@ ColumnLayout {
   }
   Text { textFormat: Text.PlainText; visible: !root.settings.webEnabled; wrapMode: Text.Wrap; Layout.fillWidth: true; text: "Turning Web Mode off stops the listener and keeps tokens. Revoke a token to rotate it."; color: root.faint; font.family: root.mono; font.pixelSize: Style.font.caption }
 
-  Text { textFormat: Text.PlainText; visible: root.settings.webModeInvalid || (root.settings.webEnabled && !root.settings.webReady); Layout.fillWidth: true; wrapMode: Text.Wrap; text: root.settings.webStatusText || "Starting listener…"; color: root.yellow; font.family: root.mono; font.pixelSize: Style.font.caption }
+  Text { textFormat: Text.PlainText; visible: (root.settings.webModeUnset && !!root.settings.webStatusText) || (root.settings.webEnabled && !root.settings.webReady); Layout.fillWidth: true; wrapMode: Text.Wrap; text: root.settings.webStatusText || "Starting listener…"; color: root.yellow; font.family: root.mono; font.pixelSize: Style.font.caption }
   Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; text: "Privacy changes apply on the next successful five-second refresh. Previously received or saved data cannot be retracted."; color: root.faint; font.family: root.mono; font.pixelSize: Style.font.caption }
   Column {
     visible: root.qrSize > 0 && root.settings.webEnabled
@@ -473,7 +473,7 @@ ColumnLayout {
   }
 
   ColumnLayout {
-    visible: root.settings.webAccessMode === "lan" || root.settings.webAccessMode === "manual"
+    visible: root.settings.webAccessMode === "manual"
     Layout.fillWidth: true
     spacing: Style.spacing.md
   Text { textFormat: Text.PlainText; text: "ALLOW LIST"; color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true; font.letterSpacing: 1.4 }

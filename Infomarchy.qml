@@ -81,7 +81,7 @@ Scope {
   Process {
     id: webServer
     command: ["bun", root.webServerPath, "serve", dashboardSettings.webAccessMode]
-    running: dashboardSettings.ready && dashboardSettings.webEnabled && !webDisable.running && !root.webRetryPause
+    running: dashboardSettings.ready && dashboardSettings.webEnabled && !dashboardSettings.webModeUnset && !webDisable.running && !root.webRetryPause
     stdout: SplitParser {
       splitMarker: "\n"
       onRead: function(line) {

@@ -1,10 +1,10 @@
 # Web Mode security design
 
-Implemented design agreed on 2026-09-09, verified on 2026-09-10. See [HANDOFF.md](HANDOFF.md) for the source map and validation record, and [README setup](../README.md#set-up-web-mode) for user instructions.
+Implemented design agreed on 2026-09-09, verified on 2026-09-10. See [README setup](../README.md#set-up-web-mode) for user instructions.
 
 ## Scope and rationale
 
-Web Mode supports three mutually exclusive access modes: trusted LAN HTTP, private HTTPS through Tailscale Serve, and direct Manual HTTPS with existing certificate files. Desktop-owned privacy is enforced before responses leave the server. Network reachability, transport encryption, and viewer-token authorization are separate checks.
+Web Mode supports two mutually exclusive access modes, both HTTPS: private HTTPS through Tailscale Serve, and direct Manual HTTPS with existing certificate files. Desktop-owned privacy is enforced before responses leave the server. Network reachability, transport encryption, and viewer-token authorization are separate checks.
 
 For Tailscale mode, Tailscale owns private connectivity and HTTPS certificate lifecycle; Infomarchy owns disclosure, viewer credentials, and its forwarding process. Manual HTTPS delegates issuance, DNS, client trust and renewal to the operator. Neither mode requires DNS-provider credentials, trust-store installation, or certificate renewal machinery inside the plugin. Public exposure, Funnel, built-in CA/ACME, pairing-to-cookie sessions, and per-viewer roles are outside this implementation. They are not pending approved requirements.
 
@@ -18,15 +18,13 @@ The browser's privacy label is read-only; the layout preference endpoint rejects
 
 GitHub login remains excluded at either privacy setting. JSON sessions, attention, and usage are projected to web fields rather than forwarding desktop action arguments, working directories, previews, or extra provider data. Desktop COPY EXCERPT retains full text.
 
-Privacy off permits connected viewers to receive the allowed full values. Changes apply to subsequent responses, normally the next successful five-second refresh. Already received/saved data cannot be retracted; disconnected pages may retain old content. Privacy filtering does not encrypt HTTP transport.
+Privacy off permits connected viewers to receive the allowed full values. Changes apply to subsequent responses, normally the next successful five-second refresh. Already received/saved data cannot be retracted; disconnected pages may retain old content.
 
 ## Access boundaries
 
-### LAN HTTP
+### Removed: LAN HTTP
 
-An unknown explicit persisted mode keeps WEB off until a supported mode is chosen. Only an absent legacy mode defaults to LAN. Advertised LAN addresses follow default-route metrics, excluding non-default virtual bridges; source authorization is still checked separately.
-
-The backend binds IPv4 `0.0.0.0`, default port 8787. Source defaults are loopback and RFC1918, with explicit extra CIDRs available. `100.64.0.0/10` is not default-allowed and never proves tailnet membership. CIDRs are reachability filters. The user manages firewall rules; loading settings or enabling WEB does not change them. Data and bearer credentials travel unencrypted.
+Pre-release builds of Web Mode offered a third mode that bound `0.0.0.0:8787` without TLS, so the dashboard and the bearer token in the URL crossed the network in cleartext. It was removed. The listener refuses any mode other than `tailscale` or `manual`, including a missing mode and `lan`, before it creates credentials or binds a socket, and reports that LAN HTTP was removed. The settings writer rejects `lan` as a mode. The desk loads a saved `lan`, a missing mode or an unknown value as no mode, with WEB off, and never substitutes another mode. If such a setting was saved with WEB on, the desk saves WEB off once, marks `web.json` not listening and deletes `web-snapshot.json`, so the collector stops writing it. WEB stays off until the operator chooses a mode.
 
 ### Private HTTPS
 
@@ -36,13 +34,15 @@ Inspection checks the installed CLI, connection, DNS name, required Serve option
 
 `web-child.py` sets Linux parent-death SIGKILL and checks the parent PID before executing the CLI. Normal listener shutdown and abrupt listener death terminate the owned process; tailscaled removes its foreground mapping when the CLI connection closes. Plugin removal ends that ownership too. Tailscale itself and unrelated services continue running.
 
-Startup waits for the expected foreground mapping and verifies that it is not Funnel before reporting ready. A failed setup exits without LAN fallback. Selecting another access mode turns WEB off. Installation, login, admin HTTPS/MagicDNS changes, and local permissions are guided rather than automatically changed or escalated.
+Startup waits for the expected foreground mapping and verifies that it is not Funnel before reporting ready. A failed setup exits without starting any other listener. Selecting another access mode turns WEB off. Installation, login, admin HTTPS/MagicDNS changes, and local permissions are guided rather than automatically changed or escalated.
 
 ### Manual HTTPS
 
 README includes an operator-run private-CA/IP-SAN recipe for LAN viewing without DNS or Tailscale. It keeps key material outside the public download directory, limits incoming firewall rules, requires deliberate client CA trust and documents renewal/removal. Those manual steps do not add certificate or firewall management to the plugin.
 
 `web-manual.ts` loads a bounded existing PEM chain and unencrypted PEM private key. Configuration contains a DNS hostname or private IPv4 identity, a specific loopback/private IPv4 bind address, an unprivileged port (default 8789), file references and the expected SHA-256 leaf-certificate fingerprint. Public and wildcard binds are rejected. A VPN bind does not confer source authorization: the existing CIDR allow list still applies. DNS configuration and reachability remain operator-owned.
+
+The default source allow list is loopback and RFC1918. `100.64.0.0/10` is not in it and never proves tailnet membership. CIDRs are reachability filters, not authorization. The user manages firewall rules, and loading settings or enabling WEB does not change them.
 
 Every file path component is opened through held parent descriptors without following symlinks; parents must be owned by root/the current user and protected against unrelated writers (root-owned sticky temporary directories are allowed). Final files are descriptor-validated for type, owner, link count, permissions and bounded size. Keys must have no group/other permissions. The same validated bytes are passed into TLS; there is no later pathname reopen. Crypto errors are replaced by bounded fixed diagnostics, never PEM content.
 
@@ -66,8 +66,8 @@ The two lock files are persistent empty 0600 files validated through their opene
 
 ## Validation expectations
 
-For future changes, test distinctive private sentinels against actual HTML/JSON response bytes, privacy transitions, allowed four-word/topic disclosure, and browser mutation attempts. Exercise competing real helper processes and stale QML instances, privacy/WEB-off preservation, revocation during other credential mutations, lock rejection/crash release, and write-failure recovery. Preserve credential/revocation, Host/Origin, CSP, malformed-state, bounded-output, and shutdown tests. Exercise absent/stopped/signed-out Tailscale, conflicts, setup failures, repeated enable/disable, direct-backend boundaries, and crash cleanup. For Manual HTTPS, exercise a real TLS handshake with client trust enabled, SAN/key/fingerprint/expiry failures, unsafe file paths and permissions, Host/Origin/source/token checks, absence of HTTP fallback, and QML save/check/mode-switch behavior. Unit/mocked tests do not replace real-device or QML verification; current evidence and limits are recorded in HANDOFF.
+For future changes, test distinctive private sentinels against actual HTML/JSON response bytes, privacy transitions, allowed four-word/topic disclosure, and browser mutation attempts. Exercise competing real helper processes and stale QML instances, privacy/WEB-off preservation, revocation during other credential mutations, lock rejection/crash release, and write-failure recovery. Preserve credential/revocation, Host/Origin, CSP, malformed-state, bounded-output, and shutdown tests. Exercise absent/stopped/signed-out Tailscale, conflicts, setup failures, repeated enable/disable, direct-backend boundaries, and crash cleanup. For Manual HTTPS, exercise a real TLS handshake with client trust enabled, SAN/key/fingerprint/expiry failures, unsafe file paths and permissions, Host/Origin/source/token checks, absence of HTTP fallback, and QML save/check/mode-switch behavior. Unit and mocked tests do not replace real-device or QML verification.
 
-Real-device evidence: the user confirmed Android access using the private-CA/IP-SAN setup after a scoped inbound firewall rule, then confirmed access through the restored Tailscale URL. Local probes alone had missed the inbound firewall block. The temporary CA download service and test firewall rule were removed afterward; this validates the exercised setup, not every client trust store or network. See HANDOFF for automated checks and remaining limits.
+Real-device evidence: the user confirmed Android access using the private-CA/IP-SAN setup after a scoped inbound firewall rule, then confirmed access through the restored Tailscale URL. Local probes alone had missed the inbound firewall block. The temporary CA download service and test firewall rule were removed afterward; this validates the exercised setup, not every client trust store or network.
 
 Reference: [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve) and [HTTPS prerequisites](https://tailscale.com/docs/how-to/set-up-https-certificates).

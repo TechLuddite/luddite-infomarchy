@@ -16,10 +16,11 @@ const snapshot = {
     usage: { claude: { ready: true, name: "Claude", secret: "PRIVATE_USAGE_EXTRA", limits: [{ label: "week", percent: 0.1, secret: "PRIVATE_LIMIT_EXTRA" }] } },
   },
 };
+// Private HTTPS shape: Serve connects from loopback with the tailnet Host.
 const base = {
-  method: "GET", pathname: `/t/${token}/`, host: "127.0.0.1:8787", origin: null,
+  method: "GET", pathname: `/t/${token}/`, host: "desk.example.ts.net:8788", origin: null,
   sourceIp: "127.0.0.1", contentLength: 0, tokens: [{ id: "aaaaaaaa", token, label: "test", createdAt: 1 }],
-  port: 8787, allowedHosts: ["127.0.0.1"], cidrs: parseCidrList([]), snapshot, background: null,
+  cidrs: parseCidrList([]), snapshot, background: null, externalOrigin: "https://desk.example.ts.net:8788",
 };
 
 describe("desktop disclosure boundary", () => {
@@ -67,16 +68,18 @@ describe("private HTTPS boundary", () => {
     expect(handleRequest({ ...proxied, pathname: "/t/" + "b".repeat(48) + "/" }).status).toBe(404);
     for (const sourceIp of ["100.100.1.2", "192.168.1.2", "8.8.8.8"])
       expect(handleRequest({ ...proxied, sourceIp }).status).toBe(403);
-    for (const host of [base.host, "evil.ts.net:8788", "desk.example.ts.net", "desk.example.ts.net:443"])
+    for (const host of ["127.0.0.1:8787", "evil.ts.net:8788", "desk.example.ts.net", "desk.example.ts.net:443"])
       expect(handleRequest({ ...proxied, host }).status).toBe(403);
     for (const bad of ["http://desk.example.ts.net:8788", "https://evil.ts.net:8788", origin + "/", "null"])
       expect(handleRequest({ ...proxied, origin: bad }).status).toBe(403);
     expect(handleRequest({ ...proxied, externalOrigin: "https://evil.example:8788" }).status).toBe(403);
     expect(handleRequest({ ...proxied, method: "POST", pathname: base.pathname + "prefs", contentType: "application/json", body: "{}" }).status).toBe(403);
   });
-  test("LAN cannot opt itself into the HTTPS origin", () => {
-    expect(handleRequest({ ...base, host: proxied.host }).status).toBe(403);
-    expect(handleRequest({ ...base, origin }).status).toBe(403);
+  test("a request without an HTTPS origin is refused, so no plain HTTP path exists", () => {
+    for (const externalOrigin of [undefined, "", "http://desk.example.ts.net:8788", "http://192.168.1.20:8787"]) {
+      expect(handleRequest({ ...base, externalOrigin }).status).toBe(403);
+      expect(handleRequest({ ...base, externalOrigin, host: "192.168.1.20:8787", sourceIp: "192.168.1.60" }).status).toBe(403);
+    }
     expect(tailOrigin("desk.example.ts.net.")).toBe(origin);
     for (const name of ["evil.example", "desk.ts.net.evil.example", "-bad.ts.net", "desk.ts.net/path", "desk.ts.net@evil"])
       expect(tailOrigin(name)).toBe("");

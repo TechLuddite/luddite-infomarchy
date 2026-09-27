@@ -25,7 +25,7 @@ function validPatch(patch: any): boolean {
     if (BOOLS.includes(key)) return typeof value === "boolean";
     if (STRINGS.includes(key)) return typeof value === "string" && value.length <= 2048;
     if (ORDERS.includes(key)) return Array.isArray(value) && value.length <= 16 && value.every(v => typeof v === "string" && /^[a-zA-Z]+$/.test(v));
-    if (key === "webAccessMode") return value === "lan" || value === "tailscale" || value === "manual";
+    if (key === "webAccessMode") return value === "tailscale" || value === "manual";
     if (key === "quietStartHour" || key === "quietEndHour") return Number.isInteger(value) && value >= 0 && value <= 23;
     if (key === "sessionQuietMinutes") return Number.isInteger(value) && value >= 0 && value <= 10080;
     if (key === "deskWorkspace") return Number.isInteger(value) && value >= 0 && value <= 999;

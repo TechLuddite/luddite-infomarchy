@@ -93,8 +93,10 @@ Item {
   property bool webReady: false
   property bool webStarting: false
   readonly property bool webFailed: webEnabled && !webReady && !webStarting
-  property bool webModeInvalid: false
-  property string webAccessMode: "lan"
+  // "" until the operator picks one. Only "tailscale" and "manual" exist:
+  // LAN HTTP was removed, and a saved LAN or unknown mode loads as unset.
+  property string webAccessMode: ""
+  readonly property bool webModeUnset: webAccessMode !== "tailscale" && webAccessMode !== "manual"
   property var manualHttps: ({})
   property string webStatusText: ""
   property var webSections: ({})
@@ -145,13 +147,19 @@ Item {
       dashboardVisible = parsed && typeof parsed.dashboardVisible === "boolean" ? parsed.dashboardVisible : true
       privacyMode = !!(parsed && parsed.privacyMode === true)
       privacyUnlockCount = 0
-      // Only a missing mode is a legacy LAN setting. Unknown explicit values
-      // must never turn an intended HTTPS listener into plaintext HTTP.
-      webModeInvalid = !!parsed && Object.prototype.hasOwnProperty.call(parsed, "webAccessMode") && ["lan", "tailscale", "manual"].indexOf(parsed.webAccessMode) < 0
-      webAccessMode = webModeInvalid ? "" : (parsed && parsed.webAccessMode ? parsed.webAccessMode : "lan")
-      if (webModeInvalid) webStatusText = "Unknown saved access mode. Select an access mode before enabling WEB."
+      // LAN HTTP was removed. A saved "lan", a missing mode (which pre-release builds
+      // read as LAN) or any unknown value loads as unset, and WEB stays off
+      // until the operator chooses a mode. Nothing ever switches to another mode.
+      var savedMode = parsed && typeof parsed.webAccessMode === "string" ? parsed.webAccessMode : ""
+      webAccessMode = savedMode === "tailscale" || savedMode === "manual" ? savedMode : ""
       manualHttps = parsed && parsed.manualHttps && typeof parsed.manualHttps === "object" ? parsed.manualHttps : ({})
-      webEnabled = !webModeInvalid && !!(parsed && parsed.webEnabled === true)
+      webEnabled = !webModeUnset && !!(parsed && parsed.webEnabled === true)
+      if (webModeUnset && parsed && parsed.webEnabled === true) {
+        webStatusText = savedMode === "" || savedMode === "lan"
+          ? "LAN HTTP was removed. Choose Private HTTPS or Manual HTTPS, then turn WEB on."
+          : "Unknown saved access mode. Choose Private HTTPS or Manual HTTPS, then turn WEB on."
+        stopStaleWeb()
+      }
       webSections = parsed && parsed.webSections && typeof parsed.webSections === "object" ? parsed.webSections : ({})
       if (webEnabled) Qt.callLater(refreshWebStatus)
       else { webReady = false; webStarting = false }
@@ -179,8 +187,7 @@ Item {
       dashboardVisible = true
       privacyMode = false
       privacyUnlockCount = 0
-      webModeInvalid = false
-      webAccessMode = "lan"
+      webAccessMode = ""
       manualHttps = ({})
       webEnabled = false
       webReady = false
@@ -476,17 +483,16 @@ Item {
     persist({ manualHttps: config })
   }
   function setWebAccessMode(mode) {
-    if ((mode !== "lan" && mode !== "tailscale" && mode !== "manual") || mode === webAccessMode) return
+    if ((mode !== "tailscale" && mode !== "manual") || mode === webAccessMode) return
     webEnabled = false
     webReady = false
     webStarting = false
     webAccessMode = mode
-    webModeInvalid = false
     webStatusText = ""
     persist({ webAccessMode: webAccessMode, webEnabled: false })
   }
   function setWebEnabled(enabled) {
-    if (enabled && webModeInvalid) return
+    if (enabled && webModeUnset) return
     webStarting = !!enabled
     webStatusText = ""
     webEnabled = !!enabled
@@ -495,6 +501,17 @@ Item {
     persist({ webEnabled: webEnabled })
   }
   function toggleWebEnabled() { setWebEnabled(!webEnabled) }
+  // One-shot cleanup for a listener saved on by a build that had LAN HTTP:
+  // save WEB off, and mark web.json not listening so the collector stops
+  // refreshing web-snapshot.json. Idempotent, so both desk instances may run it.
+  function stopStaleWeb() {
+    persist({ webEnabled: false })
+    if (!staleWebDisable.running) staleWebDisable.running = true
+  }
+  Process {
+    id: staleWebDisable
+    command: ["bun", root.webServerPath, "disable"]
+  }
   function retryWebSetup() {
     if (!webFailed || webRetryProc.running) return
     webStatusReader.running = false

@@ -66,7 +66,7 @@ test("unsafe key permissions and symlinks, including parent symlinks, are refuse
 
 const token = "a".repeat(48);
 const request = {method:"GET",pathname:`/t/${token}/`,host:"infomarchy.localhost:8789",origin:null,sourceIp:"127.0.0.1",contentLength:0,
-  tokens:[{id:"aaaaaaaa",token,label:"test",createdAt:1}],port:8789,allowedHosts:[],cidrs:parseCidrList([]),snapshot:{ai:{}},background:null,
+  tokens:[{id:"aaaaaaaa",token,label:"test",createdAt:1}],cidrs:parseCidrList([]),snapshot:{ai:{}},background:null,
   externalOrigin:"https://infomarchy.localhost:8789",manualTls:true};
 test("manual HTTPS retains token, source, exact Host/Origin and privacy mutation boundaries", () => {
   expect(handleRequest(request).status).toBe(200);

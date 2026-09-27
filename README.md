@@ -196,11 +196,12 @@ Web Mode displays sessions, recent tasks, activity, usage, local AI status, and 
 
 | Mode | Reachability | Transport | Default port |
 | --- | --- | --- | --- |
-| **LAN HTTP** | Trusted local IPv4 network; loopback/RFC1918 sources or explicitly allowed CIDRs | Dashboard data and viewer credentials travel unencrypted | 8787 |
 | **PRIVATE HTTPS** | Connected Tailscale devices permitted by your tailnet policy | HTTPS through Tailscale Serve to a loopback backend | 8788 |
 | **MANUAL HTTPS** | A configured private IPv4 interface or loopback, with the source allow list | Direct HTTPS using your existing certificate and private key | 8789 |
 
 The modes are mutually exclusive. Selecting a different mode turns WEB off; enable it again after reviewing the new setup. Private HTTPS supports viewing away from home through Tailscale. Public internet exposure and Funnel are outside the supported setup.
+
+Pre-release builds of Web Mode also offered LAN HTTP. It was removed because it sent the dashboard and the viewer token over the network unencrypted. A saved LAN setting loads with WEB off and no mode selected, and WEB stays off until you choose **PRIVATE HTTPS** or **MANUAL HTTPS**. Nothing switches to another mode on its own.
 
 Each viewer link contains a bearer token: someone with the link and network access can use it. **COPY URL** and **SHOW QR** deliberately reveal the selected token's address only after the listener is ready. Routine startup and status checks do not print token links. Keep links and QR images out of public screenshots, logs, commits, and chat. Tokens are individually revocable; turning WEB off stops access but keeps them for the next start.
 
@@ -210,28 +211,13 @@ The browser shows **PRIVACY ON/OFF · controlled on desktop**. Use the desktop p
 
 With privacy on, the server omits WAN/LAN addresses, Wi-Fi SSID, and user/host identity, shortens home mounts, and sends recent prompts only through their first four words plus the mask. Full values are absent from the HTML and JSON, including hidden elements. Session topics, project names, and prompts of four words or fewer stay visible. GitHub login remains excluded at either setting. The JSON view also excludes desktop action arguments, session working directories, previews, and extra provider fields.
 
-Turning desktop privacy off lets connected viewers receive the permitted full values. Changes apply to subsequent responses, normally at the next successful five-second refresh; previously received or saved data cannot be retracted, and a disconnected page can retain its old content. Privacy does not encrypt LAN HTTP traffic. Desktop source data and full-text **COPY EXCERPT** are preserved.
+Turning desktop privacy off lets connected viewers receive the permitted full values. Changes apply to subsequent responses, normally at the next successful five-second refresh; previously received or saved data cannot be retracted, and a disconnected page can retain its old content. Desktop source data and full-text **COPY EXCERPT** are preserved.
 
 ## Set up Web Mode
 
 Install and enable Infomarchy first using [Install](#install). Open the desk with **SUPER+D**, then **SETTINGS**. Choose the desktop privacy setting you want before sharing a viewer link.
 
 Web helpers require Bun, `flock` (util-linux) and `timeout` (coreutils). **SHOW QR** uses `qrencode`; **COPY URL** uses `wl-copy` from `wl-clipboard`. On Omarchy/Arch, install the optional viewer tools with `sudo pacman -S --needed qrencode wl-clipboard`. Tailscale process cleanup requires Python 3; the optional CA recipe requires OpenSSL, and its download helper uses Python 3.
-
-### LAN HTTP: on your trusted local network
-
-1. Connect the desktop and viewing device to a local network you control and trust. Guest Wi-Fi or client isolation can prevent devices from reaching one another.
-2. Select **LAN HTTP** in settings. Click **WEB OFF** to start the listener and wait for **WEB ON**.
-3. If your desktop firewall blocks incoming connections, allow TCP port **8787** from your actual trusted subnet. Infomarchy does not edit firewall rules. For example, if you use UFW and your subnet is `192.168.1.0/24`, run:
-
-   ```bash
-   sudo ufw allow from 192.168.1.0/24 to any port 8787 proto tcp
-   ```
-
-   Substitute your own subnet; do not use a broad internet-facing rule or router port forwarding. The firewall and Infomarchy's source allow list are separate checks. Loopback and RFC1918 private IPv4 sources are allowed by default. Add another CIDR in settings only when you intend to allow that network, then restart WEB. The Tailscale CGNAT range is not allowed by default, and an allowed source range is not proof of identity.
-4. Follow [Open the page and manage viewers](#open-the-page-and-manage-viewers). The address is HTTP, so a browser may label the connection insecure; this mode does not provide TLS.
-
-If the page cannot connect, confirm **WEB ON**, the current copied address, the desktop firewall, and Wi-Fi isolation. If access is denied, check the viewer's source network against the allow list and use a current, unrevoked viewer link.
 
 ### Private HTTPS: through Tailscale
 
@@ -248,9 +234,9 @@ If the page cannot connect, confirm **WEB ON**, the current copied address, the 
 5. **Recover directly if setup fails.** Read the message beside **WEB FAILED**, fix the reported prerequisite, and click **RETRY SETUP**. For example, if HTTPS certificates were disabled, enable them in the admin console and retry. **CHECK PREREQUISITES** only checks; it does not restart failed setup. There is no need to flip WEB off and on.
 6. **Open the page** using the selected viewer's **COPY URL** or **SHOW QR**, as described below. Keep Tailscale connected on both devices. Use the copied HTTPS hostname and port, including the viewer credential; a bare hostname or IP address is not the dashboard link.
 
-Infomarchy owns a foreground Serve mapping on **8788**, forwarding to its backend on **127.0.0.1:8787**. There is no need to open backend port 8787 on the LAN for this mode or manually create a background Serve mapping. If 8788 already belongs to another Serve or Funnel mapping, setup refuses to overwrite it. Resolve that specific conflict yourself; unrelated services are preserved. Turning WEB off, stopping the listener, or removing the plugin removes its owned mapping while leaving Tailscale and unrelated services running.
+Infomarchy owns a foreground Serve mapping on **8788**, forwarding to its backend on **127.0.0.1:8787**. The backend listens on loopback only, so there is no firewall rule to open for it and no background Serve mapping to create. If 8788 already belongs to another Serve or Funnel mapping, setup refuses to overwrite it. Resolve that specific conflict yourself; unrelated services are preserved. Turning WEB off, stopping the listener, or removing the plugin removes its owned mapping while leaving Tailscale and unrelated services running.
 
-If setup reports local permissions, make sure the user running Omarchy is allowed to manage Serve; the Omarchy installer configures operator access. If it reports a missing/stopped/signed-out client or an unsupported CLI, correct that condition and retry. For more detail, **SETUP GUIDE** opens [Tailscale Serve documentation](https://tailscale.com/docs/features/tailscale-serve). Failed HTTPS setup never falls back to LAN HTTP or public access.
+If setup reports local permissions, make sure the user running Omarchy is allowed to manage Serve; the Omarchy installer configures operator access. If it reports a missing/stopped/signed-out client or an unsupported CLI, correct that condition and retry. For more detail, **SETUP GUIDE** opens [Tailscale Serve documentation](https://tailscale.com/docs/features/tailscale-serve). Failed HTTPS setup never falls back to plain HTTP or public access.
 
 ### Manual HTTPS: bring an existing certificate
 
@@ -358,7 +344,7 @@ You can also deliberately copy the default viewer's address from the desktop wit
 omarchy-shell infomarchy copyWebUrl
 ```
 
-To stop sharing, turn **WEB ON** off. Tokens survive stopping, restarting the shell, and switching modes. After changing modes, copy a fresh address because the hostname/protocol changes even though the token remains valid.
+To stop sharing, turn **WEB ON** off. Tokens survive stopping, restarting the shell, and switching modes. After changing modes, copy a fresh address because the hostname and port change even though the token remains valid.
 
 Settings persist in `$XDG_STATE_HOME/infomarchy/` (normally `~/.local/state/infomarchy/`): `dashboard.json` holds desktop privacy, web layout/access preferences and Manual HTTPS file references/fingerprint, `web.json` holds private viewer credentials with mode 0600, and `web-status.json` holds noncredential runtime status. Preference changes and viewer-token updates are serialized so overlapping edits preserve desktop privacy and token revocation. Empty `dashboard.lock` and `web-config.lock` files also remain in the state directory. A failed desktop settings save displays an error and reloads the saved settings; retry the change once the problem is resolved. Do not publish credential files or hand-edit them to recover a failed setup; use the reported guidance and **RETRY SETUP**.
 

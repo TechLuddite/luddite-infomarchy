@@ -1,13 +1,15 @@
 #!/usr/bin/env bun
-// LAN Web Mode: HTML of the latest collector snapshot.
-// Off until toggled. Token in the path, source IP allowlist, Host check,
-// HTML-escaped fields. GET/HEAD for the page. POST /prefs for web section
-// visibility and narrow-layout order. Token never travels in argv.
+// Web Mode: HTML of the latest collector snapshot, served only over HTTPS.
+// Private HTTPS is a loopback backend behind an owned Tailscale Serve mapping.
+// Manual HTTPS serves an existing, fingerprint-pinned certificate directly.
+// Off until toggled. Token in the path, exact Host and Origin, source allow
+// list for Manual HTTPS, HTML-escaped fields. GET/HEAD for the page. POST
+// /prefs for web section visibility and narrow-layout order. The token never
+// travels in argv. Plain HTTP on the LAN was removed and is refused.
 
 import { loadManualTls, readManualPrefs, validManualOrigin } from "./web-manual";
 import { withStateLock } from "./state-lock";
 import { patchDashboard } from "./dashboard-state";
-import { networkInterfaces } from "os";
 import { randomBytes, timingSafeEqual } from "crypto";
 import { isIP } from "net";
 import { dirname, join } from "path";
@@ -31,7 +33,8 @@ const CONFIG_NAME = "web.json";
 const SNAPSHOT_NAME = "web-snapshot.json";
 const MAX_SNAPSHOT_BYTES = 960 * 1024;
 const TOKEN_BYTES = 24;
-const DEFAULT_PORT = 8787;
+// Loopback-only backend behind Tailscale Serve. Never bound to a LAN address.
+const SERVE_BACKEND_PORT = 8787;
 const MAX_REQUEST_BYTES = 8192;
 const RATE_WINDOW_MS = 60_000;
 const RATE_MAX = 60;
@@ -101,35 +104,6 @@ export function tokensEqual(got: string, expected: string): boolean {
 
 export function newToken(): string {
   return randomBytes(TOKEN_BYTES).toString("hex");
-}
-
-export function rankLanAddresses(nets: ReturnType<typeof networkInterfaces>, routes: string): string[] {
-  const defaults = routes.split("\n").map(line => line.trim().split(/\s+/))
-    .filter(f => f[1] === "00000000" && f[7] === "00000000" && (parseInt(f[3], 16) & 1) && /^\d+$/.test(f[6]))
-    .sort((a, b) => Number(a[6]) - Number(b[6])).map(f => f[0]);
-  const names = Object.keys(nets).sort((a, b) => {
-    const rank = (n: string) => { const i = defaults.indexOf(n); return i < 0 ? defaults.length : i; };
-    return rank(a) - rank(b) || a.localeCompare(b);
-  });
-  const found: string[] = [];
-  for (const name of names) {
-    // Virtual-only networks are not an automatic phone-view advertisement.
-    if (!defaults.includes(name) && /^(docker|br-|virbr|veth|tailscale|tun|tap|wg)/.test(name)) continue;
-    for (const addr of nets[name] || []) {
-      if (addr.internal || addr.family !== "IPv4") continue;
-      const ip = canonicalIp(addr.address);
-      if (isIP(ip) === 4 && parseCidrList([]).some(cidr => cidr.text !== "127.0.0.0/8" && ipInCidr(ip, cidr)) && !found.includes(ip)) found.push(ip);
-    }
-  }
-  return found;
-}
-
-export function localPrivateIPv4(): string[] {
-  return rankLanAddresses(networkInterfaces(), readRegularFileLimited("/proc/net/route", 65536) || "");
-}
-
-export function advertisedBind(preferred: string[]): string {
-  return preferred[0] || "127.0.0.1";
 }
 
 export const MAX_TOKENS = 8;
@@ -237,7 +211,7 @@ export function loadConfig(): WebConfig | null {
   const parsed = parseJsonBounded(raw, CONFIG_MAX_BYTES, 12);
   if (!parsed || typeof parsed !== "object") return null;
   const tokens = parseTokens(parsed as Record<string, unknown>);
-  const port = validPort(parsed.port) || DEFAULT_PORT;
+  const port = validPort(parsed.port) || SERVE_BACKEND_PORT;
   const extraCidrs = Array.isArray(parsed.extraCidrs)
     ? parsed.extraCidrs.map((item: unknown) => String(item)).filter((item: string) => !!parseCidr(item)).slice(0, MAX_EXTRA_CIDRS)
     : [];
@@ -280,7 +254,7 @@ function ensureConfigLocked(extraCidrs: string[] = [], listening?: boolean): Web
   catch (error: any) { if (error.code !== "ENOENT") throw error; }
   const created: WebConfig = {
     tokens: [makeToken("default")],
-    port: DEFAULT_PORT,
+    port: SERVE_BACKEND_PORT,
     extraCidrs: extraCidrs.filter(item => !!parseCidr(item)).slice(0, MAX_EXTRA_CIDRS),
     listening: listening !== false,
   };
@@ -443,7 +417,7 @@ export function parseAsciiQr(text: string): string[] {
 }
 
 export async function qrMatrixForUrl(url: string, executable = "/usr/bin/qrencode"): Promise<string[]> {
-  if (!/^https?:\/\/[0-9a-zA-Z.:[\]-]+\/t\/[0-9a-f]{48}\/$/.test(url)) return [];
+  if (!/^https:\/\/[0-9a-zA-Z.:[\]-]+\/t\/[0-9a-f]{48}\/$/.test(url)) return [];
   let proc: ReturnType<typeof Bun.spawn>;
   try { proc = Bun.spawn([executable, "-t", "ASCII", "-m", "2", "-o", "-"], {
     stdin: new Blob([url]), stdout: "pipe", stderr: "ignore",
@@ -485,31 +459,6 @@ function reply(status: number, body: string | Uint8Array, type = "text/html; cha
   return { status, headers: { ...SECURITY_HEADERS, "Content-Type": type, "Content-Security-Policy": contentSecurityPolicy(nonce) }, body };
 }
 
-export function hostAllowed(hostHeader: string, allowedHosts: string[], port: number): boolean {
-  const raw = String(hostHeader || "").trim().toLowerCase();
-  if (!raw || raw.length > 128 || /[\s/]/.test(raw)) return false;
-  const host = raw.replace(/:\d+$/, "");
-  if (!allowedHosts.includes(host)) return false;
-  const portMatch = raw.match(/:(\d+)$/);
-  if ((portMatch ? Number(portMatch[1]) : 80) !== port) return false;
-  return true;
-}
-
-export function originAllowed(origin: string | null, allowedHosts: string[], port: number): boolean {
-  if (!origin) return true;
-  try {
-    const url = new URL(origin);
-    if (url.protocol !== "http:") return false;
-    if (url.username || url.password || url.search || url.hash || url.pathname !== "/") return false;
-    const host = url.hostname.toLowerCase();
-    if (!allowedHosts.includes(host)) return false;
-    const originPort = url.port ? Number(url.port) : 80;
-    return originPort === port || (originPort === 80 && port === 80);
-  } catch {
-    return false;
-  }
-}
-
 export function jsonContentType(value: string): boolean {
   return String(value || "").split(";")[0].trim().toLowerCase() === "application/json";
 }
@@ -543,8 +492,6 @@ export function handleRequest(input: {
   sourceIp: string;
   contentLength: number;
   tokens: WebToken[];
-  port: number;
-  allowedHosts: string[];
   cidrs: Cidr[];
   snapshot: any | null;
   prefs?: DashPrefs;
@@ -557,20 +504,17 @@ export function handleRequest(input: {
 }): Reply {
   const method = String(input.method || "").toUpperCase();
   if (input.contentLength > MAX_REQUEST_BYTES) return reply(413, "too large");
-  if (input.externalOrigin) {
-    // The actual TCP peer must be loopback. Forwarded/identity headers confer
-    // no authority; the external origin is discovered locally, never from HTTP.
-    let external: URL;
-    try { external = new URL(input.externalOrigin); } catch { return reply(403, "forbidden"); }
-    const reachable = input.manualTls
-      ? validManualOrigin(input.externalOrigin) && ipAllowed(input.sourceIp, input.cidrs)
-      : tailOrigin(external.hostname) === input.externalOrigin && canonicalIp(input.sourceIp) === "127.0.0.1";
-    if (!reachable || input.host.toLowerCase() !== external.host || (input.origin !== null && input.origin !== input.externalOrigin)) return reply(403, "forbidden");
-  } else {
-    if (!ipAllowed(input.sourceIp, input.cidrs)) return reply(403, "forbidden");
-    if (!hostAllowed(input.host, input.allowedHosts, input.port)) return reply(403, "forbidden");
-    if (!originAllowed(input.origin, input.allowedHosts, input.port)) return reply(403, "forbidden");
-  }
+  // Every request is judged against an HTTPS origin discovered locally, never
+  // from HTTP. Without one there is nothing to serve: no plain HTTP path exists.
+  if (!input.externalOrigin) return reply(403, "forbidden");
+  let external: URL;
+  try { external = new URL(input.externalOrigin); } catch { return reply(403, "forbidden"); }
+  // Private HTTPS: the actual TCP peer must be loopback, and forwarded or
+  // identity headers confer no authority. Manual HTTPS: the source allow list.
+  const reachable = input.manualTls
+    ? validManualOrigin(input.externalOrigin) && ipAllowed(input.sourceIp, input.cidrs)
+    : tailOrigin(external.hostname) === input.externalOrigin && canonicalIp(input.sourceIp) === "127.0.0.1";
+  if (!reachable || input.host.toLowerCase() !== external.host || (input.origin !== null && input.origin !== input.externalOrigin)) return reply(403, "forbidden");
   if (method !== "GET" && method !== "HEAD" && method !== "POST") return reply(405, "method not allowed");
 
   const path = String(input.pathname || "");
@@ -621,11 +565,6 @@ export function loadSnapshot(): any | null {
   if (!raw) return null;
   const parsed = parseJsonBounded(raw, MAX_SNAPSHOT_BYTES, 24);
   return parsed && typeof parsed === "object" ? parsed : null;
-}
-
-export function publicUrl(config: WebConfig, bind: string, token?: string): string {
-  const value = validToken(token) || config.tokens[0]?.token || "";
-  return `http://${bind}:${config.port}/t/${value}/`;
 }
 
 export function tokenById(config: WebConfig, id: string): WebToken | null {
@@ -682,20 +621,31 @@ export function webStatus(): { running: boolean; ready: boolean; mode: string; o
   const running = s && Number.isInteger(s.pid) && s.pid > 1 && s.start && processStart(s.pid) === s.start;
   const ready = !!(running && s.ready === true && loadConfig()?.listening);
   const origin = String(s?.origin || "");
-  const valid = /^http:\/\/(?:[0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]{4,5}$/.test(origin) || (() => {
-    try { return s?.mode === "manual" ? validManualOrigin(origin) : tailOrigin(new URL(origin).hostname) === origin; } catch { return false; }
+  const mode = s?.mode === "manual" || s?.mode === "tailscale" ? s.mode : "";
+  // Only an HTTPS origin of the recorded mode can report ready.
+  const valid = (() => {
+    try { return mode === "manual" ? validManualOrigin(origin) : mode === "tailscale" && tailOrigin(new URL(origin).hostname) === origin; } catch { return false; }
   })();
-  return { running: !!running, ready: ready && valid, mode: s?.mode === "manual" ? "manual" : s?.mode === "tailscale" ? "tailscale" : "lan", origin: ready && valid ? origin : "",
+  return { running: !!running, ready: ready && valid, mode, origin: ready && valid ? origin : "",
     message: String(s?.message || (ready ? "" : "Listener is not running. Choose RETRY SETUP to try again.")).replace(/[<>\u0000-\u001f]/g, " ").slice(0, 400) };
 }
 
+export const ACCESS_MODES = ["tailscale", "manual"];
+export const LAN_REMOVED_MESSAGE = "LAN HTTP was removed. Choose Private HTTPS or Manual HTTPS in SETTINGS.";
+
+// A missing, legacy "lan" or unknown mode starts nothing. It never falls back
+// to another mode, and it runs before any credential file is created.
+export function refuseAccessMode(mode: unknown): boolean {
+  if (typeof mode === "string" && ACCESS_MODES.includes(mode)) return false;
+  writeWebStatus(false, "", "", LAN_REMOVED_MESSAGE);
+  console.log(JSON.stringify({ ok: false, message: LAN_REMOVED_MESSAGE }));
+  return true;
+}
+
 export async function serve(mode = process.argv[3], integration = { inspectTailscale, startServe, serveMappingReady }) {
-  if (mode !== undefined && !["lan", "tailscale", "manual"].includes(mode)) throw new Error("Unknown Web Mode access mode");
-  mode = mode || "lan";
+  if (!ACCESS_MODES.includes(mode)) throw new Error("Unknown Web Mode access mode");
   const extra = process.argv.filter(arg => parseCidr(arg)).slice(0, MAX_EXTRA_CIDRS);
   const config = ensureConfig(extra, true);
-  const bind = advertisedBind(localPrivateIPv4());
-  const allowedHosts = [...localPrivateIPv4(), "127.0.0.1"];
   const requestedPort = process.env.INFOMARCHY_WEB_PORT === "0" ? 0 : (validPort(process.env.INFOMARCHY_WEB_PORT) || config.port);
   const tailscale = mode === "tailscale";
   writeWebStatus(false, mode, "", "Starting listener…");
@@ -722,7 +672,7 @@ export async function serve(mode = process.argv[3], integration = { inspectTails
     externalOrigin = status.origin;
   }
   const server = Bun.serve({
-    hostname: manual ? manual.config.bind : tailscale ? "127.0.0.1" : "0.0.0.0",
+    hostname: manual ? manual.config.bind : "127.0.0.1",
     port: manual ? manual.config.port : requestedPort,
     ...(manual ? { tls: manual.tls } : {}),
     maxRequestBodySize: MAX_REQUEST_BYTES,
@@ -747,8 +697,6 @@ export async function serve(mode = process.argv[3], integration = { inspectTails
         sourceIp,
         contentLength: Number(req.headers.get("content-length") || 0),
         tokens: live.tokens,
-        port: srv.port,
-        allowedHosts,
         externalOrigin,
         manualTls: !!manual,
         cidrs: parseCidrList(live.extraCidrs),
@@ -785,7 +733,7 @@ export async function serve(mode = process.argv[3], integration = { inspectTails
     }
     if (!ready) {
       stop();
-      const message = "Serve setup failed. Enable MagicDNS and HTTPS certificates in the Tailscale admin console; check local Serve permissions, then retry. No LAN fallback was started.";
+      const message = "Serve setup failed. Enable MagicDNS and HTTPS certificates in the Tailscale admin console; check local Serve permissions, then retry. No other listener was started.";
       writeWebStatus(false, "tailscale", "", message);
       console.log(JSON.stringify({ ok: false, message }));
       return;
@@ -795,7 +743,7 @@ export async function serve(mode = process.argv[3], integration = { inspectTails
       writeWebStatus(false, "tailscale", "", "Tailscale Serve stopped. Check the connection and choose RETRY SETUP.");
     });
   }
-  writeWebStatus(true, mode, externalOrigin || `http://${bind}:${server.port}`, "");
+  writeWebStatus(true, mode, externalOrigin, "");
   console.log(JSON.stringify({ ok: true, ready: true, port: server.port, mode }));
 }
 
@@ -880,9 +828,10 @@ if (import.meta.main) {
     await Bun.write(Bun.stdout, JSON.stringify({ ok: rows.length > 0, size: rows.length, rows }) + "\n");
     process.exit(rows.length ? 0 : 1);
   }
+  if (refuseAccessMode(process.argv[3])) process.exit(1);
   try { await serve(); }
   catch {
-    writeWebStatus(false, ["tailscale", "manual"].includes(process.argv[3]) ? process.argv[3] : "lan", "", "Listener setup failed. Check port availability and state-file permissions, then retry.");
+    writeWebStatus(false, process.argv[3], "", "Listener setup failed. Check port availability and state-file permissions, then retry.");
     console.log(JSON.stringify({ ok: false, message: "Listener setup failed. Check port availability and state-file permissions, then retry." }));
     process.exit(1);
   }

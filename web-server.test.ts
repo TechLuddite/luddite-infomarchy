@@ -1,10 +1,10 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
-  DEFAULT_CIDRS, displayMount, escapeHtml, fmtBytes, fmtRate, handleRequest, hostAllowed, ipAllowed, maskSnapshot,
-  originAllowed, parseCidr, parseCidrList, parseAsciiQr, parsePrefsPatch, tokensEqual, newToken, ipv4ToInt, wifiLabel,
+  DEFAULT_CIDRS, displayMount, escapeHtml, fmtBytes, fmtRate, handleRequest, ipAllowed, maskSnapshot,
+  parseCidr, parseCidrList, parseAsciiQr, parsePrefsPatch, tokensEqual, newToken, ipv4ToInt, wifiLabel,
 } from "./web-server";
 import { LIVE_SCRIPT, obfuscatePrompt, parseDashPrefs, parseThemeColors, providerColorHex, renderPage, renderUsageSection, webSectionEnabled } from "./web-page";
 
@@ -14,16 +14,19 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
 const token = "a".repeat(48);
 const cidrs = parseCidrList([]);
 const tokens = [{ id: "aaaaaaaa", token, label: "default", createdAt: 1 }];
+// Manual HTTPS shape: a phone on the private LAN reaching the desk's own
+// certificate. LAN HTTP was removed, so every request carries an HTTPS origin.
+const manualOrigin = "https://192.168.1.20:8789";
 const base = {
   method: "GET",
   pathname: `/t/${token}/`,
-  host: "172.20.20.142:8787",
+  host: "192.168.1.20:8789",
   origin: null as string | null,
   sourceIp: "172.20.20.192",
   contentLength: 0,
   tokens,
-  port: 8787,
-  allowedHosts: ["172.20.20.142", "127.0.0.1"],
+  externalOrigin: manualOrigin,
+  manualTls: true,
   cidrs,
   prefs: parseDashPrefs({ privacyMode: true }),
   theme: parseThemeColors('background = "#1f1f28"\nforeground = "#dcd7ba"\n'),
@@ -58,10 +61,9 @@ describe("web mode access control", () => {
   test("rejects WAN IPs, bad Host, cross-origin, POST, and traversal", () => {
     expect(handleRequest({ ...base, sourceIp: "8.8.8.8" }).status).toBe(403);
     expect(handleRequest({ ...base, host: "evil.example" }).status).toBe(403);
-    expect(hostAllowed("172.20.20.142:8787", base.allowedHosts, 8787)).toBe(true);
-    expect(hostAllowed("evil.example", base.allowedHosts, 8787)).toBe(false);
-    expect(originAllowed("http://evil.example", base.allowedHosts, 8787)).toBe(false);
-    expect(originAllowed(null, base.allowedHosts, 8787)).toBe(true);
+    expect(handleRequest({ ...base, origin: "https://evil.example" }).status).toBe(403);
+    expect(handleRequest({ ...base, origin: "http://192.168.1.20:8789" }).status).toBe(403);
+    expect(handleRequest({ ...base, origin: manualOrigin }).status).toBe(200);
     expect(handleRequest({ ...base, method: "PUT" }).status).toBe(405);
     expect(handleRequest({ ...base, pathname: `/t/${token}/../../etc/passwd` }).status).toBe(404);
     expect(handleRequest({ ...base, pathname: `/t/${token}/%2e%2e/` }).status).toBe(404);
@@ -310,8 +312,8 @@ describe("web mode rendering", () => {
   test("prefs POST is origin and JSON bounded", () => {
     const prefsPath = `/t/${token}/prefs`;
     expect(handleRequest({ ...base, method: "POST", pathname: prefsPath }).status).toBe(403);
-    expect(handleRequest({ ...base, method: "POST", pathname: prefsPath, origin: "http://172.20.20.142:8787", contentType: "text/plain", body: "{}" }).status).toBe(415);
-    expect(handleRequest({ ...base, method: "POST", pathname: prefsPath, origin: "http://172.20.20.142:8787", contentType: "application/json", body: "{" }).status).toBe(400);
+    expect(handleRequest({ ...base, method: "POST", pathname: prefsPath, origin: manualOrigin, contentType: "text/plain", body: "{}" }).status).toBe(415);
+    expect(handleRequest({ ...base, method: "POST", pathname: prefsPath, origin: manualOrigin, contentType: "application/json", body: "{" }).status).toBe(400);
     expect(parsePrefsPatch(JSON.stringify({ webSections: { recent: false, media: true, __proto__: { x: 1 } } }))).toEqual({ webSections: { recent: false } });
     expect(parsePrefsPatch(JSON.stringify({ webNarrowOrder: ["machine", "sessions", "nope"] }))?.webNarrowOrder?.[0]).toBe("machine");
     expect(parsePrefsPatch("{}")).toBeNull();
@@ -328,7 +330,19 @@ describe("live listen", () => {
     fixture.ai.sessions[0] = { ...fixture.ai.sessions[0], cwd: "/home/PRIVATE_CWD", prompt: "PRIVATE_PROMPT_SENTINEL" } as any;
     writeFileSync(join(dir, "web-snapshot.json"), JSON.stringify(fixture));
     writeFileSync(join(dir, "dashboard.json"), JSON.stringify({ privacyMode: true }));
-    const proc = Bun.spawn([process.execPath, join(import.meta.dir, "web-server.ts")], {
+    // Only the external Tailscale service is stubbed. The listener, auth,
+    // privacy filter and prefs writer are the real ones.
+    const origin = "https://desk.example.ts.net:8788";
+    const listener = join(root, "live-listener.ts");
+    writeFileSync(listener, `
+      import { serve } from ${JSON.stringify(join(import.meta.dir, "web-server.ts"))};
+      await serve("tailscale", {
+        inspectTailscale: async () => ({ ok: true, state: "ready", message: "", origin: ${JSON.stringify(origin)} }),
+        startServe: () => Bun.spawn(["/usr/bin/sleep", "60"], { stdout: "ignore", stderr: "ignore" }),
+        serveMappingReady: async () => true,
+      });
+    `);
+    const proc = Bun.spawn([process.execPath, listener], {
       env: { HOME: root, USER: "tester", XDG_STATE_HOME: state, PATH: "/usr/bin:/bin", INFOMARCHY_WEB_PORT: "0" },
       stdout: "pipe", stderr: "ignore",
     });
@@ -339,7 +353,8 @@ describe("live listen", () => {
       expect(status.url).toBeUndefined();
       const config = JSON.parse(readFileSync(join(dir, "web.json"), "utf8"));
       const url = `http://127.0.0.1:${status.port}/t/${config.tokens[0].token}/`;
-      const request = (path = "", init: RequestInit = {}) => fetch(url + path, init);
+      const request = (path = "", init: RequestInit = {}) =>
+        fetch(url + path, { ...init, headers: { Host: "desk.example.ts.net:8788", ...(init.headers || {}) } });
       const page = await request();
       expect(page.status).toBe(200);
       const html = await page.text();
@@ -350,7 +365,7 @@ describe("live listen", () => {
       expect(json.includes("PRIVATE_CWD")).toBe(false);
       expect(json.includes("PRIVATE_PROMPT_SENTINEL")).toBe(false);
       const post = (body: unknown) => request("prefs", { method: "POST", headers: {
-        "content-type": "application/json", Origin: `http://127.0.0.1:${status.port}`,
+        "content-type": "application/json", Origin: origin,
       }, body: JSON.stringify(body) });
       expect((await post({ privacyMode: false, webSections: { recent: false } })).status).toBe(400);
       expect(JSON.parse(readFileSync(join(dir, "dashboard.json"), "utf8")).privacyMode).toBe(true);
@@ -374,5 +389,25 @@ describe("live listen", () => {
       writeFileSync(join(dir, "web.json"), "{malformed");
       expect((await request()).status).toBe(503);
     } finally { proc.kill("SIGTERM"); await proc.exited; }
+  });
+
+  test("a missing, LAN or unknown access mode starts nothing and creates no credential", async () => {
+    for (const args of [[], ["serve"], ["serve", "lan"], ["serve", ""], ["serve", "bogus"]]) {
+      const state = mkdtempSync(join(root, "refused-"));
+      const proc = Bun.spawn([process.execPath, join(import.meta.dir, "web-server.ts"), ...args], {
+        env: { HOME: root, XDG_STATE_HOME: state, PATH: "/usr/bin:/bin", INFOMARCHY_WEB_PORT: "0" },
+        stdout: "pipe", stderr: "ignore",
+      });
+      const out = await new Response(proc.stdout).text();
+      expect(await proc.exited).toBe(1);
+      const result = JSON.parse(out.trim());
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain("LAN HTTP was removed");
+      expect(result.port).toBeUndefined();
+      expect(existsSync(join(state, "infomarchy", "web.json"))).toBe(false);
+      const status = JSON.parse(readFileSync(join(state, "infomarchy", "web-status.json"), "utf8"));
+      expect(status.ready).toBe(false);
+      expect(status.mode).toBe("");
+    }
   });
 });

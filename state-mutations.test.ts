@@ -125,7 +125,7 @@ test("field patches retain other preferences, preserve pin pruning, and keep an 
 
 for (const failWrite of [false, true]) test.skipIf(!existsSync("/usr/bin/quickshell"))(failWrite ? "actual QML reports failed writes and reloads saved settings" : "actual QML stale instances preserve privacy, WEB off and access mode while saving layout", async () => {
   const dir = mkdtempSync(join(root, "qml-")), state = join(dir, "infomarchy");
-  expect(patchDashboard(state, { privacyMode: false, webEnabled: true })).toBe(true);
+  expect(patchDashboard(state, { privacyMode: false, webAccessMode: "manual", webEnabled: true })).toBe(true);
   if (failWrite) { rmSync(join(state, "dashboard.lock")); symlinkSync(join(state, "dashboard.json"), join(state, "dashboard.lock")); }
   writeFileSync(join(dir, "InfoSettings.qml"), readFileSync(join(import.meta.dir, "InfoSettings.qml")));
   symlinkSync(join(import.meta.dir, "dashboard-state.ts"), join(dir, "dashboard-state.ts"));
