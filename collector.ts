@@ -2987,13 +2987,25 @@ function addTokenUsage(into: TokenUsage, add: TokenUsage): void {
 function tokenTotal(u: TokenUsage): number {
   return u.inputTokens + u.outputTokens + u.cacheReadInputTokens + u.cacheCreationInputTokens;
 }
+// Burn leaves out cache reads, the rule opencodeUsageFromRows states.
+function tokenBurn(u: TokenUsage): number {
+  return u.inputTokens + u.outputTokens + u.cacheCreationInputTokens;
+}
 export type GrokUsageSnap = { ts: number; usage: TokenUsage; models: Record<string, TokenUsage> };
+// Grok's usage block overlaps: on every local updates.jsonl line checked,
+// totalTokens is inputTokens + outputTokens, cachedReadTokens is part of
+// inputTokens and reasoningTokens is no larger than outputTokens. So cached
+// reads come out of input, and output is taken as it is. That reasoning sits
+// inside output is inferred from the total, xAI does not document it.
+// cacheCreationTokens has only been seen as 0, so it stays separate, as
+// Claude reports it.
 function grokTokenFields(raw: any): TokenUsage | null {
   if (!raw || typeof raw !== "object") return null;
+  const cacheRead = nToken(raw.cachedReadTokens);
   const usage: TokenUsage = {
-    inputTokens: nToken(raw.inputTokens),
-    outputTokens: nToken(raw.outputTokens) + nToken(raw.reasoningTokens),
-    cacheReadInputTokens: nToken(raw.cachedReadTokens),
+    inputTokens: Math.max(0, nToken(raw.inputTokens) - cacheRead),
+    outputTokens: nToken(raw.outputTokens),
+    cacheReadInputTokens: cacheRead,
     cacheCreationInputTokens: nToken(raw.cacheCreationTokens),
   };
   return tokenTotal(usage) > 0 ? usage : null;
@@ -3046,7 +3058,7 @@ export function foldGrokSessionSnaps(snaps: GrokUsageSnap[]): { last: GrokUsageS
   const ordered = snaps.slice().sort((a, b) => a.ts - b.ts);
   let previous = 0;
   for (const snap of ordered) {
-    const total = tokenTotal(snap.usage);
+    const total = tokenBurn(snap.usage);
     const delta = total - previous;
     if (delta > 0 && snap.ts) {
       const day = localDayKey(snap.ts);
@@ -3094,7 +3106,8 @@ function grokLocalUsage(): any | null {
     try { const state = lstatSync(path); return `${path}:${state.size}:${Math.round(state.mtimeMs)}`; } catch { return path; }
   }).join("|");
   // Billing is attached after selecting the local record, including cache hits.
-  const hashed = String(Bun.hash(identity + "|" + localDayKey(now)));
+  // The version token drops records cached before burn left out cache reads.
+  const hashed = String(Bun.hash("grok-usage-v2|" + identity + "|" + localDayKey(now)));
   const cached = prev.grokLocalUsage && prev.grokLocalUsage.identity === hashed ? prev.grokLocalUsage : null;
   if (!FORCE_REFRESH && cached?.record) { currentGrokUsageCache = cached; return cached.record; }
   const modelUsage: Record<string, TokenUsage> = {};

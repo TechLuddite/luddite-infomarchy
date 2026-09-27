@@ -756,6 +756,31 @@ describe("history collection", () => {
     expect(snap.ai.usage.grok.todayTotalTokens).toBe(290);
     rmSync(root, { recursive: true, force: true });
   });
+
+  test("a Grok record cached before burn left out cache reads is not reused", async () => {
+    const root = join(testRoot, "grok-usage-salt");
+    const session = join(root, ".grok", "sessions", "proj", "session-bbbb");
+    const state = join(root, "state", "infomarchy");
+    mkdirSync(session, { recursive: true });
+    mkdirSync(state, { recursive: true, mode: 0o700 });
+    const updates = join(session, "updates.jsonl");
+    writeFileSync(updates, JSON.stringify({ timestamp: Date.now(), params: { update: { usage: {
+      inputTokens: 2_557_090, outputTokens: 2_322, totalTokens: 2_559_412, cachedReadTokens: 2_549_376, reasoningTokens: 1_701, cacheCreationTokens: 0,
+    } } } }) + "\n");
+    // Plant what the previous identity would have cached for this very file.
+    const file = lstatSync(updates);
+    const day = new Date().toISOString().slice(0, 10);
+    const old = String(Bun.hash(`${updates}:${file.size}:${Math.round(file.mtimeMs)}` + "|" + day));
+    writeFileSync(join(state, "prev-bg.json"), JSON.stringify({ grokLocalUsage: { identity: old, record: { name: "Grok", ready: true, todayTotalTokens: 5_108_824, limits: [] } } }));
+    const proc = Bun.spawn([process.execPath, join(import.meta.dir, "collector.ts")], {
+      env: { TZ: "UTC", HOME: root, USER: "tester", GROK_HOME: join(root, ".grok"), XDG_STATE_HOME: join(root, "state"), PATH: process.env.PATH || "", INFOMARCHY_SKIP_EXTERNAL_IP: "1" },
+      stdout: "pipe", stderr: "pipe",
+    });
+    const snap = decodeFrames(await new Response(proc.stdout).text());
+    expect(await proc.exited).toBe(0);
+    expect(snap.ai.usage.grok.todayTotalTokens).toBe(10_036);
+    rmSync(root, { recursive: true, force: true });
+  });
 });
 
 describe("degrading instead of crashing", () => {
@@ -963,6 +988,24 @@ describe("second-reviewer findings (2026-09-04)", () => {
     expect(folded.daily.get("2026-09-05")).toBe(120);
     expect(folded.daily.get("2026-09-06")).toBe(100);
     expect(grokUsageFromUpdate({ inputTokens: 0, outputTokens: 0 })).toBeNull();
+  });
+
+  test("Grok burn counts cached reads and reasoning once, and leaves cache reads out", () => {
+    // The shape of a real updates.jsonl line: totalTokens is input + output,
+    // cached reads are part of input and reasoning is part of output.
+    const usage = {
+      inputTokens: 2_557_090, outputTokens: 2_322, totalTokens: 2_559_412,
+      cachedReadTokens: 2_549_376, reasoningTokens: 1_701, cacheCreationTokens: 0,
+      modelCalls: 3, apiDurationMs: 9_000, costUsdTicks: 1_000,
+    };
+    const stamp = Date.UTC(2026, 8, 5, 12);
+    const snap = grokUsageFromUpdate({ timestamp: stamp / 1000, method: "_x.ai/session/update", params: {
+      _meta: { agentTimestampMs: stamp, eventId: "e-1" }, sessionId: "01a0aaaa-0000-7000-8000-000000000001",
+      update: { sessionUpdate: "turn_completed", prompt_id: "p-1", stop_reason: "end_turn", elapsed_ms: 12_000,
+        usage: { ...usage, numTurns: 3, modelUsage: { "grok-4.6-build": usage } } },
+    } });
+    expect(snap?.usage).toEqual({ inputTokens: 7_714, outputTokens: 2_322, cacheReadInputTokens: 2_549_376, cacheCreationInputTokens: 0 });
+    expect(foldGrokSessionSnaps([snap!]).daily.get("2026-09-05")).toBe(10_036);
   });
 
   test("usage caches are normalized to displayed fields with hard bounds", () => {
