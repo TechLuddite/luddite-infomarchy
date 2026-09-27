@@ -1,4 +1,4 @@
-import { parseGrokCreditsConfig, grokBillingFromUnifiedLog, grokObservedLimits, grokBillingRefreshDue, GROK_BILLING_REFRESH_MS, forceRefreshRequested, withGrokObservedLimits, refreshGrokBilling, claudeOauthExpiredAt } from "./collector.ts";
+import { parseGrokCreditsConfig, grokBillingFromUnifiedLog, grokObservedLimits, grokBillingRefreshDue, GROK_BILLING_REFRESH_MS, forceRefreshRequested, grokBillingAllowed, claudeRefreshAllowed, withGrokObservedLimits, refreshGrokBilling, claudeOauthExpiredAt } from "./collector.ts";
 import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { Database } from "bun:sqlite";
@@ -1521,7 +1521,7 @@ describe("zombie detection", () => {
     expect(grokObservedLimits(dir)[0].percent).toBe(0.17);
   });
 
-  test("Grok billing refresh is due after 60s, immediately on force, and never when skipped", () => {
+  test("Grok billing refresh is due after 60s and immediately on force", () => {
     const stamp = 1_000_000;
     const fresh = { attemptedAt: stamp - GROK_BILLING_REFRESH_MS + 1, limits: [{ label: "WEEKLY", percent: 0.02 }] };
     expect(grokBillingRefreshDue(fresh, stamp)).toBe(false);
@@ -1531,16 +1531,19 @@ describe("zombie detection", () => {
     expect(grokBillingRefreshDue({}, stamp)).toBe(true);
     expect(forceRefreshRequested(["bun", "collector.ts"])).toBe(false);
     expect(forceRefreshRequested(["bun", "collector.ts", "--force-refresh"])).toBe(true);
-    const previous = process.env.INFOMARCHY_SKIP_GROK_BILLING;
-    process.env.INFOMARCHY_SKIP_GROK_BILLING = "1";
-    try {
-      expect(grokBillingRefreshDue(fresh, stamp)).toBe(false);
-      expect(grokBillingRefreshDue(fresh, stamp, true)).toBe(false);
-    }
-    finally {
-      if (previous === undefined) delete process.env.INFOMARCHY_SKIP_GROK_BILLING;
-      else process.env.INFOMARCHY_SKIP_GROK_BILLING = previous;
-    }
+  });
+
+  test("outbound usage calls are off unless explicitly allowed", () => {
+    expect(grokBillingAllowed({})).toBe(false);
+    expect(grokBillingAllowed({ INFOMARCHY_ALLOW_GROK_BILLING: "0" })).toBe(false);
+    expect(grokBillingAllowed({ INFOMARCHY_ALLOW_GROK_BILLING: "true" })).toBe(false);
+    expect(grokBillingAllowed({ INFOMARCHY_ALLOW_GROK_BILLING: "1" })).toBe(true);
+    // The old skip switch never enables anything.
+    expect(grokBillingAllowed({ INFOMARCHY_SKIP_GROK_BILLING: "0" })).toBe(false);
+    expect(claudeRefreshAllowed({})).toBe(false);
+    expect(claudeRefreshAllowed({ INFOMARCHY_ALLOW_CLAUDE_REFRESH: "0" })).toBe(false);
+    expect(claudeRefreshAllowed({ INFOMARCHY_ALLOW_CLAUDE_REFRESH: "1" })).toBe(true);
+    expect(claudeRefreshAllowed({ INFOMARCHY_SKIP_CLAUDE_USAGE: "0" })).toBe(false);
   });
 });
 
@@ -1808,10 +1811,25 @@ describe("Grok billing without token snapshots", () => {
 });
 
 describe("Grok billing backoff and mutual exclusion", () => {
+  test("without the opt-in no request is made and no billing state is written", async () => {
+    const directory = join(testRoot, "billing-default-off");
+    let calls = 0;
+    const previous = process.env.INFOMARCHY_ALLOW_GROK_BILLING;
+    delete process.env.INFOMARCHY_ALLOW_GROK_BILLING;
+    try {
+      await refreshGrokBilling({ directory, force: true, readLog: () => "", fetchBilling: async () => { calls++; return { creditUsagePercent: 25 }; } });
+      await refreshGrokBilling({ directory, enabled: false, force: true, readLog: () => "", fetchBilling: async () => { calls++; return { creditUsagePercent: 25 }; } });
+    } finally {
+      if (previous !== undefined) process.env.INFOMARCHY_ALLOW_GROK_BILLING = previous;
+    }
+    expect(calls).toBe(0);
+    expect(existsSync(join(directory, "grok-billing.json"))).toBe(false);
+  });
+
   test("failed first fetch backs off, expires after 60 seconds, and allows hard refresh", async () => {
     const directory = join(testRoot, "billing-failure");
     let calls = 0;
-    const options = { directory, readLog: () => "", fetchBilling: async () => { calls++; return null; } };
+    const options = { directory, enabled: true, readLog: () => "", fetchBilling: async () => { calls++; return null; } };
     await refreshGrokBilling({ ...options, stamp: 1_000_000 });
     await refreshGrokBilling({ ...options, stamp: 1_000_001 });
     expect(calls).toBe(1);
@@ -1827,7 +1845,7 @@ describe("Grok billing backoff and mutual exclusion", () => {
     const started = new Promise<void>(resolve => { entered = resolve; });
     const blocked = new Promise<void>(resolve => { release = resolve; });
     let calls = 0;
-    const options = { directory, stamp: 2_000_000, readLog: () => "" };
+    const options = { directory, enabled: true, stamp: 2_000_000, readLog: () => "" };
     const first = refreshGrokBilling({ ...options, fetchBilling: async () => {
       calls++;
       entered();
@@ -1851,7 +1869,7 @@ describe("Grok billing backoff and mutual exclusion", () => {
   test("a killed collector releases its lock for the next hard refresh", async () => {
     const directory = join(testRoot, "billing-killed");
     const script = `import { refreshGrokBilling } from ${JSON.stringify(join(import.meta.dir, "collector.ts"))};
-      await refreshGrokBilling({ directory: process.argv[1], force: true, readLog: () => "",
+      await refreshGrokBilling({ directory: process.argv[1], enabled: true, force: true, readLog: () => "",
         fetchBilling: async () => { console.log("locked"); await Bun.sleep(60000); return null; } });`;
     const child = Bun.spawn([process.execPath, "-e", script, directory], { stdout: "pipe", stderr: "ignore" });
     try {
@@ -1862,7 +1880,7 @@ describe("Grok billing backoff and mutual exclusion", () => {
       child.kill("SIGKILL");
       await child.exited;
       let called = false;
-      await refreshGrokBilling({ directory, force: true, readLog: () => "", fetchBilling: async () => { called = true; return null; } });
+      await refreshGrokBilling({ directory, enabled: true, force: true, readLog: () => "", fetchBilling: async () => { called = true; return null; } });
       expect(called).toBe(true);
     } finally { await terminate(child); }
   });
@@ -1874,7 +1892,7 @@ describe("Grok billing backoff and mutual exclusion", () => {
     writeFileSync(target, "must survive");
     symlinkSync(target, join(directory, "grok-billing.lock"));
     let called = false;
-    await refreshGrokBilling({ directory, force: true, fetchBilling: async () => { called = true; return null; }, readLog: () => "" });
+    await refreshGrokBilling({ directory, enabled: true, force: true, fetchBilling: async () => { called = true; return null; }, readLog: () => "" });
     expect(called).toBe(false);
     expect(readFileSync(target, "utf8")).toBe("must survive");
   });

@@ -37,6 +37,15 @@ export function forceRefreshRequested(argv = process.argv): boolean {
   return argv.includes("--force-refresh") || process.env.INFOMARCHY_FORCE_REFRESH === "1";
 }
 const FORCE_REFRESH = forceRefreshRequested();
+// Both outbound usage paths spend a credential against an AI account, so both
+// are off unless the operator asks for them, the same rule as
+// INFOMARCHY_ALLOW_REMOTE_OLLAMA. Local file reads stay on without either.
+export function grokBillingAllowed(env: Record<string, string | undefined> = process.env): boolean {
+  return env.INFOMARCHY_ALLOW_GROK_BILLING === "1";
+}
+export function claudeRefreshAllowed(env: Record<string, string | undefined> = process.env): boolean {
+  return env.INFOMARCHY_ALLOW_CLAUDE_REFRESH === "1";
+}
 const PREV_FILE = join(STATE_DIR, `prev-${instanceId()}.json`);
 // Shared by every collector instance: the GitHub rows are the same for the
 // wallpaper and the overlay, and one 7-day store means one set of API calls.
@@ -2868,7 +2877,6 @@ async function fetchGrokBilling(): Promise<any | null> {
   } catch { return null; }
 }
 export function grokBillingRefreshDue(existing: any, stamp: number, force = false): boolean {
-  if (process.env.INFOMARCHY_SKIP_GROK_BILLING === "1") return false;
   if (force) return true;
   const attemptedAt = Number(existing && existing.attemptedAt || existing && existing.fetchedAt || 0);
   if (attemptedAt && stamp - attemptedAt < GROK_BILLING_REFRESH_MS) return false;
@@ -2895,10 +2903,10 @@ async function withGrokBillingLock(directory: string, action: () => Promise<void
   finally { if (fd >= 0) try { closeSync(fd); } catch {} }
 }
 export async function refreshGrokBilling(options: {
-  directory?: string; stamp?: number; force?: boolean;
+  directory?: string; stamp?: number; force?: boolean; enabled?: boolean;
   fetchBilling?: () => Promise<any>; readLog?: () => string;
 } = {}) {
-  if (process.env.INFOMARCHY_SKIP_GROK_BILLING === "1") return;
+  if (!(options.enabled ?? grokBillingAllowed())) return;
   const directory = options.directory ?? STATE_DIR;
   const cached = parseJsonBounded(readRegularFileLimited(join(directory, GROK_BILLING_FILE), 4096) || "", 4096, 8);
   if (!grokBillingRefreshDue(cached, options.stamp ?? Date.now(), options.force ?? FORCE_REFRESH)) return;
@@ -3142,7 +3150,7 @@ function claudeOauthExpired(): boolean {
 
 async function refreshClaudeAuthIfNeeded() {
   try {
-    if (process.env.INFOMARCHY_SKIP_CLAUDE_USAGE === "1") return;
+    if (!claudeRefreshAllowed()) return;
     if (!FORCE_REFRESH && instanceId() === "overlay") return;
     const expired = claudeOauthExpired();
     if (!FORCE_REFRESH && !expired) return;
