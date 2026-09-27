@@ -1534,6 +1534,15 @@ describe("zombie detection", () => {
     expect(grokBillingRefreshDue({}, stamp)).toBe(true);
     expect(forceRefreshRequested(["bun", "collector.ts"])).toBe(false);
     expect(forceRefreshRequested(["bun", "collector.ts", "--force-refresh"])).toBe(true);
+    // Only the argument forces. An inherited environment would force every tick.
+    const previous = process.env.INFOMARCHY_FORCE_REFRESH;
+    process.env.INFOMARCHY_FORCE_REFRESH = "1";
+    try {
+      expect(forceRefreshRequested(["bun", "collector.ts"])).toBe(false);
+    } finally {
+      if (previous === undefined) delete process.env.INFOMARCHY_FORCE_REFRESH;
+      else process.env.INFOMARCHY_FORCE_REFRESH = previous;
+    }
   });
 
   test("outbound usage calls are off unless explicitly allowed and the USAGE card is visible", () => {

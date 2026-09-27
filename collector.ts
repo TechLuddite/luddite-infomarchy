@@ -34,7 +34,7 @@ function instanceId(): string {
   return raw.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 32) || "bg";
 }
 export function forceRefreshRequested(argv = process.argv): boolean {
-  return argv.includes("--force-refresh") || process.env.INFOMARCHY_FORCE_REFRESH === "1";
+  return argv.includes("--force-refresh");
 }
 const FORCE_REFRESH = forceRefreshRequested();
 // Set per run by InfoModel only while a desk showing the USAGE card is on
