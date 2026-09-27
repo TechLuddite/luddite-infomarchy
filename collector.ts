@@ -3128,7 +3128,21 @@ function grokLocalUsage(): any | null {
   return record;
 }
 const CLAUDE_AUTH_REFRESH_MS = 15 * 60 * 1000;
-let currentClaudeAuthRefreshAt = Number(prev.claudeAuthRefreshAt || 0);
+// One host-wide clock in a shared state file, written before the CLI is
+// spawned, so a collector killed mid-refresh still backs off.
+const CLAUDE_AUTH_REFRESH_FILE = "claude-auth-refresh.json";
+// The CLI refresh runs from the wallpaper collector only, the same one-writer
+// rule as GitHub and FLEET, and HARD REFRESH does not bypass the 15 minutes:
+// forcing skips caches, never this limit.
+export function claudeRefreshDue(lastAt: number, stamp: number, expired: boolean, instance: string): boolean {
+  if (!expired || instance === "overlay") return false;
+  return !(lastAt > 0 && stamp - lastAt < CLAUDE_AUTH_REFRESH_MS);
+}
+function lastClaudeAuthRefreshAt(directory = STATE_DIR): number {
+  const parsed = parseJsonBounded(readRegularFileLimited(join(directory, CLAUDE_AUTH_REFRESH_FILE), 1024) || "", 1024, 4);
+  const at = Number(parsed && typeof parsed === "object" ? parsed.attemptedAt : 0);
+  return Number.isFinite(at) && at > 0 ? at : 0;
+}
 let claudeUsageFresh: any = null;
 
 export function claudeOauthExpiredAt(expiresAt: unknown, nowMs = now): boolean {
@@ -3161,10 +3175,10 @@ async function refreshClaudeAuthIfNeeded() {
     const expired = claudeOauthExpired();
     if (!FORCE_REFRESH && !expired) return;
     if (expired) {
-      if (!FORCE_REFRESH && currentClaudeAuthRefreshAt && now - currentClaudeAuthRefreshAt < CLAUDE_AUTH_REFRESH_MS) return;
+      if (!claudeRefreshDue(lastClaudeAuthRefreshAt(), now, expired, instanceId())) return;
       const claude = Bun.which("claude");
       if (!claude) return;
-      currentClaudeAuthRefreshAt = now;
+      if (!writePrivateStateFile(STATE_DIR, CLAUDE_AUTH_REFRESH_FILE, JSON.stringify({ attemptedAt: now }) + "\n")) return;
       await run([claude, "-p", "ping", "--max-turns", "0", "--output-format", "json"], 12_000);
     }
     const collector = join(process.env.OMARCHY_PATH || "/usr/share/omarchy", "bin/omarchy-agent-usage-claude");
@@ -3495,7 +3509,6 @@ async function runCollector() {
       ciByRepo: currentCiByRepo,
       opencodeTotals: currentOpencodeTotals,
       grokLocalUsage: currentGrokUsageCache,
-      claudeAuthRefreshAt: currentClaudeAuthRefreshAt,
       sessionNotifications: notificationState.tracked,
     }));
   } catch {}

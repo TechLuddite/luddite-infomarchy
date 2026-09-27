@@ -1,4 +1,4 @@
-import { parseGrokCreditsConfig, grokBillingFromUnifiedLog, grokObservedLimits, grokBillingRefreshDue, GROK_BILLING_REFRESH_MS, forceRefreshRequested, grokBillingAllowed, claudeRefreshAllowed, usageCardVisible, withGrokObservedLimits, refreshGrokBilling, claudeOauthExpiredAt } from "./collector.ts";
+import { parseGrokCreditsConfig, grokBillingFromUnifiedLog, grokObservedLimits, grokBillingRefreshDue, GROK_BILLING_REFRESH_MS, forceRefreshRequested, grokBillingAllowed, claudeRefreshAllowed, usageCardVisible, claudeRefreshDue, withGrokObservedLimits, refreshGrokBilling, claudeOauthExpiredAt } from "./collector.ts";
 import { afterAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { Database } from "bun:sqlite";
@@ -1784,7 +1784,11 @@ describe("outbound usage gate in a real collector run", () => {
   mkdirSync(join(home, ".claude"), { recursive: true });
   mkdirSync(join(home, ".grok"), { recursive: true });
   mkdirSync(fakeBin, { recursive: true });
-  writeFileSync(join(fakeBin, "claude"), `#!/bin/sh\necho "$*" >> ${JSON.stringify(marker)}\n`);
+  // On a print-mode call it also copies the throttle file, which shows what was
+  // on disk at the moment the CLI started.
+  const seen = join(root, "claude-auth-refresh.seen");
+  const throttle = join(home, "state", "infomarchy", "claude-auth-refresh.json");
+  writeFileSync(join(fakeBin, "claude"), `#!/bin/sh\necho "$*" >> ${JSON.stringify(marker)}\nif [ "$1" = "-p" ]; then cp ${JSON.stringify(throttle)} ${JSON.stringify(seen)}; fi\n`);
   chmodSync(join(fakeBin, "claude"), 0o755);
   writeFileSync(join(home, ".claude", ".credentials.json"), JSON.stringify({ claudeAiOauth: { expiresAt: 1000 } }), { mode: 0o600 });
   writeFileSync(join(home, ".grok", "auth.json"), JSON.stringify({ a: { key: "x".repeat(40), expires_at: "2999-01-01T00:00:00Z" } }), { mode: 0o600 });
@@ -1815,6 +1819,26 @@ describe("outbound usage gate in a real collector run", () => {
   test("opted in and visible, an expired token gets one refresh", async () => {
     await collect(["--id", "bg", "--usage-visible"], { INFOMARCHY_ALLOW_CLAUDE_REFRESH: "1" });
     expect(calls()).toEqual(["-p ping --max-turns 0 --output-format json"]);
+    // The attempt is recorded in the shared state file before the CLI runs.
+    expect(JSON.parse(readFileSync(seen, "utf8")).attemptedAt).toBeGreaterThan(0);
+  });
+
+  test("HARD REFRESH does not bypass the 15-minute limit, from either instance", async () => {
+    const env = { INFOMARCHY_ALLOW_CLAUDE_REFRESH: "1" };
+    await collect(["--id", "bg", "--usage-visible", "--force-refresh"], env);
+    await collect(["--id", "bg", "--usage-visible", "--force-refresh"], env);
+    await collect(["--id", "overlay", "--usage-visible", "--force-refresh"], env);
+    expect(calls()).toHaveLength(1);
+  });
+
+  test("a throttle file that cannot be written means no refresh", async () => {
+    // A directory where the attempt record goes makes the write fail, and the
+    // refresh fails closed rather than running without a clock.
+    const state = join(root, "unwritable-state");
+    mkdirSync(join(state, "infomarchy", "claude-auth-refresh.json"), { recursive: true, mode: 0o700 });
+    const before = calls().length;
+    await collect(["--id", "bg", "--usage-visible"], { INFOMARCHY_ALLOW_CLAUDE_REFRESH: "1", XDG_STATE_HOME: state });
+    expect(calls()).toHaveLength(before);
   });
 });
 
@@ -1949,6 +1973,17 @@ describe("Grok billing backoff and mutual exclusion", () => {
     expect(called).toBe(false);
     expect(readFileSync(target, "utf8")).toBe("must survive");
   });
+});
+
+test("the Claude CLI refresh is due only when expired, from the wallpaper, once per 15 minutes", () => {
+  const minute = 60_000, stamp = 100 * minute;
+  expect(claudeRefreshDue(0, stamp, true, "bg")).toBe(true);
+  expect(claudeRefreshDue(0, stamp, false, "bg")).toBe(false);
+  expect(claudeRefreshDue(0, stamp, true, "overlay")).toBe(false);
+  expect(claudeRefreshDue(stamp - 14 * minute, stamp, true, "bg")).toBe(false);
+  expect(claudeRefreshDue(stamp - 15 * minute, stamp, true, "bg")).toBe(true);
+  // A clock that moved backwards keeps the limit rather than lifting it.
+  expect(claudeRefreshDue(stamp + minute, stamp, true, "bg")).toBe(false);
 });
 
 test("Claude auth help follows status and OAuth expiry is explicit", () => {
