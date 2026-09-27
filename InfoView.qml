@@ -2246,6 +2246,11 @@ Item {
                     }
                     color: view.textFaint; font.family: view.mono; font.pixelSize: Style.font.caption
                   }
+                  // Per-model breakdown. Anthropic gives Fable its own rate-limit
+                  // window above; OpenAI and xAI publish no per-model window, so
+                  // this is each model's share of the work instead. Driven purely
+                  // by what the provider reports — a model released tomorrow
+                  // appears here on its own, with no change to this file.
                   Repeater {
                     model: (up.u.models || []).filter(function(m) { return m && ((m.share || 0) > 0 || (m.sessions || 0) > 0) })
                     delegate: Meter {
@@ -2255,10 +2260,13 @@ Item {
                       value: up.u.hasTokenData
                         ? view.desk.tokens(modelData.todayTokens) + " tok  ·  " + Math.round((modelData.share || 0) * 100) + "%"
                         : (modelData.sessions || 0) + " sess"
+                      // A provider with no token counts has no share to draw.
                       fraction: up.u.hasTokenData ? (modelData.share || 0) : 0
                       tone: up.tone
                     }
                   }
+                  // Why a provider has no limit bars. Absent everywhere else, so it
+                  // costs a row only for the provider that needs to explain itself.
                   PlainText {
                     Layout.fillWidth: true
                     visible: !!up.u.usageStatusText && !(up.u.limits || []).length

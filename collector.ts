@@ -402,6 +402,8 @@ const dt = prev.ts ? (now - prev.ts) / 1000 : 0;
 // costs one small file read. Only the wallpaper collector refreshes and
 // writes — the overlay's collector reads the same file — so two instances
 // never race each other's fetches. INFOMARCHY_SKIP_GITHUB=1 never calls gh.
+// HARD REFRESH from the overlay is the one exception, and the write is an
+// atomic rename, so the later writer wins.
 const GITHUB_WRITER = instanceId() !== "overlay";
 async function githubActivity() {
   const ghAvailable = !!Bun.which("gh");
