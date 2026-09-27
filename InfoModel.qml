@@ -55,6 +55,9 @@ Item {
   property string instance: "bg"
   // Origin only, e.g. http://127.0.0.1:11435. Empty inherits OLLAMA_HOST.
   property string ollamaHost: ""
+  // True only while a desk showing the USAGE card is on screen. The opt-in
+  // outbound usage calls (Grok billing, Claude refresh) never run without it.
+  property bool usageVisible: false
 
   // HARD REFRESH: next collector pass bypasses GitHub / billing / usage TTLs.
   property bool forceRefreshArmed: false
@@ -201,6 +204,7 @@ Item {
       var cmd = ["bun", root.collectorPath, "--id", root.instance]
       if (root.demoMode) return cmd.concat(["--demo"])
       if (root.forceRefreshArmed) cmd.push("--force-refresh")
+      if (root.usageVisible) cmd.push("--usage-visible")
       return cmd
     }
     environment: root.ollamaHost !== "" ? ({ OLLAMA_HOST: root.ollamaHost }) : ({})
@@ -287,6 +291,7 @@ Item {
     collector.running = true
   }
   function hardRefresh() {
+    if (!root.active) return
     root.forceRefreshArmed = true
     root.hardRefreshing = true
     if (collector.running || bunProbe.running) return

@@ -1,6 +1,6 @@
-import { parseGrokCreditsConfig, grokBillingFromUnifiedLog, grokObservedLimits, grokBillingRefreshDue, GROK_BILLING_REFRESH_MS, forceRefreshRequested, grokBillingAllowed, claudeRefreshAllowed, withGrokObservedLimits, refreshGrokBilling, claudeOauthExpiredAt } from "./collector.ts";
+import { parseGrokCreditsConfig, grokBillingFromUnifiedLog, grokObservedLimits, grokBillingRefreshDue, GROK_BILLING_REFRESH_MS, forceRefreshRequested, grokBillingAllowed, claudeRefreshAllowed, usageCardVisible, withGrokObservedLimits, refreshGrokBilling, claudeOauthExpiredAt } from "./collector.ts";
 import { afterAll, describe, expect, test } from "bun:test";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { Database } from "bun:sqlite";
 import { tmpdir } from "os";
 import { join, relative } from "path";
@@ -1533,17 +1533,23 @@ describe("zombie detection", () => {
     expect(forceRefreshRequested(["bun", "collector.ts", "--force-refresh"])).toBe(true);
   });
 
-  test("outbound usage calls are off unless explicitly allowed", () => {
-    expect(grokBillingAllowed({})).toBe(false);
-    expect(grokBillingAllowed({ INFOMARCHY_ALLOW_GROK_BILLING: "0" })).toBe(false);
-    expect(grokBillingAllowed({ INFOMARCHY_ALLOW_GROK_BILLING: "true" })).toBe(false);
-    expect(grokBillingAllowed({ INFOMARCHY_ALLOW_GROK_BILLING: "1" })).toBe(true);
+  test("outbound usage calls are off unless explicitly allowed and the USAGE card is visible", () => {
+    const shown = ["bun", "collector.ts", "--id", "bg", "--usage-visible"];
+    const hidden = ["bun", "collector.ts", "--id", "bg"];
+    expect(usageCardVisible(shown)).toBe(true);
+    expect(usageCardVisible(hidden)).toBe(false);
+    expect(grokBillingAllowed({}, shown)).toBe(false);
+    expect(grokBillingAllowed({ INFOMARCHY_ALLOW_GROK_BILLING: "0" }, shown)).toBe(false);
+    expect(grokBillingAllowed({ INFOMARCHY_ALLOW_GROK_BILLING: "true" }, shown)).toBe(false);
+    expect(grokBillingAllowed({ INFOMARCHY_ALLOW_GROK_BILLING: "1" }, shown)).toBe(true);
+    expect(grokBillingAllowed({ INFOMARCHY_ALLOW_GROK_BILLING: "1" }, hidden)).toBe(false);
     // The old skip switch never enables anything.
-    expect(grokBillingAllowed({ INFOMARCHY_SKIP_GROK_BILLING: "0" })).toBe(false);
-    expect(claudeRefreshAllowed({})).toBe(false);
-    expect(claudeRefreshAllowed({ INFOMARCHY_ALLOW_CLAUDE_REFRESH: "0" })).toBe(false);
-    expect(claudeRefreshAllowed({ INFOMARCHY_ALLOW_CLAUDE_REFRESH: "1" })).toBe(true);
-    expect(claudeRefreshAllowed({ INFOMARCHY_SKIP_CLAUDE_USAGE: "0" })).toBe(false);
+    expect(grokBillingAllowed({ INFOMARCHY_SKIP_GROK_BILLING: "0" }, shown)).toBe(false);
+    expect(claudeRefreshAllowed({}, shown)).toBe(false);
+    expect(claudeRefreshAllowed({ INFOMARCHY_ALLOW_CLAUDE_REFRESH: "0" }, shown)).toBe(false);
+    expect(claudeRefreshAllowed({ INFOMARCHY_ALLOW_CLAUDE_REFRESH: "1" }, shown)).toBe(true);
+    expect(claudeRefreshAllowed({ INFOMARCHY_ALLOW_CLAUDE_REFRESH: "1" }, hidden)).toBe(false);
+    expect(claudeRefreshAllowed({ INFOMARCHY_SKIP_CLAUDE_USAGE: "0" }, shown)).toBe(false);
   });
 });
 
@@ -1765,6 +1771,50 @@ describe("Cursor", () => {
     expect(safePrompt("rotate crsr_23c5c84eabae6848bfff5d17542c9c59 please")).toBe("rotate crsr_[redacted] please");
     expect(safePrompt("cursor-agent --api-key crsr_23c5c84eabae6848bfff5d17542c9c59 worker"))
       .toContain("--api-key [redacted]");
+  });
+});
+
+describe("outbound usage gate in a real collector run", () => {
+  // A stand-in `claude` records each invocation. It is first on a PATH that
+  // holds no real claude, so nothing here can reach an account.
+  const root = join(testRoot, "usage-gate");
+  const home = join(root, "home");
+  const marker = join(root, "claude-calls");
+  const fakeBin = join(root, "bin");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(join(home, ".grok"), { recursive: true });
+  mkdirSync(fakeBin, { recursive: true });
+  writeFileSync(join(fakeBin, "claude"), `#!/bin/sh\necho "$*" >> ${JSON.stringify(marker)}\n`);
+  chmodSync(join(fakeBin, "claude"), 0o755);
+  writeFileSync(join(home, ".claude", ".credentials.json"), JSON.stringify({ claudeAiOauth: { expiresAt: 1000 } }), { mode: 0o600 });
+  writeFileSync(join(home, ".grok", "auth.json"), JSON.stringify({ a: { key: "x".repeat(40), expires_at: "2999-01-01T00:00:00Z" } }), { mode: 0o600 });
+  const collect = async (args: string[], env: Record<string, string>) => {
+    const proc = Bun.spawn([process.execPath, join(import.meta.dir, "collector.ts"), ...args], {
+      env: { HOME: home, USER: "tester", XDG_STATE_HOME: join(home, "state"), OMARCHY_PATH: join(root, "no-omarchy"), PATH: `${fakeBin}:/usr/bin:/bin`,
+        INFOMARCHY_SKIP_EXTERNAL_IP: "1", INFOMARCHY_SKIP_GITHUB: "1", INFOMARCHY_SKIP_CONTAINERS: "1", ...env },
+      stdout: "pipe", stderr: "pipe",
+    });
+    await new Response(proc.stdout).text();
+    expect(await proc.exited).toBe(0);
+  };
+  // The collector also runs the local `claude agents --json` listing; only
+  // print-mode calls reach the model.
+  const calls = () => existsSync(marker) ? readFileSync(marker, "utf8").trim().split("\n").filter(line => line.startsWith("-p ")) : [];
+
+  test("opted in but with the USAGE card hidden, nothing runs", async () => {
+    await collect(["--id", "bg"], { INFOMARCHY_ALLOW_CLAUDE_REFRESH: "1", INFOMARCHY_ALLOW_GROK_BILLING: "1" });
+    expect(calls()).toEqual([]);
+    expect(existsSync(join(home, "state", "infomarchy", "grok-billing.json"))).toBe(false);
+  });
+
+  test("visible but not opted in, nothing runs", async () => {
+    await collect(["--id", "bg", "--usage-visible"], {});
+    expect(calls()).toEqual([]);
+  });
+
+  test("opted in and visible, an expired token gets one refresh", async () => {
+    await collect(["--id", "bg", "--usage-visible"], { INFOMARCHY_ALLOW_CLAUDE_REFRESH: "1" });
+    expect(calls()).toEqual(["-p ping --max-turns 0 --output-format json"]);
   });
 });
 

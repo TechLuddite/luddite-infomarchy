@@ -37,14 +37,21 @@ export function forceRefreshRequested(argv = process.argv): boolean {
   return argv.includes("--force-refresh") || process.env.INFOMARCHY_FORCE_REFRESH === "1";
 }
 const FORCE_REFRESH = forceRefreshRequested();
+// Set per run by InfoModel only while a desk showing the USAGE card is on
+// screen. It is an argument rather than an environment variable, so an
+// inherited environment cannot claim the card is visible.
+export function usageCardVisible(argv = process.argv): boolean {
+  return argv.includes("--usage-visible");
+}
 // Both outbound usage paths spend a credential against an AI account, so both
 // are off unless the operator asks for them, the same rule as
-// INFOMARCHY_ALLOW_REMOTE_OLLAMA. Local file reads stay on without either.
-export function grokBillingAllowed(env: Record<string, string | undefined> = process.env): boolean {
-  return env.INFOMARCHY_ALLOW_GROK_BILLING === "1";
+// INFOMARCHY_ALLOW_REMOTE_OLLAMA, and even then only while the USAGE card is
+// visible to show the result. Local file reads stay on without either.
+export function grokBillingAllowed(env: Record<string, string | undefined> = process.env, argv = process.argv): boolean {
+  return env.INFOMARCHY_ALLOW_GROK_BILLING === "1" && usageCardVisible(argv);
 }
-export function claudeRefreshAllowed(env: Record<string, string | undefined> = process.env): boolean {
-  return env.INFOMARCHY_ALLOW_CLAUDE_REFRESH === "1";
+export function claudeRefreshAllowed(env: Record<string, string | undefined> = process.env, argv = process.argv): boolean {
+  return env.INFOMARCHY_ALLOW_CLAUDE_REFRESH === "1" && usageCardVisible(argv);
 }
 const PREV_FILE = join(STATE_DIR, `prev-${instanceId()}.json`);
 // Shared by every collector instance: the GitHub rows are the same for the
@@ -3427,7 +3434,8 @@ async function runCollector() {
   const pids = scanProcs();
   const [cpuS, memS, diskS, netS, pingS, gpuS, sessions, ollama, externalIpS, github, gitea, containers, fleet, hermesUsage] = await Promise.all([
     Promise.resolve(cpu()), Promise.resolve(mem()), disk(), net(), ping(), gpu(), liveSessions(pids), ollamaState(), externalIp(), githubActivity(), giteaActivity(), containerState(), fleetActivity(), hermesUsageActivity(),
-    refreshGrokBilling(), refreshClaudeAuthIfNeeded(),
+    grokBillingAllowed() ? refreshGrokBilling() : undefined,
+    claudeRefreshAllowed() ? refreshClaudeAuthIfNeeded() : undefined,
   ]);
   const claude = claudeHistory(), codex = codexHistory(), grok = grokHistory(), grokBot = grokBotHistory(), opencode = opencodeHistory(), pi = piHistory(), hermes = hermesHistory(), kimi = kimiHistory(), cursor = cursorHistory();
   // Same priority as grok's own fallback below: a real cache (Omarchy's own

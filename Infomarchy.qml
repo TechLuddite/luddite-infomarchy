@@ -65,6 +65,7 @@ Scope {
     refreshMs: dashboardSettings.dashboardVisible ? 4000 : 16000
     demoMode: root.demoMode
     ollamaHost: dashboardSettings.ollamaHost
+    usageVisible: dashboardSettings.ready && dashboardSettings.dashboardVisible && dashboardSettings.sectionEnabled("usage")
     active: dashboardSettings.ready && (dashboardSettings.dashboardVisible || dashboardSettings.notificationsEnabled)
   }
   InfoSettings { id: dashboardSettings }
