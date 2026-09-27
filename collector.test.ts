@@ -1517,8 +1517,8 @@ describe("zombie detection", () => {
     writeFileSync(join(dir, "grok-billing.json"), JSON.stringify({
       limits: [{ label: "WEEKLY", percent: 0.17, resetsAt: "2026-09-14T07:26:13Z" }, { label: "BUILD", percent: 0.14, resetsAt: "2026-09-14T07:26:13Z" }],
     }));
-    expect(grokObservedLimits(dir).map((row: any) => row.label)).toEqual(["WEEKLY", "BUILD"]);
-    expect(grokObservedLimits(dir)[0].percent).toBe(0.17);
+    expect(grokObservedLimits(dir, true).map((row: any) => row.label)).toEqual(["WEEKLY", "BUILD"]);
+    expect(grokObservedLimits(dir, true)[0].percent).toBe(0.17);
   });
 
   test("Grok billing refresh is due after 60s and immediately on force", () => {
@@ -1791,9 +1791,9 @@ describe("Grok billing without token snapshots", () => {
     const dir = join(testRoot, "grok-session-billing");
     mkdirSync(dir, { recursive: true });
     const sessions = normalizeUsage({ name: "Grok", totalSessions: 3, todaySessions: 1, modelSessions: { grok: 3 }, limits: [] });
-    expect(withGrokObservedLimits(sessions, dir).limits).toEqual([]);
+    expect(withGrokObservedLimits(sessions, dir, true).limits).toEqual([]);
     writeFileSync(join(dir, "grok-billing.json"), JSON.stringify({ limits: [{ label: "WEEKLY", percent: 0.17 }] }));
-    const result = withGrokObservedLimits(sessions, dir);
+    const result = withGrokObservedLimits(sessions, dir, true);
     expect(result.limits[0].percent).toBe(0.17);
     expect(result.tierLabel).toBe("weekly");
     expect(result.hasTokenData).toBe(false);
@@ -1804,9 +1804,12 @@ describe("Grok billing without token snapshots", () => {
     expect(sessions.limits).toEqual([]);
     // A new billing result must be visible even when the local record is cached.
     writeFileSync(join(dir, "grok-billing.json"), JSON.stringify({ limits: [{ label: "WEEKLY", percent: 0.28 }] }));
-    expect(withGrokObservedLimits(sessions, dir).limits[0].percent).toBe(0.28);
+    expect(withGrokObservedLimits(sessions, dir, true).limits[0].percent).toBe(0.28);
     const tokens = normalizeUsage({ name: "Grok", todayTotalTokens: 100, limits: [] });
-    expect(withGrokObservedLimits(tokens, dir).usageStatusText).toContain("token totals");
+    expect(withGrokObservedLimits(tokens, dir, true).usageStatusText).toContain("token totals");
+    // With the billing opt-in off, a file left from an earlier opt-in is not shown.
+    expect(grokObservedLimits(dir, false)).toEqual([]);
+    expect(withGrokObservedLimits(sessions, dir, false)).toBe(sessions);
   });
 });
 
@@ -1860,10 +1863,10 @@ describe("Grok billing backoff and mutual exclusion", () => {
     } finally { release(); await first; }
     await refreshGrokBilling({ ...options, force: true, fetchBilling: async () => { calls++; return { creditUsagePercent: 25 }; } });
     expect(calls).toBe(2);
-    expect(grokObservedLimits(directory)[0].percent).toBe(0.25);
+    expect(grokObservedLimits(directory, true)[0].percent).toBe(0.25);
     // A later outage preserves the successful result while recording backoff.
     await refreshGrokBilling({ ...options, stamp: 2_060_000, fetchBilling: async () => null });
-    expect(grokObservedLimits(directory)[0].percent).toBe(0.25);
+    expect(grokObservedLimits(directory, true)[0].percent).toBe(0.25);
   });
 
   test("a killed collector releases its lock for the next hard refresh", async () => {

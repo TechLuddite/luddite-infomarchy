@@ -2939,22 +2939,21 @@ function normalizeLimitRows(rows: unknown, fallbackReset = ""): any[] {
   }
   return out;
 }
-export function grokObservedLimits(directory = STATE_DIR): any[] {
-  const liveRaw = readRegularFileLimited(join(directory, GROK_BILLING_FILE), 4096);
-  const live = liveRaw ? parseJsonBounded(liveRaw, 4096, 8) : null;
-  const fromLive = normalizeLimitRows(live && live.limits, uiString(live && live.resetsAt, 40));
-  if (fromLive.length) return fromLive;
-  if (directory === STATE_DIR) {
-    const meters = grokBillingMeters(grokBillingFromUnifiedLog(readHistoryTail(join(process.env.GROK_HOME || join(HOME, ".grok"), "logs", "unified.jsonl"), 64 * 1024) || ""));
-    if (meters.length) return meters;
+// grok-billing.json is only kept fresh while the billing opt-in is on. Once it
+// is off the file is ignored, so an old percentage is never shown as current.
+// Grok CLI's own log is still read: it costs no request.
+export function grokObservedLimits(directory = STATE_DIR, liveAllowed = grokBillingAllowed()): any[] {
+  if (liveAllowed) {
+    const liveRaw = readRegularFileLimited(join(directory, GROK_BILLING_FILE), 4096);
+    const live = liveRaw ? parseJsonBounded(liveRaw, 4096, 8) : null;
+    const fromLive = normalizeLimitRows(live && live.limits, uiString(live && live.resetsAt, 40));
+    if (fromLive.length) return fromLive;
   }
-  const raw = readRegularFileLimited(join(directory, "grok-limits.json"), 4096);
-  if (!raw) return [];
-  const parsed = parseJsonBounded(raw, 4096, 8);
-  return normalizeLimitRows(parsed && typeof parsed === "object" ? parsed.limits : []);
+  if (directory !== STATE_DIR) return [];
+  return grokBillingMeters(grokBillingFromUnifiedLog(readHistoryTail(join(process.env.GROK_HOME || join(HOME, ".grok"), "logs", "unified.jsonl"), 64 * 1024) || ""));
 }
-export function withGrokObservedLimits(record: any, directory = STATE_DIR): any {
-  const limits = grokObservedLimits(directory);
+export function withGrokObservedLimits(record: any, directory = STATE_DIR, liveAllowed = grokBillingAllowed()): any {
+  const limits = grokObservedLimits(directory, liveAllowed);
   if (!limits.length) return record;
   return {
     ...record,
