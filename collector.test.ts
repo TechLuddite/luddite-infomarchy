@@ -1803,76 +1803,6 @@ describe("zombie detection", () => {
     expect(sessionStaleness({ startedAt: 1000, topicAt: 5000, hosts: [], window: null }, now).idleSince).toBe(5000);
     expect(sessionStaleness({ startedAt: 7000, topicAt: 0, hosts: [], window: null }, now).idleSince).toBe(7000);
   });
-  test("Grok credits config uses 0-100 percents and product rows", () => {
-    const parsed = parseGrokCreditsConfig({
-      config: {
-        creditUsagePercent: 17,
-        currentPeriod: { type: "USAGE_PERIOD_TYPE_WEEKLY", end: "2026-09-14T07:26:13Z" },
-        productUsage: [{ product: "GrokBuild", usagePercent: 14 }, { product: "GrokVoice", usagePercent: 3 }],
-      },
-    });
-    expect(parsed).toEqual({
-      percent: 0.17,
-      resetsAt: "2026-09-14T07:26:13Z",
-      products: [{ label: "BUILD", percent: 0.14 }, { label: "VOICE", percent: 0.03 }],
-    });
-    const log = grokBillingFromUnifiedLog(JSON.stringify({
-      msg: "billing: fetched credits config",
-      ctx: { config: { creditUsagePercent: 16, currentPeriod: { end: "2026-09-14T07:26:13Z" }, productUsage: [] } },
-    }) + "\n");
-    expect(log?.percent).toBe(0.16);
-    const dir = join(testRoot, "grok-billing");
-    mkdirSync(dir, { recursive: true });
-    const reset = new Date(Date.now() + 86_400_000).toISOString();
-    writeFileSync(join(dir, "grok-billing.json"), JSON.stringify({
-      limits: [{ label: "WEEKLY", percent: 0.17, resetsAt: reset }, { label: "BUILD", percent: 0.14, resetsAt: reset }],
-    }));
-    expect(grokObservedLimits(dir, true).map((row: any) => row.label)).toEqual(["WEEKLY", "BUILD"]);
-    expect(grokObservedLimits(dir, true)[0].percent).toBe(0.17);
-  });
-
-  test("Grok billing refresh is due after 60s, or after 10s on force", () => {
-    const stamp = 1_000_000;
-    const fresh = { attemptedAt: stamp - GROK_BILLING_REFRESH_MS + 1, limits: [{ label: "WEEKLY", percent: 0.02 }] };
-    expect(grokBillingRefreshDue(fresh, stamp)).toBe(false);
-    expect(grokBillingRefreshDue(fresh, stamp, true)).toBe(true);
-    // Force skips the cache, not the floor: a click right after an attempt waits.
-    expect(grokBillingRefreshDue({ attemptedAt: stamp - GROK_BILLING_FORCE_FLOOR_MS + 1 }, stamp, true)).toBe(false);
-    expect(grokBillingRefreshDue({ attemptedAt: stamp - GROK_BILLING_FORCE_FLOOR_MS }, stamp, true)).toBe(true);
-    expect(grokBillingRefreshDue({ attemptedAt: stamp - GROK_BILLING_REFRESH_MS, limits: [{ label: "WEEKLY", percent: 0.02 }] }, stamp)).toBe(true);
-    expect(grokBillingRefreshDue({ attemptedAt: stamp, limits: [] }, stamp)).toBe(false);
-    expect(grokBillingRefreshDue({}, stamp)).toBe(true);
-    expect(forceRefreshRequested(["bun", "collector.ts"])).toBe(false);
-    expect(forceRefreshRequested(["bun", "collector.ts", "--force-refresh"])).toBe(true);
-    // Only the argument forces. An inherited environment would force every tick.
-    const previous = process.env.INFOMARCHY_FORCE_REFRESH;
-    process.env.INFOMARCHY_FORCE_REFRESH = "1";
-    try {
-      expect(forceRefreshRequested(["bun", "collector.ts"])).toBe(false);
-    } finally {
-      if (previous === undefined) delete process.env.INFOMARCHY_FORCE_REFRESH;
-      else process.env.INFOMARCHY_FORCE_REFRESH = previous;
-    }
-  });
-
-  test("outbound usage calls are off unless explicitly allowed and the USAGE card is visible", () => {
-    const shown = ["bun", "collector.ts", "--id", "bg", "--usage-visible"];
-    const hidden = ["bun", "collector.ts", "--id", "bg"];
-    expect(usageCardVisible(shown)).toBe(true);
-    expect(usageCardVisible(hidden)).toBe(false);
-    expect(grokBillingAllowed({}, shown)).toBe(false);
-    expect(grokBillingAllowed({ INFOMARCHY_ALLOW_GROK_BILLING: "0" }, shown)).toBe(false);
-    expect(grokBillingAllowed({ INFOMARCHY_ALLOW_GROK_BILLING: "true" }, shown)).toBe(false);
-    expect(grokBillingAllowed({ INFOMARCHY_ALLOW_GROK_BILLING: "1" }, shown)).toBe(true);
-    expect(grokBillingAllowed({ INFOMARCHY_ALLOW_GROK_BILLING: "1" }, hidden)).toBe(false);
-    // The old skip switch never enables anything.
-    expect(grokBillingAllowed({ INFOMARCHY_SKIP_GROK_BILLING: "0" }, shown)).toBe(false);
-    expect(claudeRefreshAllowed({}, shown)).toBe(false);
-    expect(claudeRefreshAllowed({ INFOMARCHY_ALLOW_CLAUDE_REFRESH: "0" }, shown)).toBe(false);
-    expect(claudeRefreshAllowed({ INFOMARCHY_ALLOW_CLAUDE_REFRESH: "1" }, shown)).toBe(true);
-    expect(claudeRefreshAllowed({ INFOMARCHY_ALLOW_CLAUDE_REFRESH: "1" }, hidden)).toBe(false);
-    expect(claudeRefreshAllowed({ INFOMARCHY_SKIP_CLAUDE_USAGE: "0" }, shown)).toBe(false);
-  });
 });
 
 // Cursor's agent ships as one binary that is both a terminal session and the
@@ -2182,6 +2112,97 @@ describe("container snapshot", () => {
   });
 });
 
+describe("usage opt-ins and Grok billing", () => {
+  test("Grok credits config uses 0-100 percents and product rows", () => {
+    const parsed = parseGrokCreditsConfig({
+      config: {
+        creditUsagePercent: 17,
+        currentPeriod: { type: "USAGE_PERIOD_TYPE_WEEKLY", end: "2026-09-14T07:26:13Z" },
+        productUsage: [{ product: "GrokBuild", usagePercent: 14 }, { product: "GrokVoice", usagePercent: 3 }],
+      },
+    });
+    expect(parsed).toEqual({
+      percent: 0.17,
+      resetsAt: "2026-09-14T07:26:13Z",
+      products: [{ label: "BUILD", percent: 0.14 }, { label: "VOICE", percent: 0.03 }],
+    });
+    const log = grokBillingFromUnifiedLog(JSON.stringify({
+      msg: "billing: fetched credits config",
+      ctx: { config: { creditUsagePercent: 16, currentPeriod: { end: "2026-09-14T07:26:13Z" }, productUsage: [] } },
+    }) + "\n");
+    expect(log?.percent).toBe(0.16);
+    const dir = join(testRoot, "grok-billing");
+    mkdirSync(dir, { recursive: true });
+    const reset = new Date(Date.now() + 86_400_000).toISOString();
+    writeFileSync(join(dir, "grok-billing.json"), JSON.stringify({
+      limits: [{ label: "WEEKLY", percent: 0.17, resetsAt: reset }, { label: "BUILD", percent: 0.14, resetsAt: reset }],
+    }));
+    expect(grokObservedLimits(dir, true).map((row: any) => row.label)).toEqual(["WEEKLY", "BUILD"]);
+    expect(grokObservedLimits(dir, true)[0].percent).toBe(0.17);
+  });
+
+  test("Grok billing refresh is due after 60s, or after 10s on force", () => {
+    const stamp = 1_000_000;
+    const fresh = { attemptedAt: stamp - GROK_BILLING_REFRESH_MS + 1, limits: [{ label: "WEEKLY", percent: 0.02 }] };
+    expect(grokBillingRefreshDue(fresh, stamp)).toBe(false);
+    expect(grokBillingRefreshDue(fresh, stamp, true)).toBe(true);
+    // Force skips the cache, not the floor: a click right after an attempt waits.
+    expect(grokBillingRefreshDue({ attemptedAt: stamp - GROK_BILLING_FORCE_FLOOR_MS + 1 }, stamp, true)).toBe(false);
+    expect(grokBillingRefreshDue({ attemptedAt: stamp - GROK_BILLING_FORCE_FLOOR_MS }, stamp, true)).toBe(true);
+    expect(grokBillingRefreshDue({ attemptedAt: stamp - GROK_BILLING_REFRESH_MS, limits: [{ label: "WEEKLY", percent: 0.02 }] }, stamp)).toBe(true);
+    expect(grokBillingRefreshDue({ attemptedAt: stamp, limits: [] }, stamp)).toBe(false);
+    expect(grokBillingRefreshDue({}, stamp)).toBe(true);
+    expect(forceRefreshRequested(["bun", "collector.ts"])).toBe(false);
+    expect(forceRefreshRequested(["bun", "collector.ts", "--force-refresh"])).toBe(true);
+    // Only the argument forces. An inherited environment would force every tick.
+    const previous = process.env.INFOMARCHY_FORCE_REFRESH;
+    process.env.INFOMARCHY_FORCE_REFRESH = "1";
+    try {
+      expect(forceRefreshRequested(["bun", "collector.ts"])).toBe(false);
+    } finally {
+      if (previous === undefined) delete process.env.INFOMARCHY_FORCE_REFRESH;
+      else process.env.INFOMARCHY_FORCE_REFRESH = previous;
+    }
+  });
+
+  test("outbound usage calls are off unless explicitly allowed and the USAGE card is visible", () => {
+    const shown = ["bun", "collector.ts", "--id", "bg", "--usage-visible"];
+    const hidden = ["bun", "collector.ts", "--id", "bg"];
+    expect(usageCardVisible(shown)).toBe(true);
+    expect(usageCardVisible(hidden)).toBe(false);
+    expect(grokBillingAllowed({}, shown)).toBe(false);
+    expect(grokBillingAllowed({ INFOMARCHY_ALLOW_GROK_BILLING: "0" }, shown)).toBe(false);
+    expect(grokBillingAllowed({ INFOMARCHY_ALLOW_GROK_BILLING: "true" }, shown)).toBe(false);
+    expect(grokBillingAllowed({ INFOMARCHY_ALLOW_GROK_BILLING: "1" }, shown)).toBe(true);
+    expect(grokBillingAllowed({ INFOMARCHY_ALLOW_GROK_BILLING: "1" }, hidden)).toBe(false);
+    // The old skip switch never enables anything.
+    expect(grokBillingAllowed({ INFOMARCHY_SKIP_GROK_BILLING: "0" }, shown)).toBe(false);
+    expect(claudeRefreshAllowed({}, shown)).toBe(false);
+    expect(claudeRefreshAllowed({ INFOMARCHY_ALLOW_CLAUDE_REFRESH: "0" }, shown)).toBe(false);
+    expect(claudeRefreshAllowed({ INFOMARCHY_ALLOW_CLAUDE_REFRESH: "1" }, shown)).toBe(true);
+    expect(claudeRefreshAllowed({ INFOMARCHY_ALLOW_CLAUDE_REFRESH: "1" }, hidden)).toBe(false);
+    expect(claudeRefreshAllowed({ INFOMARCHY_SKIP_CLAUDE_USAGE: "0" }, shown)).toBe(false);
+  });
+
+  test("the Claude CLI refresh is due only when expired, from the wallpaper, once per 15 minutes", () => {
+    const minute = 60_000, stamp = 100 * minute;
+    expect(claudeRefreshDue(0, stamp, true, "bg")).toBe(true);
+    expect(claudeRefreshDue(0, stamp, false, "bg")).toBe(false);
+    expect(claudeRefreshDue(0, stamp, true, "overlay")).toBe(false);
+    expect(claudeRefreshDue(stamp - 14 * minute, stamp, true, "bg")).toBe(false);
+    expect(claudeRefreshDue(stamp - 15 * minute, stamp, true, "bg")).toBe(true);
+    // A clock that moved backwards keeps the limit rather than lifting it.
+    expect(claudeRefreshDue(stamp + minute, stamp, true, "bg")).toBe(false);
+  });
+
+  test("Claude auth help follows status and OAuth expiry is explicit", () => {
+    expect(normalizeUsage({authHelpText: "Run claude auth login", limits: [{label:"Weekly", percent:0.2}]}).authHelpText).toBe("");
+    expect(normalizeUsage({usageStatusText: "expired", authHelpText: "Sign in"}).authHelpText).toBe("Sign in");
+    expect(claudeOauthExpiredAt(1000, 1001)).toBe(true);
+    expect(claudeOauthExpiredAt(2000, 1001)).toBe(false);
+  });
+});
+
 describe("Grok billing without token snapshots", () => {
   test("attaches observed limits to session-only usage without inventing tokens", () => {
     const dir = join(testRoot, "grok-session-billing");
@@ -2314,22 +2335,4 @@ describe("Grok billing backoff and mutual exclusion", () => {
     expect(called).toBe(false);
     expect(readFileSync(target, "utf8")).toBe("must survive");
   });
-});
-
-test("the Claude CLI refresh is due only when expired, from the wallpaper, once per 15 minutes", () => {
-  const minute = 60_000, stamp = 100 * minute;
-  expect(claudeRefreshDue(0, stamp, true, "bg")).toBe(true);
-  expect(claudeRefreshDue(0, stamp, false, "bg")).toBe(false);
-  expect(claudeRefreshDue(0, stamp, true, "overlay")).toBe(false);
-  expect(claudeRefreshDue(stamp - 14 * minute, stamp, true, "bg")).toBe(false);
-  expect(claudeRefreshDue(stamp - 15 * minute, stamp, true, "bg")).toBe(true);
-  // A clock that moved backwards keeps the limit rather than lifting it.
-  expect(claudeRefreshDue(stamp + minute, stamp, true, "bg")).toBe(false);
-});
-
-test("Claude auth help follows status and OAuth expiry is explicit", () => {
-  expect(normalizeUsage({authHelpText: "Run claude auth login", limits: [{label:"Weekly", percent:0.2}]}).authHelpText).toBe("");
-  expect(normalizeUsage({usageStatusText: "expired", authHelpText: "Sign in"}).authHelpText).toBe("Sign in");
-  expect(claudeOauthExpiredAt(1000, 1001)).toBe(true);
-  expect(claudeOauthExpiredAt(2000, 1001)).toBe(false);
 });
