@@ -37,9 +37,10 @@ const CEILINGS: Record<string, number> = {
   // same exit-status metadata warning every other Process handler produces.
   "Infomarchy.qml": 33,
   "InfoModel.qml": 6,
-  // 2 (#25): the settings writer and the web status reader are Processes
-  // with onExited handlers, which qmllint cannot type without QProcess.
-  "InfoSettings.qml": 2,
+  // 3 (#25): the settings writer, the RETRY SETUP launcher and the WEB
+  // prerequisite check are Processes with onExited handlers, which qmllint
+  // cannot type without QProcess.
+  "InfoSettings.qml": 3,
   // 509 came in with privacy mode (#17). The two above it are the topic mask
   // folded into that merge: qmllint cannot resolve a view-scoped function, so
   // each call site of displayTopic reads as a missing property, exactly like

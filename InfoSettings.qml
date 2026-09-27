@@ -501,6 +501,41 @@ Item {
     persist({ webEnabled: webEnabled })
   }
   function toggleWebEnabled() { setWebEnabled(!webEnabled) }
+  // Enabling from outside the drawer (IPC) passes the same gate the drawer
+  // does, and fails closed: a chosen mode, no pending save, and a passing
+  // prerequisite check (Tailscale status, or the saved Manual certificate).
+  // Turning WEB off never waits for a check.
+  function enableWebChecked() {
+    if (webEnabled || webPrereq.running) return
+    if (webModeUnset) { webStatusText = "Choose an access mode in SETTINGS before turning WEB on."; return }
+    if (settingsWriting) { webStatusText = "Settings are still saving. Try again."; return }
+    webPrereq.mode = webAccessMode
+    webPrereq.output = ""
+    webPrereq.running = true
+  }
+  function toggleWebChecked() { if (webEnabled) setWebEnabled(false); else enableWebChecked() }
+  Process {
+    id: webPrereq
+    property string mode: ""
+    property string output: ""
+    command: ["bun", Qt.resolvedUrl(mode === "manual" ? "web-manual.ts" : "web-tailscale.ts").toString().replace(/^file:\/\//, "")]
+    stdout: SplitParser {
+      splitMarker: ""
+      onRead: function(chunk) {
+        if (webPrereq.output.length + chunk.length > 2048) { webPrereq.running = false; return }
+        webPrereq.output += chunk
+      }
+    }
+    onExited: {
+      var result = null
+      try { result = JSON.parse(output) } catch (e) {}
+      output = ""
+      // The mode may have changed while the check ran. Only a pass for the
+      // mode still selected enables WEB.
+      if (result && result.ok === true && mode === root.webAccessMode && !root.webModeUnset && !root.settingsWriting) root.setWebEnabled(true)
+      else root.webStatusText = String(result && result.message ? result.message : "Prerequisite check failed. Open SETTINGS to finish setup.").replace(/[<>\u0000-\u001f]/g, " ").slice(0, 400)
+    }
+  }
   // One-shot cleanup for a listener saved on by a build that had LAN HTTP:
   // save WEB off, and mark web.json not listening so the collector stops
   // refreshing web-snapshot.json. Idempotent, so both desk instances may run it.

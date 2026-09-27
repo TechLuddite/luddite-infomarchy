@@ -1206,7 +1206,8 @@ Item {
         Tag {
           text: view.settings.webEnabled ? (view.settings.webReady ? "WEB ON" : (view.settings.webStarting ? "WEB …" : "WEB FAILED")) : "WEB"
           tone: view.settings.webReady ? view.desk.green : (view.settings.webFailed ? view.desk.yellow : view.textFaint)
-          MouseArea { anchors.fill: parent; enabled: view.interactive; cursorShape: Qt.PointingHandCursor; onClicked: view.settings.toggleWebEnabled() }
+          // Off: open SETTINGS, where the setup gates live. On: turn WEB off.
+          MouseArea { anchors.fill: parent; enabled: view.interactive; cursorShape: Qt.PointingHandCursor; onClicked: { if (view.settings.webEnabled) view.settings.setWebEnabled(false); else view.settingsOpen = true } }
         }
         Tag { text: view.keyboardAvailable ? "SUPER+I HIDE DESK · SUPER+D / ESC CLOSE" : "SUPER+I HIDE DESK · SUPER+D SHOW OVER WINDOWS"; tone: view.textFaint }
         // Keyboard shortcuts only reach the overlay (the wallpaper layer has no keyboard focus).

@@ -291,7 +291,7 @@ Scope {
     function togglePrivacy(): void { dashboardSettings.togglePrivacyMode() }
     function getPrivacy(): string { return dashboardSettings.privacyMode ? "true" : "false" }
     function retryWeb(): void { root.retryWebSetup() }
-    function toggleWeb(): void { dashboardSettings.toggleWebEnabled() }
+    function toggleWeb(): void { dashboardSettings.toggleWebChecked() }
     function copyWebUrl(): void { if (dashboardSettings.webEnabled) Quickshell.execDetached(["bun", root.webServerPath, "copy-url"]) }
     function setWebCidrs(v: string): void {
       var parts = String(v || "").split(/[\s,]+/)

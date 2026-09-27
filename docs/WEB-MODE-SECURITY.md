@@ -52,7 +52,7 @@ The listener requires the exact configured HTTPS Host/Origin plus source authori
 
 ## Credentials, requests, and UI
 
-Setup and viewer management are desktop controls in the dashboard SETTINGS drawer. This contribution does not register a bar widget.
+Setup and viewer management are desktop controls in the dashboard SETTINGS drawer. This contribution does not register a bar widget. Every path that turns WEB on passes a gate and fails closed. The drawer requires a chosen mode, no pending save, and a passing Tailscale check or a saved Manual form. The strip WEB chip only opens the drawer when WEB is off. The `toggleWeb` IPC requires a chosen mode and no pending save, then runs the Tailscale status check or the Manual certificate check and enables WEB only if that check passes for the mode still selected. Turning WEB off never waits for a check.
 
 Viewer tokens are individually revocable bearer credentials stored in `web.json` with mode 0600. Credential reads validate the opened descriptor, ownership, link count, mode, and bounded size; symlinks and invalid files fail closed. Rejected state is not silently replaced with new credentials or stale cached tokens. All credential mutations (creation, token add/revoke, CIDR changes, and enable/disable) acquire `web-config.lock` before reading and retain it through atomic publication. The whole-config writer is private to those transactions, so an unrelated update cannot restore a revoked token from a stale read. Revocation affects subsequent authenticated requests. WEB off keeps credentials; add a replacement before revoking the last token. `token-revoke` reports `revoked`, `not-found`, `last-token` or `unavailable` (exit 0, 2, 3 or 1), so a refused revoke is never mistaken for a dead credential.
 

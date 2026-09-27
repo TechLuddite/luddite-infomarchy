@@ -186,7 +186,7 @@ is required. See [Development apps](docs/apps.md) for setup and CLI usage.
 
 ## Web Mode
 
-Web Mode makes the Infomarchy desk available in a browser on your phone, tablet, or another computer. It runs with the desktop plugin, so the computer and Omarchy shell must stay running. Open **SETTINGS** from the desk's module strip to manage access.
+Web Mode makes the Infomarchy desk available in a browser on your phone, tablet, or another computer. It runs with the desktop plugin, so the computer and Omarchy shell must stay running. Open **SETTINGS** from the desk's module strip to manage access. The strip's **WEB** chip opens SETTINGS while WEB is off, and turns WEB off while it is on. `omarchy-shell infomarchy toggleWeb` turns WEB on only after the check SETTINGS runs for the chosen mode passes, and shows the reason in SETTINGS when it does not.
 
 The page follows the live Omarchy theme and wallpaper. Wide screens use two columns; narrow screens stack cards and offer **UP/DOWN** ordering. Module chips show or hide sections, and zoom is remembered for the current browser tab. Web section visibility and narrow-screen order are independent of the desktop layout but shared by web viewers. A successful refresh updates the page and theme every five seconds while preserving scroll position.
 
