@@ -2860,7 +2860,6 @@ function grokCliAccessToken(): string {
     return expired;
   } catch { return ""; }
   finally { if (fd >= 0) try { closeSync(fd); } catch {} }
-  return "";
 }
 async function fetchGrokBilling(): Promise<any | null> {
   const token = grokCliAccessToken();
