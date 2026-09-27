@@ -1,4 +1,4 @@
-import { parseGrokCreditsConfig, grokBillingFromUnifiedLog, grokObservedLimits, grokBillingRefreshDue, GROK_BILLING_REFRESH_MS, forceRefreshRequested, grokBillingAllowed, claudeRefreshAllowed, usageCardVisible, claudeRefreshDue, withGrokObservedLimits, refreshGrokBilling, claudeOauthExpiredAt } from "./collector.ts";
+import { parseGrokCreditsConfig, grokBillingFromUnifiedLog, grokObservedLimits, grokBillingRefreshDue, GROK_BILLING_REFRESH_MS, GROK_BILLING_FORCE_FLOOR_MS, forceRefreshRequested, grokBillingAllowed, claudeRefreshAllowed, usageCardVisible, claudeRefreshDue, withGrokObservedLimits, refreshGrokBilling, claudeOauthExpiredAt } from "./collector.ts";
 import { afterAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { Database } from "bun:sqlite";
@@ -1521,11 +1521,14 @@ describe("zombie detection", () => {
     expect(grokObservedLimits(dir, true)[0].percent).toBe(0.17);
   });
 
-  test("Grok billing refresh is due after 60s and immediately on force", () => {
+  test("Grok billing refresh is due after 60s, or after 10s on force", () => {
     const stamp = 1_000_000;
     const fresh = { attemptedAt: stamp - GROK_BILLING_REFRESH_MS + 1, limits: [{ label: "WEEKLY", percent: 0.02 }] };
     expect(grokBillingRefreshDue(fresh, stamp)).toBe(false);
     expect(grokBillingRefreshDue(fresh, stamp, true)).toBe(true);
+    // Force skips the cache, not the floor: a click right after an attempt waits.
+    expect(grokBillingRefreshDue({ attemptedAt: stamp - GROK_BILLING_FORCE_FLOOR_MS + 1 }, stamp, true)).toBe(false);
+    expect(grokBillingRefreshDue({ attemptedAt: stamp - GROK_BILLING_FORCE_FLOOR_MS }, stamp, true)).toBe(true);
     expect(grokBillingRefreshDue({ attemptedAt: stamp - GROK_BILLING_REFRESH_MS, limits: [{ label: "WEEKLY", percent: 0.02 }] }, stamp)).toBe(true);
     expect(grokBillingRefreshDue({ attemptedAt: stamp, limits: [] }, stamp)).toBe(false);
     expect(grokBillingRefreshDue({}, stamp)).toBe(true);
@@ -1913,6 +1916,8 @@ describe("Grok billing backoff and mutual exclusion", () => {
     await refreshGrokBilling({ ...options, stamp: 1_060_000 });
     expect(calls).toBe(2);
     await refreshGrokBilling({ ...options, stamp: 1_060_001, force: true });
+    expect(calls).toBe(2);
+    await refreshGrokBilling({ ...options, stamp: 1_060_000 + GROK_BILLING_FORCE_FLOOR_MS, force: true });
     expect(calls).toBe(3);
   });
 
@@ -1932,14 +1937,15 @@ describe("Grok billing backoff and mutual exclusion", () => {
     try {
       await started;
       expect(JSON.parse(readFileSync(join(directory, "grok-billing.json"), "utf8")).attemptedAt).toBe(options.stamp);
-      await refreshGrokBilling({ ...options, force: true, fetchBilling: async () => { calls++; return null; } });
+      // Past the force floor, so only the lock can be what stops this one.
+      await refreshGrokBilling({ ...options, stamp: options.stamp + GROK_BILLING_FORCE_FLOOR_MS, force: true, fetchBilling: async () => { calls++; return null; } });
       expect(calls).toBe(1);
     } finally { release(); await first; }
-    await refreshGrokBilling({ ...options, force: true, fetchBilling: async () => { calls++; return { creditUsagePercent: 25 }; } });
+    await refreshGrokBilling({ ...options, stamp: options.stamp + GROK_BILLING_FORCE_FLOOR_MS, force: true, fetchBilling: async () => { calls++; return { creditUsagePercent: 25 }; } });
     expect(calls).toBe(2);
     expect(grokObservedLimits(directory, true)[0].percent).toBe(0.25);
     // A later outage preserves the successful result while recording backoff.
-    await refreshGrokBilling({ ...options, stamp: 2_060_000, fetchBilling: async () => null });
+    await refreshGrokBilling({ ...options, stamp: 2_070_000, fetchBilling: async () => null });
     expect(grokObservedLimits(directory, true)[0].percent).toBe(0.25);
   });
 
@@ -1957,7 +1963,7 @@ describe("Grok billing backoff and mutual exclusion", () => {
       child.kill("SIGKILL");
       await child.exited;
       let called = false;
-      await refreshGrokBilling({ directory, enabled: true, force: true, readLog: () => "", fetchBilling: async () => { called = true; return null; } });
+      await refreshGrokBilling({ directory, enabled: true, force: true, stamp: Date.now() + GROK_BILLING_FORCE_FLOOR_MS, readLog: () => "", fetchBilling: async () => { called = true; return null; } });
       expect(called).toBe(true);
     } finally { await terminate(child); }
   });

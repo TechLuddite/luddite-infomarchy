@@ -2883,10 +2883,12 @@ async function fetchGrokBilling(): Promise<any | null> {
     return parsed && typeof parsed === "object" ? parsed : null;
   } catch { return null; }
 }
+// HARD REFRESH skips the 60-second cache but not this floor, so repeated
+// clicks cannot turn into one authenticated request each.
+export const GROK_BILLING_FORCE_FLOOR_MS = 10_000;
 export function grokBillingRefreshDue(existing: any, stamp: number, force = false): boolean {
-  if (force) return true;
   const attemptedAt = Number(existing && existing.attemptedAt || existing && existing.fetchedAt || 0);
-  if (attemptedAt && stamp - attemptedAt < GROK_BILLING_REFRESH_MS) return false;
+  if (attemptedAt && stamp - attemptedAt < (force ? GROK_BILLING_FORCE_FLOOR_MS : GROK_BILLING_REFRESH_MS)) return false;
   return true;
 }
 // flock operates on the inherited stdin descriptor's open-file description.
