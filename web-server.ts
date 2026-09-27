@@ -272,16 +272,22 @@ export function addWebToken(label: string): WebToken | null {
   }); } catch { return null; }
 }
 
-export function revokeWebToken(id: string): boolean {
-  try { return withStateLock(STATE_DIR, "web-config.lock", () => {
+export type RevokeResult = "revoked" | "not-found" | "last-token" | "unavailable";
+export const REVOKE_EXIT: Record<RevokeResult, number> = { revoked: 0, unavailable: 1, "not-found": 2, "last-token": 3 };
+
+// Distinguishes a missing id from the last remaining token, so a caller never
+// mistakes a refused revoke for a dead credential. "unavailable" covers an
+// unreadable web.json, a busy lock and a failed save.
+export function revokeWebToken(id: string): RevokeResult {
+  try { return withStateLock(STATE_DIR, "web-config.lock", (): RevokeResult => {
     const config = loadConfig();
-    if (!config) return false;
+    if (!config) return "unavailable";
     const next = config.tokens.filter(row => row.id !== id);
-    if (next.length === config.tokens.length) return false;
-    if (!next.length) return false;
+    if (next.length === config.tokens.length) return "not-found";
+    if (!next.length) return "last-token";
     config.tokens = next;
-    return saveConfig(config);
-  }); } catch { return false; }
+    return saveConfig(config) ? "revoked" : "unavailable";
+  }); } catch { return "unavailable"; }
 }
 
 export function addExtraCidr(text: string): boolean {
@@ -799,9 +805,9 @@ if (import.meta.main) {
     process.exit(created ? 0 : 1);
   }
   if (cmd === "token-revoke") {
-    const ok = revokeWebToken(process.argv[3] || "");
-    await Bun.write(Bun.stdout, JSON.stringify({ ok }) + "\n");
-    process.exit(ok ? 0 : 1);
+    const reason = revokeWebToken(process.argv[3] || "");
+    await Bun.write(Bun.stdout, JSON.stringify({ ok: reason === "revoked", reason }) + "\n");
+    process.exit(REVOKE_EXIT[reason]);
   }
   if (cmd === "cidr-add") {
     const ok = addExtraCidr(process.argv[3] || "");

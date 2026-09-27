@@ -68,7 +68,7 @@ test("concurrent revocation, token creation, CIDRs and listener writes cannot re
   const held = await heldLock(dir, "web-config.lock");
   let completed = 0;
   const jobs = [
-    `if(!w.revokeWebToken(${JSON.stringify(id)})) process.exit(1);`,
+    `if(w.revokeWebToken(${JSON.stringify(id)})!=="revoked") process.exit(1);`,
     `if(!w.addWebToken('viewer two')) process.exit(1);`,
     `if(!w.addWebToken('viewer three')) process.exit(1);`,
     `if(!w.addExtraCidr('10.11.0.0/16')) process.exit(1);`,

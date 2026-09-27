@@ -71,3 +71,26 @@ describe("url prints no credential unless asked", () => {
     }
   });
 });
+
+describe("token-revoke says why", () => {
+  test("revoked, not-found and last-token have distinct reasons and exit codes", async () => {
+    const state = readyState();
+    const missing = await cli(state, "token-revoke", "cccccccc");
+    expect([missing.code, missing.json]).toEqual([2, { ok: false, reason: "not-found" }]);
+    const revoked = await cli(state, "token-revoke", "aaaaaaaa");
+    expect([revoked.code, revoked.json]).toEqual([0, { ok: true, reason: "revoked" }]);
+    const again = await cli(state, "token-revoke", "aaaaaaaa");
+    expect([again.code, again.json]).toEqual([2, { ok: false, reason: "not-found" }]);
+    const last = await cli(state, "token-revoke", "bbbbbbbb");
+    expect([last.code, last.json]).toEqual([3, { ok: false, reason: "last-token" }]);
+    const saved = JSON.parse(readFileSync(join(state, "infomarchy", "web.json"), "utf8"));
+    expect(saved.tokens.map((t: { id: string }) => t.id)).toEqual(["bbbbbbbb"]);
+  });
+
+  test("an unreadable credential file is unavailable, not a missing id", async () => {
+    const state = readyState();
+    writeFileSync(join(state, "infomarchy", "web.json"), "{malformed", { mode: 0o600 });
+    const r = await cli(state, "token-revoke", "aaaaaaaa");
+    expect([r.code, r.json]).toEqual([1, { ok: false, reason: "unavailable" }]);
+  });
+});
