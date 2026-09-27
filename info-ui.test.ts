@@ -1169,8 +1169,32 @@ describe("hard refresh", () => {
     expect(strip.indexOf("HARD REFRESH")).toBeLessThan(strip.indexOf("Repeater {"));
     expect(view).toContain("onClicked: view.desk.hardRefresh()");
     expect(model).toContain("function hardRefresh()");
-    expect(model).toContain('cmd.push("--force-refresh")');
     expect(service).toContain("function hardRefresh(): void { infoModel.hardRefresh() }");
     expect(overlay).toContain("function hardRefresh() { infoModel.hardRefresh() }");
+  });
+});
+
+describe("collector command", () => {
+  // The command is a declarative binding, so no start path can drop --demo.
+  const body = model.match(/\n    command: \{\n([\s\S]*?)\n    \}\n/)?.[1] || "";
+  const build = (props: Record<string, unknown>) =>
+    Function("root", body)({ collectorPath: "/p/collector.ts", instance: "bg", demoMode: false, forceRefreshArmed: false, ...props });
+
+  test("is a binding and is never assigned imperatively", () => {
+    expect(body).toContain("root.demoMode");
+    expect(model).not.toMatch(/collector\.command\s*=/);
+    expect(model).not.toContain("function collectorCommand");
+  });
+
+  test("demo mode always carries --demo, even when a hard refresh is armed", () => {
+    expect(build({ demoMode: true })).toEqual(["bun", "/p/collector.ts", "--id", "bg", "--demo"]);
+    const armed = build({ demoMode: true, forceRefreshArmed: true });
+    expect(armed).toContain("--demo");
+    expect(armed).not.toContain("--force-refresh");
+  });
+
+  test("a hard refresh adds --force-refresh outside demo mode", () => {
+    expect(build({})).toEqual(["bun", "/p/collector.ts", "--id", "bg"]);
+    expect(build({ forceRefreshArmed: true })).toContain("--force-refresh");
   });
 });

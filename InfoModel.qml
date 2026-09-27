@@ -194,7 +194,15 @@ Item {
     readonly property int maxOutputBytes: 2 * 1024 * 1024
     readonly property int maxStderrBytes: 4096
     property bool forceRun: false
-    command: ["bun", root.collectorPath, "--id", root.instance]
+    // A binding, never an assignment: every start, including a future plain
+    // `collector.running = true`, gets --demo while demo mode is on. A change
+    // while running applies to the next start (Quickshell Process.command).
+    command: {
+      var cmd = ["bun", root.collectorPath, "--id", root.instance]
+      if (root.demoMode) return cmd.concat(["--demo"])
+      if (root.forceRefreshArmed) cmd.push("--force-refresh")
+      return cmd
+    }
     environment: root.ollamaHost !== "" ? ({ OLLAMA_HOST: root.ollamaHost }) : ({})
 
     function fail(message) {
@@ -274,15 +282,8 @@ Item {
       if (root.forceRefreshArmed) root.startCollector()
     }
   }
-  function collectorCommand() {
-    var cmd = ["bun", root.collectorPath, "--id", root.instance]
-    if (root.demoMode) cmd.push("--demo")
-    else if (root.forceRefreshArmed) cmd.push("--force-refresh")
-    return cmd
-  }
   function startCollector() {
     if (collector.running || bunProbe.running) return
-    collector.command = collectorCommand()
     collector.running = true
   }
   function hardRefresh() {
