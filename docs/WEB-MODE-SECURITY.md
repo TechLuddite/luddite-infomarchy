@@ -1,6 +1,6 @@
 # Web Mode security design
 
-Implemented design agreed on 2026-09-09, verified on 2026-09-10. See [README setup](../README.md#set-up-web-mode) for user instructions.
+See [README setup](../README.md#set-up-web-mode) for user instructions.
 
 ## Scope and rationale
 
@@ -71,12 +71,13 @@ The two lock files are persistent empty 0600 files validated through their opene
 - The viewer token is in the URL path. It can end up in browser history, history synced to a browser account, the address bar and screenshots. `Referrer-Policy: no-referrer` keeps it out of Referer headers, and the server keeps no request log. A proposed follow-up exchanges the link for a `__Host-` cookie and redirects to a token-free URL.
 - Rejected requests are not recorded, so a probe with a leaked or guessed link is not visible. A 192-bit token makes guessing infeasible.
 - Any process running as the same user can reach the loopback backend in Private HTTPS mode. It still needs a valid token.
+- A viewer's layout change rewrites `dashboard.json`, and the desk runs a local collect after it. The rate limit of 60 requests a minute for each viewer bounds it.
 - COPY URL passes `--sensitive` to `wl-copy`, which asks clipboard managers not to keep the link. A manager that ignores the hint can still keep it. An older `wl-copy` without the flag gets one plain retry.
 
 ## Validation expectations
 
 For future changes, test distinctive private sentinels against actual HTML/JSON response bytes, privacy transitions, allowed four-word disclosure, topic removal under privacy, and browser mutation attempts. Exercise competing real helper processes and stale QML instances, privacy/WEB-off preservation, revocation during other credential mutations, lock rejection/crash release, and write-failure recovery. Preserve credential/revocation, Host/Origin, CSP, malformed-state, bounded-output, and shutdown tests. Exercise absent/stopped/signed-out Tailscale, conflicts, setup failures, repeated enable/disable, direct-backend boundaries, and crash cleanup. For Manual HTTPS, exercise a real TLS handshake with client trust enabled, SAN/key/fingerprint/expiry failures, unsafe file paths and permissions, Host/Origin/source/token checks, absence of HTTP fallback, and QML save/check/mode-switch behavior. Unit and mocked tests do not replace real-device or QML verification.
 
-Real-device evidence: the user confirmed Android access using the private-CA/IP-SAN setup after a scoped inbound firewall rule, then confirmed access through the restored Tailscale URL. Local probes alone had missed the inbound firewall block. The temporary CA download service and test firewall rule were removed afterward. This validates the exercised setup, not every client trust store or network.
+Real-device evidence, from before this rework on the branch as first proposed: the user confirmed Android access using the private-CA/IP-SAN setup after a scoped inbound firewall rule, then confirmed access through the restored Tailscale URL. Local probes alone had missed the inbound firewall block. The temporary CA download service and test firewall rule were removed afterward. This validates the exercised setup, not every client trust store or network.
 
 Reference: [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve) and [HTTPS prerequisites](https://tailscale.com/docs/how-to/set-up-https-certificates).
