@@ -93,8 +93,26 @@ export function filterWebSnapshot(snapshot: any, privacy = true): any {
   const pick = (row: any, keys: string[]) => Object.fromEntries(keys
     .filter(key => row && Object.hasOwn(row, key)).map(key => [key, row[key]]));
   const ai = snap.ai || {};
-  const machine = { ...snap.machine, net: { ...snap.machine?.net } };
-  machine.disks = take(machine.disks, 2).map(d => ({ ...d, mount: privacy ? displayMount(d.mount) : d.mount }));
+  const nums = (list: unknown, n: number) => take(list, n).map(v => Number(v) || 0);
+  // Heatmap cells are a count, or [count, {kind: count}]. Only numbers pass.
+  const heatCells = (list: unknown) => take(list, 168).map(cell => {
+    const kinds = Array.isArray(cell) && cell[1] && typeof cell[1] === "object" ? cell[1] : {};
+    const count = Array.isArray(cell) ? cell[0] : cell && typeof cell === "object" ? cell.n : cell;
+    return [Number(count) || 0, Object.fromEntries(Object.keys(kinds).slice(0, 16).map(k => [k, Number(kinds[k]) || 0]))];
+  });
+  const counts = (map: any, keys: string[]) => Object.fromEntries(keys
+    .filter(key => map && typeof map === "object" && map[key] && typeof map[key] === "object")
+    .map(key => [key, pick(map[key], ["today", "week"])]));
+  const m = snap.machine && typeof snap.machine === "object" ? snap.machine : {};
+  const machine: any = {
+    ...pick(m, ["temp", "uptime", "externalIp"]),
+    cpu: { ...pick(m.cpu, ["pct"]), ...(Array.isArray(m.cpu?.load) ? { load: nums(m.cpu.load, 3) } : {}) },
+    mem: pick(m.mem, ["pct", "used", "total"]),
+    net: pick(m.net, ["dev", "wireless", "ssid", "signal", "addr", "rxRate", "txRate"]),
+    ping: pick(m.ping, ["ok", "ms"]),
+    battery: m.battery && typeof m.battery === "object" ? pick(m.battery, ["pct", "status"]) : null,
+    disks: take(m.disks, 2).map(d => ({ ...pick(d, ["size", "used", "pct"]), mount: privacy ? displayMount(d?.mount) : d?.mount })),
+  };
   if (privacy) {
     machine.externalIp = null;
     machine.net.ssid = null;
@@ -108,16 +126,42 @@ export function filterWebSnapshot(snapshot: any, privacy = true): any {
   });
   const usage = Object.fromEntries(Object.entries(ai.usage || {}).slice(0, 8).map(([key, row]: [string, any]) => [key, {
     ...pick(row, ["name", "ready", "tierLabel", "todayPrompts", "todaySessions", "todayTotalTokens", "hasTokenData", "totalSessions", "authHelpText", "usageStatusText"]),
-    dailyTokens: take(row?.dailyTokens, 7),
+    dailyTokens: nums(row?.dailyTokens, 7),
     models: take(row?.models, 8).map(m => pick(m, ["id", "share", "todayTokens", "sessions"])),
     limits: take(row?.limits, 8).map(l => pick(l, ["label", "title", "percent", "resetsAt"])),
     value: { ...pick(row?.value, ["lifetime", "today"]), totals: pick(row?.value?.totals, ["inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens"]) },
   }]));
+  // Deny by default: the filtered view names every object field it keeps,
+  // machine telemetry included, so a new collector field (FLEET, APPS,
+  // CONTAINERS, GITEA, future usage or machine fields) reaches a browser only
+  // when it is added here. Heatmap, day and daily-token arrays carry numbers
+  // and dates only.
+  const ollama = ai.providers?.ollama;
+  const project = (row: any) => ({
+    ...pick(row, ["project", "repo", "status"]),
+    git: pick(row?.git, ["branch", "dirty", "ahead", "behind"]),
+    ...(row?.changes && typeof row.changes === "object" ? { changes: {
+      fileCount: Array.isArray(row.changes.files) ? row.changes.files.length : Number(row.changes.fileCount || 0),
+      ...pick(row.changes, ["commitSubject"]),
+    } } : {}),
+  });
   return {
-    ...snap, media: undefined, containers: undefined,
+    ...pick(snap, ["ts"]),
     user: privacy ? null : snap.user, host: privacy ? null : snap.host, machine,
     ai: {
-      ...ai, github: { ...ai.github, login: "" }, gitea: undefined, usage,
+      ...(Array.isArray(ai.usageDays) ? { usageDays: take(ai.usageDays, 31).map(String) } : {}),
+      ...(ai.heatmap && typeof ai.heatmap === "object" ? { heatmap: { cells: heatCells(ai.heatmap.cells), days: nums(ai.heatmap.days, 7) } } : {}),
+      ...(ai.counts && typeof ai.counts === "object" ? { counts: counts(ai.counts, Object.keys(ai.counts).slice(0, 8)) } : {}),
+      github: {
+        ...(ai.github && typeof ai.github === "object" ? { cells: heatCells(ai.github.cells), days: nums(ai.github.days, 7) } : {}),
+        counts: counts(ai.github?.counts, ["commit", "pr", "review", "issue", "comment", "other"]), login: "",
+      }, usage,
+      projects: take(ai.projects, 8).map(project),
+      providers: ollama && typeof ollama === "object" ? { ollama: {
+        ...pick(ollama, ["present", "up"]),
+        loaded: take(ollama.loaded, 8).map(m => pick(m, ["name"])),
+        models: take(ollama.models, 12).map(m => pick(m, ["name", "size", "parameterSize"])),
+      } } : {},
       sessions: take(ai.sessions, 12).map(session),
       attention: take(ai.attention, 8).map(session),
       recent: take(ai.recent, 24).map(row => ({

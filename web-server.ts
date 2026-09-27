@@ -441,13 +441,18 @@ export async function qrMatrixForUrl(url: string, executable = "/usr/bin/qrencod
   } finally { clearTimeout(timer); proc.kill("SIGKILL"); await proc.exited; }
 }
 
+// --sensitive asks clipboard managers not to keep the link in history. A
+// wl-copy too old for the flag gets one plain retry rather than no copy.
 export async function copyWebLink(url: string, executable = "/usr/bin/wl-copy"): Promise<boolean> {
-  let proc: ReturnType<typeof Bun.spawn>;
-  try { proc = Bun.spawn([executable], { stdin: new Blob([url]), stdout: "ignore", stderr: "ignore" }); }
-  catch { return false; }
-  const timer = setTimeout(() => proc.kill("SIGKILL"), 3000);
-  try { return await proc.exited === 0; }
-  finally { clearTimeout(timer); }
+  for (const args of [["--sensitive"], []]) {
+    let proc: ReturnType<typeof Bun.spawn>;
+    try { proc = Bun.spawn([executable, ...args], { stdin: new Blob([url]), stdout: "ignore", stderr: "ignore" }); }
+    catch { return false; }
+    const timer = setTimeout(() => proc.kill("SIGKILL"), 3000);
+    try { if (await proc.exited === 0) return true; }
+    finally { clearTimeout(timer); }
+  }
+  return false;
 }
 
 export const SECURITY_HEADERS: Record<string, string> = {
@@ -456,6 +461,10 @@ export const SECURITY_HEADERS: Record<string, string> = {
   "Referrer-Policy": "no-referrer",
   "Cache-Control": "no-store",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+  // No HSTS: a policy would apply to every port on the same host name, and
+  // viewer links are always HTTPS.
+  "Cross-Origin-Resource-Policy": "same-origin",
+  "Cross-Origin-Opener-Policy": "same-origin",
   "Content-Security-Policy": contentSecurityPolicy(),
 };
 

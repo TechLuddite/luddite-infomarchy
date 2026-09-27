@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { filterWebSnapshot, LIVE_SCRIPT, parseDashPrefs } from "./web-page";
-import { handleRequest, parseCidrList, parsePrefsPatch } from "./web-server";
+import { copyWebLink, handleRequest, parseCidrList, parsePrefsPatch, SECURITY_HEADERS } from "./web-server";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { assessTailscale, boundedCommand, portOccupied, tailOrigin } from "./web-tailscale";
 
 const token = "a".repeat(48);
@@ -123,5 +126,91 @@ describe("guided Serve setup", () => {
     expect(await boundedCommand(["/usr/bin/yes"], 32)).toBeNull();
     expect(await boundedCommand(["/usr/bin/sleep", "10"], 32, 30)).toBeNull();
     expect(await boundedCommand(["/does/not/exist"], 32)).toBeNull();
+  });
+});
+
+describe("defense in depth", () => {
+  test("fields no renderer names never reach a browser, at either privacy setting", () => {
+    const extra = structuredClone(snapshot) as any;
+    extra.fleet = { hosts: [{ name: "LEAK_FLEET_HOST" }] };
+    extra.apps = [{ name: "LEAK_APP", cwd: "/home/x/LEAK_APP_DIR" }];
+    extra.containers = [{ name: "LEAK_CONTAINER" }];
+    extra.futureTopLevel = "LEAK_TOP";
+    extra.ai.gitea = { login: "LEAK_GITEA_LOGIN" };
+    extra.ai.hermes = { key: "LEAK_HERMES" };
+    extra.ai.futureAi = "LEAK_AI";
+    extra.ai.usage.claude.billing = { window: "LEAK_BILLING" };
+    extra.ai.usage.claude.tint = "LEAK_TINT";
+    extra.ai.projects = [{ project: "repo", path: "/home/x/LEAK_PROJECT_PATH", changes: { files: ["/home/x/LEAK_FILE"], commitSubject: "subject" }, git: { branch: "main", remote: "LEAK_REMOTE" } }];
+    extra.ai.providers = { ollama: { present: true, up: true, host: "LEAK_OLLAMA_HOST", loaded: [{ name: "qwen3", digest: "LEAK_DIGEST" }], models: [{ name: "qwen3", size: 1, path: "LEAK_MODEL_PATH" }] }, other: { secret: "LEAK_PROVIDER" } };
+    // Machine telemetry, the heatmaps and their counts are named field by field too.
+    extra.machine = {
+      hostname: "LEAK_HOSTNAME", temp: 50, uptime: 60, externalIp: "203.0.113.9",
+      cpu: { pct: 12, load: [0.5, 0.4, 0.3], model: "LEAK_CPU_MODEL" },
+      mem: { pct: 40, used: 4, total: 10, swapDevice: "LEAK_SWAP" },
+      net: { dev: "wlan0", wireless: true, ssid: "home", signal: -50, addr: "192.168.1.9", rxRate: 1, txRate: 2, gateway: "LEAK_GATEWAY" },
+      ping: { ok: true, ms: 9, target: "LEAK_PING_TARGET" },
+      battery: { pct: 80, status: "Charging", serial: "LEAK_BATTERY_SERIAL" },
+      disks: [{ mount: "/", size: 100, used: 50, pct: 50, device: "LEAK_DISK_DEVICE" }],
+    };
+    extra.ai.heatmap = { cells: [[2, { claude: 2 }], { n: 1, note: "LEAK_CELL" }], days: [1], extra: "LEAK_HEATMAP" };
+    extra.ai.counts = { claude: { today: 1, week: 2, extra: "LEAK_COUNTS" } };
+    extra.ai.github = { login: "LEAK_GITHUB_LOGIN", cells: [3], days: [1], counts: { pr: { today: 1, week: 1, extra: "LEAK_GITHUB_COUNTS" } } };
+    for (const privacyMode of [true, false]) {
+      const prefs = parseDashPrefs({ privacyMode });
+      for (const pathname of [base.pathname, base.pathname + "snapshot.json"]) {
+        const body = String(handleRequest({ ...base, snapshot: extra, pathname, prefs }).body);
+        expect(body.match(/LEAK_[A-Z_]+/g)).toBeNull();
+      }
+      // The filtered view itself holds none of them, so a future renderer cannot leak them either.
+      expect(JSON.stringify(filterWebSnapshot(extra, privacyMode)).match(/LEAK_[A-Z_]+/g)).toBeNull();
+    }
+    const view = filterWebSnapshot(extra, false);
+    expect(view.ai.projects[0]).toEqual({ project: "repo", git: { branch: "main" }, changes: { fileCount: 1, commitSubject: "subject" } });
+    expect(view.ai.providers.ollama.models[0]).toEqual({ name: "qwen3", size: 1 });
+    // Tight enough to leak nothing, loose enough that the MACHINE card keeps every value it shows.
+    expect(view.machine).toEqual({
+      temp: 50, uptime: 60, externalIp: "203.0.113.9",
+      cpu: { pct: 12, load: [0.5, 0.4, 0.3] },
+      mem: { pct: 40, used: 4, total: 10 },
+      net: { dev: "wlan0", wireless: true, ssid: "home", signal: -50, addr: "192.168.1.9", rxRate: 1, txRate: 2 },
+      ping: { ok: true, ms: 9 },
+      battery: { pct: 80, status: "Charging" },
+      disks: [{ mount: "/", size: 100, used: 50, pct: 50 }],
+    });
+    expect(view.ai.heatmap).toEqual({ cells: [[2, { claude: 2 }], [1, {}]], days: [1] });
+    expect(view.ai.counts).toEqual({ claude: { today: 1, week: 2 } });
+    expect(view.ai.github).toEqual({ cells: [[3, {}]], days: [1], counts: { pr: { today: 1, week: 1 } }, login: "" });
+  });
+
+  test("every response carries CORP and COOP and no HSTS", () => {
+    // HSTS would cover every port on the same host name, and links are always HTTPS.
+    expect(SECURITY_HEADERS["Strict-Transport-Security"]).toBeUndefined();
+    expect(SECURITY_HEADERS["Cross-Origin-Resource-Policy"]).toBe("same-origin");
+    expect(SECURITY_HEADERS["Cross-Origin-Opener-Policy"]).toBe("same-origin");
+    const replies = [
+      handleRequest(base), handleRequest({ ...base, host: "evil.example" }), handleRequest({ ...base, pathname: "/t/" + "b".repeat(48) + "/" }),
+      handleRequest({ ...base, snapshot: null }), handleRequest({ ...base, method: "PUT" }),
+    ];
+    expect(replies.map(r => r.status)).toEqual([200, 403, 404, 503, 405]);
+    for (const r of replies) {
+      expect(r.headers).not.toHaveProperty("Strict-Transport-Security");
+      expect(r.headers["Cross-Origin-Resource-Policy"]).toBe("same-origin");
+      expect(r.headers["Cross-Origin-Opener-Policy"]).toBe("same-origin");
+    }
+  });
+
+  test("COPY URL asks the clipboard not to keep the link, and retries plainly on an old wl-copy", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "infomarchy-wlcopy-"));
+    try {
+      const log = join(dir, "argv");
+      for (const [supportsFlag, expected] of [[true, ["--sensitive"]], [false, ["--sensitive", ""]]] as const) {
+        const stub = join(dir, "wl-copy-" + supportsFlag);
+        writeFileSync(stub, `#!/bin/sh\necho "$*" >> ${JSON.stringify(log + supportsFlag)}\ncat > /dev/null\n${supportsFlag ? "exit 0" : '[ "$1" = "--sensitive" ] && exit 1\nexit 0'}\n`);
+        chmodSync(stub, 0o755);
+        expect(await copyWebLink("https://desk.example.ts.net:8788/t/" + "a".repeat(48) + "/", stub)).toBe(true);
+        expect(readFileSync(log + supportsFlag, "utf8").split("\n").slice(0, -1)).toEqual([...expected]);
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });
