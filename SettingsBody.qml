@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
@@ -110,13 +111,43 @@ ColumnLayout {
     dropCidrProc.running = true
   }
 
+  // A list that shows at most `rows` rows and scrolls the rest inside its own
+  // box, so a full token or CIDR list never makes the drawer itself scroll.
+  component ScrollList: Item {
+    id: scrollList
+    property alias model: scrollRows.model
+    property alias delegate: scrollRows.delegate
+    property real rows: 4.5
+    property color barColor: "gray"
+    readonly property bool overflowing: scrollBody.implicitHeight > height + 0.5
+    implicitHeight: Math.min(scrollBody.implicitHeight, Math.round(rows * (Math.ceil(scrollMetrics.height) + Style.spacing.md) - Style.spacing.md))
+    FontMetrics { id: scrollMetrics; font.family: Style.resolvedFontFamily; font.pixelSize: Style.font.caption }
+    Flickable {
+      id: scrollFlick
+      anchors { fill: parent; rightMargin: scrollList.overflowing ? Style.spacing.md : 0 }
+      contentWidth: width
+      contentHeight: scrollBody.implicitHeight
+      clip: true
+      interactive: scrollList.overflowing
+      boundsBehavior: Flickable.StopAtBounds
+      Column { id: scrollBody; width: scrollFlick.width; spacing: Style.spacing.md; Repeater { id: scrollRows } }
+    }
+    Rectangle {
+      visible: scrollList.overflowing
+      anchors.right: parent.right
+      width: 2
+      y: scrollFlick.visibleArea.yPosition * scrollList.height
+      height: scrollFlick.visibleArea.heightRatio * scrollList.height
+      color: scrollList.barColor
+    }
+  }
+
   Text {
     textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap
     visible: !!root.settings.settingsError; text: root.settings.settingsError
     color: root.red; font.family: root.mono; font.pixelSize: Style.font.caption
   }
 
-  Text { textFormat: Text.PlainText; visible: !!root.statusText; text: root.statusText; Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.yellow; font.family: root.mono; font.pixelSize: Style.font.caption }
 
   Component.onCompleted: { refreshMeta(); checkTailscale(); resetManualDraft() }
   onVisibleChanged: if (!visible) hideQr()
@@ -239,314 +270,361 @@ ColumnLayout {
     onExited: root.refreshMeta()
   }
 
-  Text { textFormat: Text.PlainText; text: "WEB MODE"; color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true; font.letterSpacing: 1.4 }
-  Text {
-    textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap
-    text: "Desktop privacy " + (root.settings.privacyMode ? "ON" : "OFF") + ". It is off until you turn it on, and connected web viewers receive full values while it is off. With privacy on, recent prompts keep four words and session topics are not sent."
-    color: root.settings.privacyMode ? root.yellow : root.red; font.family: root.mono; font.pixelSize: Style.font.caption
-  }
+  // Three columns so every control is visible at once at 1600x1000 without
+  // page scrolling: ACCESS (mode and its setup), VIEWERS (WEB, links, QR,
+  // tokens, allow list) and SECTIONS. The token and CIDR lists scroll inside
+  // their own bounded boxes, so they never make the drawer scroll.
+  readonly property int columnGap: Style.spacing.xl * 2
+  function columnWidth(share) { return Math.floor((width - columnGap * 2) * share) }
   RowLayout {
-    Layout.fillWidth: true; spacing: Style.spacing.md
-    Repeater {
-      model: [{ id: "tailscale", label: "PRIVATE HTTPS" }, { id: "manual", label: "MANUAL HTTPS" }]
-      delegate: Text {
-        required property var modelData
-        textFormat: Text.PlainText; text: (root.settings.webAccessMode === modelData.id ? "● " : "○ ") + modelData.label
-        color: root.settings.webAccessMode === modelData.id ? root.cyan : root.dim
-        font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true
-        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { root.settings.setWebAccessMode(modelData.id); root.hideQr() } }
-      }
-    }
-  }
-  Text {
-    textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap
-    text: root.settings.webModeUnset
-      ? "Choose an access mode to turn WEB on. Both modes are HTTPS. Switching access mode turns WEB off."
-      : root.settings.webAccessMode === "manual" ? "Use an existing certificate. You manage client trust, renewal and DNS when using a hostname. Bind to a private LAN/VPN address or loopback; public exposure is unsupported. Saving certificate settings turns Manual HTTPS off."
-      : "Private HTTPS lets your connected Tailscale devices view the dashboard securely on port 8788. CONFIGURE & ENABLE sets up access; WEB off closes it. Tailscale and other services keep running."
-    color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption
-  }
-  ColumnLayout {
-    visible: root.settings.webAccessMode === "manual"
     Layout.fillWidth: true
-    spacing: Style.spacing.sm
-    Repeater {
-      model: [
-        {key:"hostname", label:"HOSTNAME / IPv4", hint:"desk.home.arpa or your private IPv4 address"},
-        {key:"bind", label:"BIND IPv4", hint:"127.0.0.1 or private interface address"},
-        {key:"port", label:"PORT", hint:"8789"},
-        {key:"certPath", label:"CERTIFICATE CHAIN", hint:"/absolute/path/to/server-chain.pem"},
-        {key:"keyPath", label:"PRIVATE KEY FILE", hint:"/absolute/path/to/server-key.pem"},
-        {key:"fingerprint", label:"SHA-256 FINGERPRINT", hint:"Leaf certificate fingerprint, with or without colons"}
-      ]
-      delegate: ColumnLayout {
-        required property var modelData
+    spacing: root.columnGap
+    ColumnLayout {
+      id: accessColumn
+      Layout.alignment: Qt.AlignTop
+      Layout.fillWidth: true
+      Layout.minimumWidth: 0
+      Layout.preferredWidth: root.columnWidth(0.37)
+      spacing: Style.spacing.md
+      Text { textFormat: Text.PlainText; text: "ACCESS"; color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true; font.letterSpacing: 1.4 }
+      Text {
+        textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap
+        text: "Desktop privacy " + (root.settings.privacyMode ? "ON" : "OFF") + ". It is off until you turn it on, and connected web viewers receive full values while it is off. With privacy on, recent prompts keep four words and session topics are not sent."
+        color: root.settings.privacyMode ? root.yellow : root.red; font.family: root.mono; font.pixelSize: Style.font.caption
+      }
+      RowLayout {
+        Layout.fillWidth: true; spacing: Style.spacing.xl * 2
+        Repeater {
+          model: [{ id: "tailscale", label: "PRIVATE HTTPS" }, { id: "manual", label: "MANUAL HTTPS" }]
+          delegate: Text {
+            required property var modelData
+            textFormat: Text.PlainText; text: (root.settings.webAccessMode === modelData.id ? "● " : "○ ") + modelData.label
+            color: root.settings.webAccessMode === modelData.id ? root.cyan : root.dim
+            font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true
+            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { root.settings.setWebAccessMode(modelData.id); root.hideQr() } }
+          }
+        }
+      }
+      Text {
+        textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap
+        text: root.settings.webModeUnset
+          ? "Choose an access mode to turn WEB on. Both modes are HTTPS. Switching access mode turns WEB off."
+          : root.settings.webAccessMode === "manual" ? "Use an existing certificate. You manage client trust, renewal and DNS when using a hostname. Bind to a private LAN/VPN address or loopback; public exposure is unsupported. Saving certificate settings turns Manual HTTPS off."
+          : "Private HTTPS lets your connected Tailscale devices view the dashboard securely on port 8788. CONFIGURE & ENABLE sets up access; WEB off closes it. Tailscale and other services keep running."
+        color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption
+      }
+      ColumnLayout {
+        visible: root.settings.webAccessMode === "manual"
         Layout.fillWidth: true
-        Text { textFormat: Text.PlainText; text: modelData.label; color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption }
-        Rectangle {
-          Layout.fillWidth: true
-          implicitHeight: Style.font.body + Style.spacing.md * 2
-          color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.04)
-          border.color: manualInput.activeFocus ? root.cyan : root.faint
-          radius: Style.cornerRadius
-          TextInput {
-            id: manualInput
-            anchors.fill: parent; anchors.margins: Style.spacing.sm
-            text: String(root.manualDraft[modelData.key] || "")
-            color: root.fg; font.family: root.mono; font.pixelSize: Style.font.caption
-            maximumLength: modelData.key === "fingerprint" ? 95 : 2048
-            clip: true; selectByMouse: true
-            onTextEdited: {
-              var next = Object.assign({}, root.manualDraft)
-              next[modelData.key] = text
-              root.manualDraft = next
-              root.manualDirty = true
+        spacing: Style.spacing.sm
+        Repeater {
+          model: [
+            {key:"hostname", label:"HOSTNAME / IPv4", hint:"desk.home.arpa or your private IPv4 address"},
+            {key:"bind", label:"BIND IPv4", hint:"127.0.0.1 or private interface address"},
+            {key:"port", label:"PORT", hint:"8789"},
+            {key:"certPath", label:"CERTIFICATE CHAIN", hint:"/absolute/path/to/server-chain.pem"},
+            {key:"keyPath", label:"PRIVATE KEY FILE", hint:"/absolute/path/to/server-key.pem"},
+            {key:"fingerprint", label:"SHA-256 FINGERPRINT", hint:"Leaf certificate fingerprint, with or without colons"}
+          ]
+          delegate: ColumnLayout {
+            required property var modelData
+            Layout.fillWidth: true
+            Text { textFormat: Text.PlainText; text: modelData.label; color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption }
+            Rectangle {
+              Layout.fillWidth: true
+              implicitHeight: Style.font.body + Style.spacing.md * 2
+              color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.04)
+              border.color: manualInput.activeFocus ? root.cyan : root.faint
+              radius: Style.cornerRadius
+              TextInput {
+                id: manualInput
+                anchors.fill: parent; anchors.margins: Style.spacing.sm
+                text: String(root.manualDraft[modelData.key] || "")
+                color: root.fg; font.family: root.mono; font.pixelSize: Style.font.caption
+                maximumLength: modelData.key === "fingerprint" ? 95 : 2048
+                clip: true; selectByMouse: true
+                onTextEdited: {
+                  var next = Object.assign({}, root.manualDraft)
+                  next[modelData.key] = text
+                  root.manualDraft = next
+                  root.manualDirty = true
+                }
+              }
+              Text { anchors.fill: manualInput; textFormat: Text.PlainText; visible: !manualInput.text && !manualInput.activeFocus; text: modelData.hint; color: root.faint; font.family: root.mono; font.pixelSize: Style.font.caption; elide: Text.ElideRight }
             }
           }
-          Text { anchors.fill: manualInput; textFormat: Text.PlainText; visible: !manualInput.text && !manualInput.activeFocus; text: modelData.hint; color: root.faint; font.family: root.mono; font.pixelSize: Style.font.caption; elide: Text.ElideRight }
+        }
+        RowLayout {
+          spacing: Style.spacing.xl * 2
+          Text {
+            textFormat: Text.PlainText; text: root.settings.settingsWriting ? "SAVING…" : "SAVE CERTIFICATE SETTINGS"
+            color: root.cyan; font.family: root.mono; font.pixelSize: Style.font.caption
+            MouseArea { anchors.fill: parent; enabled: !root.settings.settingsWriting; cursorShape: Qt.PointingHandCursor; onClicked: root.saveManual() }
+          }
+          Text {
+            textFormat: Text.PlainText; text: manualCheck.running ? "CHECKING…" : "CHECK CERTIFICATE"
+            color: root.cyan; font.family: root.mono; font.pixelSize: Style.font.caption
+            MouseArea { anchors.fill: parent; enabled: !root.settings.settingsWriting && !root.manualDirty && !manualCheck.running; cursorShape: Qt.PointingHandCursor; onClicked: root.checkManual() }
+          }
+        }
+        Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; text: root.manualMessage; color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption }
+        Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; text: "The fingerprint confirms the certificate loaded here; it does not install trust on a viewing device. A renewed certificate needs an updated fingerprint. Certificate and key files must be regular files without symlinks; key permissions must be 0600 or 0400."; color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption }
+      }
+      Text {
+        visible: root.settings.webAccessMode === "tailscale" && !root.settings.webReady && !root.settings.webStarting
+        textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap
+        text: root.tailMessage; color: root.tailReady ? root.green : root.yellow
+        font.family: root.mono; font.pixelSize: Style.font.caption
+      }
+      RowLayout {
+        visible: root.settings.webAccessMode === "tailscale" && !root.settings.webReady && !root.settings.webStarting; spacing: Style.spacing.xl * 2
+        Text {
+          textFormat: Text.PlainText; text: root.tailBusy ? "CHECKING…" : "CHECK PREREQUISITES"; color: root.cyan
+          font.family: root.mono; font.pixelSize: Style.font.caption
+          MouseArea { anchors.fill: parent; enabled: !root.tailBusy; cursorShape: Qt.PointingHandCursor; onClicked: root.checkTailscale() }
+        }
+        Text {
+          textFormat: Text.PlainText; text: "SETUP GUIDE"; color: root.cyan
+          font.family: root.mono; font.pixelSize: Style.font.caption
+          MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: Qt.openUrlExternally("https://tailscale.com/docs/features/tailscale-serve") }
         }
       }
-    }
-    RowLayout {
       Text {
-        textFormat: Text.PlainText; text: root.settings.settingsWriting ? "SAVING…" : "SAVE CERTIFICATE SETTINGS"
-        color: root.cyan; font.family: root.mono; font.pixelSize: Style.font.caption
-        MouseArea { anchors.fill: parent; enabled: !root.settings.settingsWriting; cursorShape: Qt.PointingHandCursor; onClicked: root.saveManual() }
-      }
-      Text {
-        textFormat: Text.PlainText; text: manualCheck.running ? "CHECKING…" : "CHECK CERTIFICATE"
-        color: root.cyan; font.family: root.mono; font.pixelSize: Style.font.caption
-        MouseArea { anchors.fill: parent; enabled: !root.settings.settingsWriting && !root.manualDirty && !manualCheck.running; cursorShape: Qt.PointingHandCursor; onClicked: root.checkManual() }
+        visible: root.settings.webAccessMode === "tailscale"
+        textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap
+        text: "Install and connect Tailscale on the viewing device too. Your tailnet must permit access to this computer on port 8788. Then use Copy URL or Show QR. The dashboard QR opens the page; it does not enroll or authorize a device. Public access is unsupported."
+        color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption
       }
     }
-    Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; text: root.manualMessage; color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption }
-    Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; text: "The fingerprint confirms the certificate loaded here; it does not install trust on a viewing device. A renewed certificate needs an updated fingerprint. Certificate and key files must be regular files without symlinks; key permissions must be 0600 or 0400."; color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption }
-  }
-  Text {
-    visible: root.settings.webAccessMode === "tailscale" && !root.settings.webReady && !root.settings.webStarting
-    textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap
-    text: root.tailMessage; color: root.tailReady ? root.green : root.yellow
-    font.family: root.mono; font.pixelSize: Style.font.caption
-  }
-  RowLayout {
-    visible: root.settings.webAccessMode === "tailscale" && !root.settings.webReady && !root.settings.webStarting; spacing: Style.spacing.md
-    Text {
-      textFormat: Text.PlainText; text: root.tailBusy ? "CHECKING…" : "CHECK PREREQUISITES"; color: root.cyan
-      font.family: root.mono; font.pixelSize: Style.font.caption
-      MouseArea { anchors.fill: parent; enabled: !root.tailBusy; cursorShape: Qt.PointingHandCursor; onClicked: root.checkTailscale() }
-    }
-    Text {
-      textFormat: Text.PlainText; text: "SETUP GUIDE"; color: root.cyan
-      font.family: root.mono; font.pixelSize: Style.font.caption
-      MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: Qt.openUrlExternally("https://tailscale.com/docs/features/tailscale-serve") }
-    }
-  }
-  Text {
-    visible: root.settings.webAccessMode === "tailscale"
-    textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap
-    text: "Install and connect Tailscale on the viewing device too. Your tailnet must permit access to this computer on port 8788. Then use Copy URL or Show QR. The dashboard QR opens the page; it does not enroll or authorize a device. Public access is unsupported."
-    color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption
-  }
-  RowLayout {
-    Layout.fillWidth: true
-    spacing: Style.spacing.sm
-    Rectangle {
-      implicitWidth: webToggle.implicitWidth + Style.spacing.md * 2
-      implicitHeight: webToggle.implicitHeight + Style.spacing.xs * 2
-      radius: Style.cornerRadius
-      color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, root.settings.webReady ? 0.16 : 0.06)
-      border.color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, root.settings.webReady ? 0.55 : 0.18)
-      border.width: 1
-      Text { id: webToggle; anchors.centerIn: parent; textFormat: Text.PlainText; text: root.settings.webEnabled ? (root.settings.webReady ? "WEB ON" : (root.settings.webStarting ? "STARTING…" : "WEB FAILED")) : "CONFIGURE & ENABLE"; color: root.settings.webReady ? root.green : (root.settings.webFailed ? root.yellow : root.faint); font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true }
-      MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; enabled: root.settings.webEnabled || (!root.settings.settingsWriting && !root.settings.webModeUnset && (root.settings.webAccessMode === "manual" ? !root.manualDirty : root.tailReady)); onClicked: root.settings.toggleWebEnabled() }
-    }
-    Rectangle {
-      visible: root.settings.webFailed
-      implicitWidth: retryLabel.implicitWidth + Style.spacing.md * 2
-      implicitHeight: retryLabel.implicitHeight + Style.spacing.xs * 2
-      radius: Style.cornerRadius
-      color: Qt.rgba(root.cyan.r, root.cyan.g, root.cyan.b, 0.12)
-      border.color: root.cyan; border.width: 1
-      Text { id: retryLabel; anchors.centerIn: parent; textFormat: Text.PlainText; text: "RETRY SETUP"; color: root.cyan; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true }
-      MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.settings.retryWebSetup() }
-    }
-    Rectangle {
-      visible: root.settings.webEnabled && root.settings.webReady
-      implicitWidth: copyUrl.implicitWidth + Style.spacing.md * 2
-      implicitHeight: copyUrl.implicitHeight + Style.spacing.xs * 2
-      radius: Style.cornerRadius
-      color: Qt.rgba(root.cyan.r, root.cyan.g, root.cyan.b, 0.12)
-      border.color: Qt.rgba(root.cyan.r, root.cyan.g, root.cyan.b, 0.45)
-      border.width: 1
-      Text { id: copyUrl; anchors.centerIn: parent; textFormat: Text.PlainText; text: "COPY URL"; color: root.cyan; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true }
-      MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.copySelectedUrl() }
-    }
-    Rectangle {
-      visible: root.settings.webEnabled && root.settings.webReady
-      implicitWidth: showQr.implicitWidth + Style.spacing.md * 2
-      implicitHeight: showQr.implicitHeight + Style.spacing.xs * 2
-      radius: Style.cornerRadius
-      color: Qt.rgba(root.cyan.r, root.cyan.g, root.cyan.b, 0.12)
-      border.color: Qt.rgba(root.cyan.r, root.cyan.g, root.cyan.b, 0.45)
-      border.width: 1
-      Text { id: showQr; anchors.centerIn: parent; textFormat: Text.PlainText; text: root.qrSize ? "HIDE QR" : "SHOW QR"; color: root.cyan; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true }
-      MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { if (root.qrSize) root.hideQr(); else root.refreshQr() } }
-    }
-  }
-  Text { textFormat: Text.PlainText; visible: !root.settings.webEnabled; wrapMode: Text.Wrap; Layout.fillWidth: true; text: "Turning Web Mode off stops the listener and keeps tokens. Revoke a token to rotate it."; color: root.faint; font.family: root.mono; font.pixelSize: Style.font.caption }
+    ColumnLayout {
+      id: viewersColumn
+      Layout.alignment: Qt.AlignTop
+      Layout.fillWidth: true
+      Layout.minimumWidth: 0
+      Layout.preferredWidth: root.columnWidth(0.37)
+      spacing: Style.spacing.md
+      Text { textFormat: Text.PlainText; text: "VIEWERS"; color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true; font.letterSpacing: 1.4 }
+      Text { textFormat: Text.PlainText; visible: !!root.statusText; text: root.statusText; Layout.fillWidth: true; wrapMode: Text.Wrap; color: root.yellow; font.family: root.mono; font.pixelSize: Style.font.caption }
+      RowLayout {
+        Layout.fillWidth: true
+        spacing: Style.spacing.sm
+        Rectangle {
+          implicitWidth: webToggle.implicitWidth + Style.spacing.md * 2
+          implicitHeight: webToggle.implicitHeight + Style.spacing.xs * 2
+          radius: Style.cornerRadius
+          color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, root.settings.webReady ? 0.16 : 0.06)
+          border.color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, root.settings.webReady ? 0.55 : 0.18)
+          border.width: 1
+          Text { id: webToggle; anchors.centerIn: parent; textFormat: Text.PlainText; text: root.settings.webEnabled ? (root.settings.webReady ? "WEB ON" : (root.settings.webStarting ? "STARTING…" : "WEB FAILED")) : "CONFIGURE & ENABLE"; color: root.settings.webReady ? root.green : (root.settings.webFailed ? root.yellow : root.faint); font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true }
+          MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; enabled: root.settings.webEnabled || (!root.settings.settingsWriting && !root.settings.webModeUnset && (root.settings.webAccessMode === "manual" ? !root.manualDirty : root.tailReady)); onClicked: root.settings.toggleWebEnabled() }
+        }
+        Rectangle {
+          visible: root.settings.webFailed
+          implicitWidth: retryLabel.implicitWidth + Style.spacing.md * 2
+          implicitHeight: retryLabel.implicitHeight + Style.spacing.xs * 2
+          radius: Style.cornerRadius
+          color: Qt.rgba(root.cyan.r, root.cyan.g, root.cyan.b, 0.12)
+          border.color: root.cyan; border.width: 1
+          Text { id: retryLabel; anchors.centerIn: parent; textFormat: Text.PlainText; text: "RETRY SETUP"; color: root.cyan; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true }
+          MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.settings.retryWebSetup() }
+        }
+        Rectangle {
+          visible: root.settings.webEnabled && root.settings.webReady
+          implicitWidth: copyUrl.implicitWidth + Style.spacing.md * 2
+          implicitHeight: copyUrl.implicitHeight + Style.spacing.xs * 2
+          radius: Style.cornerRadius
+          color: Qt.rgba(root.cyan.r, root.cyan.g, root.cyan.b, 0.12)
+          border.color: Qt.rgba(root.cyan.r, root.cyan.g, root.cyan.b, 0.45)
+          border.width: 1
+          Text { id: copyUrl; anchors.centerIn: parent; textFormat: Text.PlainText; text: "COPY URL"; color: root.cyan; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true }
+          MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.copySelectedUrl() }
+        }
+        Rectangle {
+          visible: root.settings.webEnabled && root.settings.webReady
+          implicitWidth: showQr.implicitWidth + Style.spacing.md * 2
+          implicitHeight: showQr.implicitHeight + Style.spacing.xs * 2
+          radius: Style.cornerRadius
+          color: Qt.rgba(root.cyan.r, root.cyan.g, root.cyan.b, 0.12)
+          border.color: Qt.rgba(root.cyan.r, root.cyan.g, root.cyan.b, 0.45)
+          border.width: 1
+          Text { id: showQr; anchors.centerIn: parent; textFormat: Text.PlainText; text: root.qrSize ? "HIDE QR" : "SHOW QR"; color: root.cyan; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true }
+          MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { if (root.qrSize) root.hideQr(); else root.refreshQr() } }
+        }
+      }
+      Text { textFormat: Text.PlainText; visible: !root.settings.webEnabled; wrapMode: Text.Wrap; Layout.fillWidth: true; text: "Turning Web Mode off stops the listener and keeps tokens. Revoke a token to rotate it."; color: root.faint; font.family: root.mono; font.pixelSize: Style.font.caption }
 
-  Text { textFormat: Text.PlainText; visible: (root.settings.webModeUnset && !!root.settings.webStatusText) || (root.settings.webEnabled && !root.settings.webReady); Layout.fillWidth: true; wrapMode: Text.Wrap; text: root.settings.webStatusText || "Starting listener…"; color: root.yellow; font.family: root.mono; font.pixelSize: Style.font.caption }
-  Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; text: "Privacy changes apply on the next successful five-second refresh. Previously received or saved data cannot be retracted."; color: root.faint; font.family: root.mono; font.pixelSize: Style.font.caption }
-  Column {
-    visible: root.qrSize > 0 && root.settings.webEnabled
-    Layout.alignment: Qt.AlignHCenter
-    Repeater {
-      model: root.qrRows
-      delegate: Row {
-        id: qrRow
-        required property string modelData
+      Text { textFormat: Text.PlainText; visible: (root.settings.webModeUnset && !!root.settings.webStatusText) || (root.settings.webEnabled && !root.settings.webReady); Layout.fillWidth: true; wrapMode: Text.Wrap; text: root.settings.webStatusText || "Starting listener…"; color: root.yellow; font.family: root.mono; font.pixelSize: Style.font.caption }
+      Text { textFormat: Text.PlainText; Layout.fillWidth: true; wrapMode: Text.Wrap; text: "Privacy changes apply on the next successful five-second refresh. Previously received or saved data cannot be retracted."; color: root.faint; font.family: root.mono; font.pixelSize: Style.font.caption }
+      Column {
+        visible: root.qrSize > 0 && root.settings.webEnabled
+        Layout.alignment: Qt.AlignHCenter
         Repeater {
-          model: qrRow.modelData.length
-          delegate: Rectangle {
-            required property int index
-            width: 5
-            height: 5
-            color: qrRow.modelData.charAt(index) === "1" ? "#111" : "#eee"
+          model: root.qrRows
+          delegate: Row {
+            id: qrRow
+            required property string modelData
+            Repeater {
+              model: qrRow.modelData.length
+              delegate: Rectangle {
+                required property int index
+                width: 5
+                height: 5
+                color: qrRow.modelData.charAt(index) === "1" ? "#111" : "#eee"
+              }
+            }
           }
         }
       }
-    }
-  }
 
-  Text { textFormat: Text.PlainText; text: "TOKENS"; color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true; font.letterSpacing: 1.4 }
-  Repeater {
-    model: root.tokens
-    delegate: RowLayout {
-      required property var modelData
-      Layout.fillWidth: true
-      spacing: Style.spacing.sm
-      Text {
-        textFormat: Text.PlainText
-        text: (root.selectedTokenId === modelData.id ? "● " : "○ ") + root.plain(modelData.label, 32) + " · …" + root.plain(modelData.suffix, 4)
-        color: root.selectedTokenId === modelData.id ? root.fg : root.dim
-        font.family: root.mono
-        font.pixelSize: Style.font.caption
-        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { root.selectedTokenId = modelData.id; root.hideQr() } }
+      Text { textFormat: Text.PlainText; text: "TOKENS" + (tokenList.overflowing ? " · " + root.tokens.length + " · SCROLL" : ""); color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true; font.letterSpacing: 1.4 }
+      ScrollList {
+        id: tokenList
+        Layout.fillWidth: true
+        barColor: root.faint
+        model: root.tokens
+        delegate: RowLayout {
+          required property var modelData
+          width: parent ? parent.width : 0
+          spacing: Style.spacing.sm
+          Text {
+            textFormat: Text.PlainText
+            text: (root.selectedTokenId === modelData.id ? "● " : "○ ") + root.plain(modelData.label, 32) + " · …" + root.plain(modelData.suffix, 4)
+            color: root.selectedTokenId === modelData.id ? root.fg : root.dim
+            font.family: root.mono
+            font.pixelSize: Style.font.caption
+            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { root.selectedTokenId = modelData.id; root.hideQr() } }
+          }
+          Item { Layout.fillWidth: true }
+          Text { textFormat: Text.PlainText; visible: root.tokens.length > 1; text: "REVOKE"; color: root.red; font.family: root.mono; font.pixelSize: Style.font.caption; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { root.selectedTokenId = modelData.id; root.revokeSelected() } } }
+        }
       }
-      Item { Layout.fillWidth: true }
-      Text { textFormat: Text.PlainText; visible: root.tokens.length > 1; text: "REVOKE"; color: root.red; font.family: root.mono; font.pixelSize: Style.font.caption; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { root.selectedTokenId = modelData.id; root.revokeSelected() } } }
-    }
-  }
-  RowLayout {
-    Layout.fillWidth: true
-    spacing: Style.spacing.sm
-    Rectangle {
-      Layout.fillWidth: true
-      implicitHeight: 28
-      radius: Style.cornerRadius
-      color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.06)
-      border.color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.18)
-      border.width: 1
-      TextInput {
-        id: tokenInput
-        anchors { fill: parent; leftMargin: 8; rightMargin: 8 }
-        text: root.tokenLabelDraft
-        color: root.fg
-        font.family: root.mono
-        font.pixelSize: Style.font.caption
-        maximumLength: 32
-        clip: true
-        onTextChanged: root.tokenLabelDraft = text
-        Text { textFormat: Text.PlainText; visible: !parent.text; text: "label"; color: root.faint; font: parent.font; anchors.verticalCenter: parent.verticalCenter }
+      RowLayout {
+        Layout.fillWidth: true
+        spacing: Style.spacing.sm
+        Rectangle {
+          Layout.fillWidth: true
+          implicitHeight: 28
+          radius: Style.cornerRadius
+          color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.06)
+          border.color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.18)
+          border.width: 1
+          TextInput {
+            id: tokenInput
+            anchors { fill: parent; leftMargin: 8; rightMargin: 8 }
+            text: root.tokenLabelDraft
+            color: root.fg
+            font.family: root.mono
+            font.pixelSize: Style.font.caption
+            maximumLength: 32
+            clip: true
+            onTextChanged: root.tokenLabelDraft = text
+            Text { textFormat: Text.PlainText; visible: !parent.text; text: "label"; color: root.faint; font: parent.font; anchors.verticalCenter: parent.verticalCenter }
+          }
+        }
+        Rectangle {
+          implicitWidth: addTok.implicitWidth + Style.spacing.md * 2
+          implicitHeight: 28
+          radius: Style.cornerRadius
+          color: Qt.rgba(root.green.r, root.green.g, root.green.b, 0.12)
+          border.color: Qt.rgba(root.green.r, root.green.g, root.green.b, 0.45)
+          border.width: 1
+          Text { id: addTok; anchors.centerIn: parent; textFormat: Text.PlainText; text: "ADD"; color: root.green; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true }
+          MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.addToken() }
+        }
       }
-    }
-    Rectangle {
-      implicitWidth: addTok.implicitWidth + Style.spacing.md * 2
-      implicitHeight: 28
-      radius: Style.cornerRadius
-      color: Qt.rgba(root.green.r, root.green.g, root.green.b, 0.12)
-      border.color: Qt.rgba(root.green.r, root.green.g, root.green.b, 0.45)
-      border.width: 1
-      Text { id: addTok; anchors.centerIn: parent; textFormat: Text.PlainText; text: "ADD"; color: root.green; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true }
-      MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.addToken() }
-    }
-  }
 
-  ColumnLayout {
-    visible: root.settings.webAccessMode === "manual"
-    Layout.fillWidth: true
-    spacing: Style.spacing.md
-  Text { textFormat: Text.PlainText; text: "ALLOW LIST"; color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true; font.letterSpacing: 1.4 }
-  Text { textFormat: Text.PlainText; wrapMode: Text.Wrap; Layout.fillWidth: true; text: "Default: " + root.defaultCidrs.join(", "); color: root.faint; font.family: root.mono; font.pixelSize: Style.font.caption }
-  Repeater {
-    model: root.extraCidrs
-    delegate: RowLayout {
-      required property string modelData
-      Layout.fillWidth: true
-      Text { textFormat: Text.PlainText; text: root.plain(modelData, 20); color: root.fg; font.family: root.mono; font.pixelSize: Style.font.caption }
-      Item { Layout.fillWidth: true }
-      Text { textFormat: Text.PlainText; text: "REMOVE"; color: root.red; font.family: root.mono; font.pixelSize: Style.font.caption; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.dropCidr(modelData) } }
-    }
-  }
-  RowLayout {
-    Layout.fillWidth: true
-    spacing: Style.spacing.sm
-    Rectangle {
-      Layout.fillWidth: true
-      implicitHeight: 28
-      radius: Style.cornerRadius
-      color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.06)
-      border.color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.18)
-      border.width: 1
-      TextInput {
-        anchors { fill: parent; leftMargin: 8; rightMargin: 8 }
-        text: root.cidrDraft
-        color: root.fg
-        font.family: root.mono
-        font.pixelSize: Style.font.caption
-        maximumLength: 18
-        clip: true
-        onTextChanged: root.cidrDraft = text
-        Text { textFormat: Text.PlainText; visible: !parent.text; text: "10.0.0.0/24"; color: root.faint; font: parent.font; anchors.verticalCenter: parent.verticalCenter }
+      ColumnLayout {
+        visible: root.settings.webAccessMode === "manual"
+        Layout.fillWidth: true
+        spacing: Style.spacing.md
+      Text { textFormat: Text.PlainText; text: "ALLOW LIST" + (cidrList.overflowing ? " · " + root.extraCidrs.length + " · SCROLL" : ""); color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true; font.letterSpacing: 1.4 }
+      Text { textFormat: Text.PlainText; wrapMode: Text.Wrap; Layout.fillWidth: true; text: "Default: " + root.defaultCidrs.join(", "); color: root.faint; font.family: root.mono; font.pixelSize: Style.font.caption }
+      ScrollList {
+        id: cidrList
+        Layout.fillWidth: true
+        visible: root.extraCidrs.length > 0
+        barColor: root.faint
+        model: root.extraCidrs
+        delegate: RowLayout {
+          required property string modelData
+          width: parent ? parent.width : 0
+          Text { textFormat: Text.PlainText; text: root.plain(modelData, 20); color: root.fg; font.family: root.mono; font.pixelSize: Style.font.caption }
+          Item { Layout.fillWidth: true }
+          Text { textFormat: Text.PlainText; text: "REMOVE"; color: root.red; font.family: root.mono; font.pixelSize: Style.font.caption; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.dropCidr(modelData) } }
+        }
+      }
+      RowLayout {
+        Layout.fillWidth: true
+        spacing: Style.spacing.sm
+        Rectangle {
+          Layout.fillWidth: true
+          implicitHeight: 28
+          radius: Style.cornerRadius
+          color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.06)
+          border.color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.18)
+          border.width: 1
+          TextInput {
+            anchors { fill: parent; leftMargin: 8; rightMargin: 8 }
+            text: root.cidrDraft
+            color: root.fg
+            font.family: root.mono
+            font.pixelSize: Style.font.caption
+            maximumLength: 18
+            clip: true
+            onTextChanged: root.cidrDraft = text
+            Text { textFormat: Text.PlainText; visible: !parent.text; text: "10.0.0.0/24"; color: root.faint; font: parent.font; anchors.verticalCenter: parent.verticalCenter }
+          }
+        }
+        Rectangle {
+          implicitWidth: addCidr.implicitWidth + Style.spacing.md * 2
+          implicitHeight: 28
+          radius: Style.cornerRadius
+          color: Qt.rgba(root.green.r, root.green.g, root.green.b, 0.12)
+          border.color: Qt.rgba(root.green.r, root.green.g, root.green.b, 0.45)
+          border.width: 1
+          Text { id: addCidr; anchors.centerIn: parent; textFormat: Text.PlainText; text: "ADD"; color: root.green; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true }
+          MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.addCidr() }
+        }
+      }
+
       }
     }
-    Rectangle {
-      implicitWidth: addCidr.implicitWidth + Style.spacing.md * 2
-      implicitHeight: 28
-      radius: Style.cornerRadius
-      color: Qt.rgba(root.green.r, root.green.g, root.green.b, 0.12)
-      border.color: Qt.rgba(root.green.r, root.green.g, root.green.b, 0.45)
-      border.width: 1
-      Text { id: addCidr; anchors.centerIn: parent; textFormat: Text.PlainText; text: "ADD"; color: root.green; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true }
-      MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.addCidr() }
-    }
-  }
-
-  }
-
-  Text { textFormat: Text.PlainText; text: "SECTIONS · DESK / WEB"; color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true; font.letterSpacing: 1.4 }
-  Repeater {
-    model: root.settings.definitions
-    delegate: RowLayout {
-      required property var modelData
+    ColumnLayout {
+      id: sectionsColumn
+      Layout.alignment: Qt.AlignTop
       Layout.fillWidth: true
-      spacing: Style.spacing.sm
-      Text { textFormat: Text.PlainText; text: root.plain(modelData.label, 16); color: root.fg; font.family: root.mono; font.pixelSize: Style.font.caption; Layout.preferredWidth: 96 }
-      Text {
-        textFormat: Text.PlainText
-        text: root.settings.sectionEnabled(modelData.id) ? "DESK ON" : "DESK OFF"
-        color: root.settings.sectionEnabled(modelData.id) ? root.green : root.faint
-        font.family: root.mono
-        font.pixelSize: Style.font.caption
-        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.settings.toggleSection(modelData.id) }
-      }
-      Text {
-        textFormat: Text.PlainText
-        text: modelData.id === "media" ? "WEB n/a" : (root.settings.webSectionEnabled(modelData.id) ? "WEB ON" : "WEB OFF")
-        color: modelData.id === "media" ? root.faint : (root.settings.webSectionEnabled(modelData.id) ? root.cyan : root.faint)
-        font.family: root.mono
-        font.pixelSize: Style.font.caption
-        MouseArea { anchors.fill: parent; enabled: modelData.id !== "media"; cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor; onClicked: root.settings.toggleWebSection(modelData.id) }
+      Layout.minimumWidth: 0
+      Layout.preferredWidth: root.columnWidth(0.26)
+      spacing: Style.spacing.md
+      Text { textFormat: Text.PlainText; text: "SECTIONS · DESK / WEB"; color: root.dim; font.family: root.mono; font.pixelSize: Style.font.caption; font.bold: true; font.letterSpacing: 1.4 }
+      Repeater {
+        model: root.settings.definitions
+        delegate: RowLayout {
+          id: sectionRow
+          required property var modelData
+          // Only sections the browser page can render get a WEB toggle.
+          readonly property bool webable: root.settings.webSectionIds.indexOf(modelData.id) >= 0
+          Layout.fillWidth: true
+          spacing: Style.spacing.sm
+          Text { textFormat: Text.PlainText; text: root.plain(modelData.label, 16); color: root.fg; font.family: root.mono; font.pixelSize: Style.font.caption; Layout.preferredWidth: Math.round(96 * Style.fontScale) }
+          Text {
+            textFormat: Text.PlainText
+            text: root.settings.sectionEnabled(modelData.id) ? "DESK ON" : "DESK OFF"
+            color: root.settings.sectionEnabled(modelData.id) ? root.green : root.faint
+            Layout.preferredWidth: Math.round(72 * Style.fontScale)
+            font.family: root.mono
+            font.pixelSize: Style.font.caption
+            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.settings.toggleSection(modelData.id) }
+          }
+          Text {
+            textFormat: Text.PlainText
+            text: !sectionRow.webable ? "WEB n/a" : (root.settings.webSectionEnabled(modelData.id) ? "WEB ON" : "WEB OFF")
+            color: !sectionRow.webable ? root.faint : (root.settings.webSectionEnabled(modelData.id) ? root.cyan : root.faint)
+            font.family: root.mono
+            font.pixelSize: Style.font.caption
+            MouseArea { anchors.fill: parent; enabled: sectionRow.webable; cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor; onClicked: root.settings.toggleWebSection(modelData.id) }
+          }
+        }
       }
     }
   }

@@ -261,14 +261,17 @@ Item {
     }
   }
   function sectionEnabled(id) { return id === "apps" ? sections[id] === true : sections[id] !== false }
+  // Sections the browser page renders. Equal to WEB_SECTION_IDS in web-page.ts:
+  // MEDIA, APPS, CONTAINERS, FLEET and GITEA stay on the desk.
+  readonly property var webSectionIds: ["needs", "sessions", "activity", "github", "recent", "usage", "localAi", "machine", "changes", "projects"]
   function webSectionEnabled(id) {
-    if (String(id) === "media") return false
+    if (webSectionIds.indexOf(String(id)) < 0) return false
     if (webSections[id] === false) return false
     if (webSections[id] === true) return true
     return sectionEnabled(id)
   }
   function setWebSection(id, enabled) {
-    if (String(id) === "media") return false
+    if (webSectionIds.indexOf(String(id)) < 0) return false
     var next = {}
     for (var key in webSections) next[key] = webSections[key]
     next[id] = !!enabled

@@ -54,14 +54,17 @@ const CEILINGS: Record<string, number> = {
   // unqualified, plus the two layout-positioning warnings the existing status
   // dot already produces, for the session dot beside it. Same false-positive
   // shape as the row above it, counted twice because there are now two rows.
-  // 595: the SETTINGS drawer panel reads Style.spacing.md and
+  // 596: the SETTINGS drawer panel reads Style.spacing.md (twice) and
   // Style.font.subtitle, dynamic Style properties qmllint sees as QObject (#25).
-  "InfoView.qml": 595,
+  "InfoView.qml": 596,
   "Overlay.qml": 29,
   "WaveWallpaper.qml": 0,
-  // Settings drawer: dynamic Style properties, unqualified access and
-  // Process exit-status metadata; covered by real offscreen QML tests too.
-  "SettingsBody.qml": 151,
+  // Settings drawer (#25): dynamic Style properties qmllint sees as QObject,
+  // modelData reads inside nested delegate children, and Process exit-status
+  // metadata. ComponentBehavior: Bound keeps outer-id reads resolvable.
+  // Covered by real offscreen QML tests too. +5: the bounded token and CIDR
+  // list (ScrollList) reads Style.spacing.md four times and Style.font.caption.
+  "SettingsBody.qml": 100,
 };
 
 // Findings that exist only because the plugin deliberately survives an Omarchy

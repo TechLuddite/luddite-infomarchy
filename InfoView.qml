@@ -2867,8 +2867,10 @@ Item {
     z: 101
     anchors.centerIn: parent
     visible: view.settingsOpen && view.interactive
-    width: Math.min(parent.width - view.gap * 4, Math.round(520 * Style.fontScale))
-    height: Math.min(parent.height - view.gap * 4, settingsFlick.contentHeight + view.pad * 2)
+    // Three columns wide, so the drawer fits 1600x1000 without scrolling. The
+    // Flickable stays only as a safety net for smaller screens.
+    width: Math.min(parent.width - view.gap * 4, Math.round(1480 * Style.fontScale))
+    height: Math.min(parent.height - view.gap * 4, settingsFlick.contentHeight + settingsHeader.implicitHeight + Style.spacing.md + view.pad * 2)
     radius: view.radius
     color: Util.alpha(view.desk.themeBackground, 0.97)
     border.color: Util.alpha(view.desk.themeForeground, 0.8)
@@ -2878,6 +2880,7 @@ Item {
       anchors { fill: parent; margins: view.pad }
       spacing: Style.spacing.md
       RowLayout {
+        id: settingsHeader
         Layout.fillWidth: true
         PlainText { text: "SETTINGS"; color: view.desk.themeForeground; font.family: view.mono; font.pixelSize: Style.font.subtitle; font.bold: true }
         Item { Layout.fillWidth: true }

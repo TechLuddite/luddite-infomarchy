@@ -82,3 +82,16 @@ test("desk helpers run bun from PATH like the rest of the plugin", () => {
   }
   expect(settings).toContain('command: ["bun", Qt.resolvedUrl("dashboard-state.ts")');
 });
+
+test("only sections the browser renders get a WEB toggle", async () => {
+  const { WEB_SECTION_IDS } = await import("./web-page");
+  const ids = JSON.parse(settings.match(/readonly property var webSectionIds: (\[[^\]]*\])/)![1]);
+  expect(ids).toEqual([...WEB_SECTION_IDS]);
+  const body = readFileSync(join(import.meta.dir, "SettingsBody.qml"), "utf8");
+  expect(body).toContain("readonly property bool webable: root.settings.webSectionIds.indexOf(modelData.id) >= 0");
+  expect(body).toContain('text: !sectionRow.webable ? "WEB n/a"');
+  const source = settings.match(/function webSectionEnabled\([\s\S]*?\n  \}/)![0];
+  const enabled = Function("webSectionIds", "webSections", "sectionEnabled", `return (${source})`)(ids, {}, () => true);
+  for (const id of ["apps", "containers", "fleet", "gitea", "media"]) expect(enabled(id)).toBe(false);
+  expect(enabled("usage")).toBe(true);
+});
